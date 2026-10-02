@@ -1,0 +1,23 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="url(#bg-grad)"/>
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="400" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0077B5"/>
+      <stop offset="1" stop-color="#0A2540"/>
+    </linearGradient>
+  </defs>
+  <!-- Card Object -->
+  <rect x="110" y="50" width="180" height="230" rx="16" fill="#0D1F2D" stroke="#00A0DC" stroke-width="2"/>
+  <path d="M260 75 A15 15 0 0 0 280 95" stroke="#00A0DC" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M265 70 A22 22 0 0 0 290 95" stroke="#00A0DC" stroke-width="3" fill="none" stroke-linecap="round"/>
+  
+  <text x="200" y="115" font-family="sans-serif" font-weight="900" font-size="22" fill="#FFFFFF" text-anchor="middle">Taprevia</text>
+  <text x="200" y="135" font-family="sans-serif" font-size="11" fill="#00A0DC" text-anchor="middle">LINKEDIN NFC CARD</text>
+  
+  <rect x="140" y="155" width="120" height="28" rx="14" fill="#0077B5"/>
+  <text x="200" y="174" font-family="sans-serif" font-size="12" font-weight="bold" fill="#FFFFFF" text-anchor="middle">TAP TO CONNECT</text>
+  
+  <rect x="145" y="200" width="110" height="30" rx="6" fill="#1E293B"/>
+  <text x="200" y="220" font-family="sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">@ Your Username</text>
+  <image href="data:image/png;base64,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" x="252" y="244" width="26" height="17"/>
+</svg>

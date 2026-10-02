@@ -1,0 +1,9 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="#F1F3F8"/>
+  <rect x="60" y="60" width="280" height="200" rx="16" fill="#FFFFFF" stroke="#D7DBE5" stroke-width="2" stroke-dasharray="8 8"/>
+  <text x="200" y="140" font-family="sans-serif" font-weight="800" font-size="20" fill="#9AA3B5" text-anchor="middle">Your Photo Here</text>
+  <text x="200" y="170" font-family="sans-serif" font-weight="600" font-size="12" fill="#B6BECE" text-anchor="middle">Drop your product image into this space</text>
+  <rect x="120" y="230" width="160" height="12" rx="6" fill="#E3E7F0"/>
+  <circle cx="200" cy="196" r="8" fill="none" stroke="#C6CDDD" stroke-width="2"/>
+  <path d="M196 196 L204 196" stroke="#C6CDDD" stroke-width="2" stroke-linecap="round"/>
+</svg>

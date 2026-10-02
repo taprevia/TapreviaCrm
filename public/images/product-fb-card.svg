@@ -1,0 +1,11 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="#090D16"/>
+  <rect x="90" y="55" width="220" height="140" rx="12" fill="#1877F2"/>
+  <text x="200" y="115" font-family="sans-serif" font-weight="900" font-size="26" fill="#FFFFFF" text-anchor="middle">Taprevia</text>
+  <path d="M200 120 Q200 150 140 150 Q200 150 200 130" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+  <rect x="197" y="120" width="8" height="34" fill="#1877F2"/>
+  <circle cx="232" cy="96" r="10" fill="#FFFFFF"/>
+  <path d="M228 92 H236 V100 H228 Z" fill="#1877F2"/>
+  <text x="200" y="178" font-family="sans-serif" font-weight="700" font-size="12" fill="#D8E4FF" text-anchor="middle">Facebook Blue</text>
+  <path d="M270 75 A12 12 0 0 0 290 95" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

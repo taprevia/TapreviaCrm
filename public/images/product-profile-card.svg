@@ -1,0 +1,12 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="#F1F5F9"/>
+  <!-- White Card Metallic -->
+  <g transform="translate(90, 60) rotate(-6)">
+    <rect x="0" y="0" width="220" height="140" rx="12" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="130" y="70" font-family="sans-serif" font-weight="900" font-size="20" fill="#151E3D">Taprevia</text>
+    <!-- QR on card -->
+    <rect x="25" y="40" width="60" height="60" fill="#0F172A"/>
+    <path d="M190 25 A10 10 0 0 0 205 40" stroke="#3B82F6" stroke-width="2" fill="none"/>
+    <image href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAABrCAYAAADw4IlaAAADE0lEQVR42u3d0W6kMAyFYYz2/V85e7ta7baUCcSOvyP1olUFJvlzbBOGieM4xpFP8dfvYtw0xvMgAuA/V+0oMH5inABgFBi8SLpIxPhhjFIwScHF0m/1GCNTjGdSa66QhqvGmNYBI8mq/fR/VrufGH8wj1lScHyzUkeyGI8NYkzh1meClREXJzFLmtslxhSL5Fxsz3FzYGLRoO0S41gc46VBGgXgG0UWyBDj/VU6Eg3am4M3A/QQ49eMXbXg8VAwI8EEvBnjrDgrxjitTsnmWPFQjE9C3S3GxwrlceO4T9UaUTjG/52zeoxpOrW3W/8Q47IYHz3BVTfJ/nBm1n3cSvvMd7PLIwAS3eLK41i0VAAkABIAiQBI/fTLEJTpIre8A8EBa8D31d8BSATA3u4IQAIhAPfQ6AQhAAmA1NcFAVgbwvJyI3pN4zDzMfrSoHLANV3r2x8GAyA9BmEAkO7CEd0HCIA1GoltXRCAdVIxB6TULghAWuqCAUBq5V4AXOdWf/682UgMAOYFYlWqjGRjAcBFAx4LJ8BN5YYARtNJHADMn2pWuKH9XU3IFm4Yna75bDBBMyeEewFwC1cAcjMA36oLA8AA3KFGanM75mwKzyfHkT454BQ4olCsACwEXyUIAbjpdf0UQiACcHmKAyEAH4GwY0oOAGpOCIDqQgCqCytcJwALQcgZAag5AeAend/sutDuBgcsUy9x1YIAjs0gBOBm17PyKZdhQQDw7eak4kIDoLpQ/VcZwJHwPKPh+LR2wLHxZLZqiCqn4PHS5H1XF769vbdV+q7+NQ3j5XPFwvNvKd8T8i7wT++klFsQumACYBO1fQ0vANWzAOR+jx9jAJDuwte2mwag1AtAqbdn+gXgendrfyMbgPlT79YfAwDgGtBmwVdetuJqNxrlUzgH3L+BASA9At8AIBEAuR8AaYeGBoDUCz4AggyAdBnCLcF0I5oTckDqKwASAAmAV+WlOjSVEQ5I5VIwFyQ1INVPv58AyAVpChPn2yckkoIphfvNdDHvyQPeUgeUjsGXChyOCLpL+g39eqXxIi50ygAAAABJRU5ErkJggg==" x="182" y="112" width="26" height="17"/>
+  </g>
+</svg>

@@ -1,0 +1,19 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="url(#insta-grad)"/>
+  <defs>
+    <linearGradient id="insta-grad" x1="0" y1="0" x2="400" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#833AB4"/>
+      <stop offset="0.5" stop-color="#FD1D1D"/>
+      <stop offset="1" stop-color="#FCB045"/>
+    </linearGradient>
+  </defs>
+  <!-- Card Object -->
+  <rect x="110" y="50" width="180" height="230" rx="16" fill="#111827" stroke="#E1306C" stroke-width="2"/>
+  <rect x="160" y="100" width="80" height="80" rx="20" stroke="#FFFFFF" stroke-width="6" fill="none"/>
+  <circle cx="200" cy="140" r="22" stroke="#FFFFFF" stroke-width="6" fill="none"/>
+  <circle cx="225" cy="115" r="5" fill="#FFFFFF"/>
+  
+  <rect x="135" y="200" width="130" height="32" rx="16" fill="#E1306C"/>
+  <text x="200" y="221" font-family="sans-serif" font-size="12" font-weight="bold" fill="#FFFFFF" text-anchor="middle">INSTAGRAM NFC</text>
+  <image href="data:image/png;base64,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" x="252" y="242" width="26" height="17"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="metal" x1="90" y1="55" x2="310" y2="195" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E5E7EB"/>
+      <stop offset="0.45" stop-color="#9CA3AF"/>
+      <stop offset="1" stop-color="#4B5563"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="320" rx="16" fill="#090D16"/>
+  <rect x="90" y="55" width="220" height="140" rx="12" fill="url(#metal)"/>
+  <text x="200" y="120" font-family="sans-serif" font-weight="900" font-size="26" fill="#151E3D" text-anchor="middle">Taprevia</text>
+  <text x="200" y="150" font-family="sans-serif" font-weight="800" font-size="11" letter-spacing="2" fill="#374151" text-anchor="middle">METAL NFC</text>
+  <path d="M200 120 Q200 150 140 152 M258 152 Q200 152 200 130" fill="none" stroke="#151E3D" stroke-opacity="0.5" stroke-width="2"/>
+  <rect x="258" y="160" width="30" height="18" rx="4" fill="#374151"/>
+  <rect x="262" y="167" width="6" height="4" rx="2" fill="#9CA3AF"/>
+  <path d="M270 75 A12 12 0 0 0 290 95" stroke="#151E3D" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

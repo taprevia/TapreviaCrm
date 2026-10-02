@@ -1,0 +1,161 @@
+{
+  "categories": [
+    {
+      "key": "mobile-repair",
+      "name": "Mobile Repair",
+      "active": true,
+      "languages": ["English"],
+      "scenarios": [
+        { "key": "overall", "name": "Overall experience" },
+        { "key": "employee-service", "name": "Employee and service" },
+        { "key": "service-quality", "name": "Service quality" },
+        { "key": "staff-expertise", "name": "Staff expertise" }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "key": "mobile-repair-service-quality-short-simple-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "service-quality",
+      "language": "English",
+      "text": "Fast and fair service at {businessName}. My {service} was handled properly and the price was reasonable.",
+      "length": "short",
+      "style": "simple",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-service-quality-medium-friendly-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "service-quality",
+      "language": "English",
+      "text": "{businessName} handled my {service} quickly and with no fuss. Turnaround was better than promised and I was told exactly what was wrong before anything was replaced.",
+      "length": "medium",
+      "style": "friendly",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-service-quality-detailed-professional-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "service-quality",
+      "language": "English",
+      "text": "I took my phone to {businessName} for {service}. The diagnosis was clear, the quote matched the final bill, and the repair was finished on time. Everything about the process was straightforward and professional.",
+      "length": "detailed",
+      "style": "professional",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-employee-service-medium-friendly-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "employee-service",
+      "language": "English",
+      "text": "{employee} handled my repair end to end at {businessName}. Friendly, transparent, and careful with my device. I would recommend asking for them.",
+      "length": "medium",
+      "style": "friendly",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-employee-service-detailed-professional-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "employee-service",
+      "language": "English",
+      "text": "From check-in to pickup, {employee} at {businessName} made the whole process easy. They explained the fault clearly, quoted a fair price, and called me when the repair was ready. Exactly the service you hope for.",
+      "length": "detailed",
+      "style": "professional",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-employee-service-short-friendly-keyword-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "employee-service",
+      "language": "English",
+      "text": "{employee} at {businessName} was courteous from the moment I walked in. The service was {keyword} and the staff were helpful.",
+      "length": "short",
+      "style": "friendly",
+      "compatibleKeywords": ["fast", "quick", "professional", "friendly"],
+      "active": true
+    },
+    {
+      "key": "mobile-repair-staff-expertise-short-simple-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "staff-expertise",
+      "language": "English",
+      "text": "The team at {businessName} clearly know their work. My issue was found quickly and fixed without any guesswork.",
+      "length": "short",
+      "style": "simple",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-staff-expertise-medium-professional-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "staff-expertise",
+      "language": "English",
+      "text": "{employee} diagnosed my {service} problem accurately and explained the options. Nothing was oversold, and the repair worked perfectly after one visit.",
+      "length": "medium",
+      "style": "professional",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-staff-expertise-medium-professional-keyword-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "staff-expertise",
+      "language": "English",
+      "text": "The technicians at {businessName} were {keyword} and thorough. They explained everything without pushing unnecessary extras.",
+      "length": "medium",
+      "style": "professional",
+      "compatibleKeywords": ["professional", "thorough", "knowledgeable", "friendly"],
+      "active": true
+    },
+    {
+      "key": "mobile-repair-overall-short-simple-keyword-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "overall",
+      "language": "English",
+      "text": "Great experience at {businessName}. Honest, {keyword}, and fairly priced.",
+      "length": "short",
+      "style": "simple",
+      "compatibleKeywords": ["friendly", "professional", "honest", "fast"],
+      "active": true
+    },
+    {
+      "key": "mobile-repair-overall-medium-casual-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "overall",
+      "language": "English",
+      "text": "Was a bit anxious about my phone, but {businessName} made it easy. Clear communication, fair price, and the device came back working perfectly. Would definitely go back.",
+      "length": "medium",
+      "style": "casual",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-overall-detailed-friendly-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "overall",
+      "language": "English",
+      "text": "If you need your phone fixed, {businessName} is a safe choice. {employee} walked me through the repair, gave honest advice about {service}, and the final cost matched the original quote to the rupee. I left with a working phone and a good impression.",
+      "length": "detailed",
+      "style": "friendly",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-overall-medium-simple-1",
+      "categoryKey": "mobile-repair",
+      "scenario": "overall",
+      "language": "English",
+      "text": "{businessName} exceeded my expectations. Simple process, honest pricing, and my phone is as good as new. I will recommend them to friends.",
+      "length": "medium",
+      "style": "simple",
+      "active": true
+    },
+    {
+      "key": "mobile-repair-service-quality-medium-friendly-2",
+      "categoryKey": "mobile-repair",
+      "scenario": "service-quality",
+      "language": "English",
+      "text": "{businessName} fixed my {service} in a single visit. Friendly staff, transparent pricing, and the device has been flawless since.",
+      "length": "medium",
+      "style": "friendly",
+      "active": true
+    }
+  ]
+}

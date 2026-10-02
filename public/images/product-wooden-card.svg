@@ -1,0 +1,17 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wood" x1="90" y1="55" x2="310" y2="195" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C68B59"/>
+      <stop offset="0.5" stop-color="#A9713F"/>
+      <stop offset="1" stop-color="#7C4A24"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="320" rx="16" fill="#090D16"/>
+  <rect x="90" y="55" width="220" height="140" rx="12" fill="url(#wood)"/>
+  <path d="M90 95 H310 M90 130 H310 M90 160 H310" stroke="#5B3418" stroke-width="1.5" stroke-opacity="0.55"/>
+  <path d="M100 95 Q150 100 200 95 Q250 90 310 95" stroke="#8A5A2E" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="200" y="188" font-family="sans-serif" font-weight="900" font-size="15" fill="#3A210E" text-anchor="middle">Taprevia · Wooden</text>
+  <circle cx="276" cy="82" r="12" fill="#5B3418" stroke="#3A210E" stroke-width="2"/>
+  <path d="M270 78 H282 M270 86 H279 M270 94 H283" stroke="#E9C9A3" stroke-width="2" stroke-linecap="round"/>
+  <path d="M270 75 A12 12 0 0 0 290 95" stroke="#3A210E" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

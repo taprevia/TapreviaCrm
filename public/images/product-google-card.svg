@@ -1,0 +1,11 @@
+<svg width="400" height="320" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="320" rx="16" fill="#090D16"/>
+  <rect x="90" y="55" width="220" height="140" rx="12" fill="#FFFFFF"/>
+  <text x="200" y="115" font-family="sans-serif" font-weight="900" font-size="26" fill="#151E3D" text-anchor="middle">Taprevia</text>
+  <text x="200" y="150" font-family="sans-serif" font-weight="700" font-size="12" fill="#EA4335" text-anchor="middle">Google Review</text>
+  <circle cx="160" cy="178" r="9" fill="#4285F4"/>
+  <circle cx="183" cy="178" r="9" fill="#EA4335"/>
+  <circle cx="206" cy="178" r="9" fill="#FBBC05"/>
+  <circle cx="229" cy="178" r="9" fill="#34A853"/>
+  <path d="M270 75 A12 12 0 0 0 290 95" stroke="#151E3D" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

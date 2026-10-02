@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* App canvas — dark-first */
+  --background: #0f172a;
+  --foreground: #f8fafc;
+
+  /* Surfaces */
+  --bg-base: #0f172a;
+  --bg-raised: #111827;
+  --surface: #1e293b;
+  --surface-2: #232f48;
+  --input-bg: #161e2e;
+  --input-bg-alt: #0b0f19;
+
+  /* Borders */
+  --border-subtle: #2d3748;
+
+  * {
+    border-color: var(--border-subtle);
+  }
+}
+
+/* Public website (cover page) — soft grey borders.
+   The app-wide dark border token (--border-subtle, #2d3748) is applied to
+   every element via the unlayered `:root *` rule above. That beats Tailwind's
+   layered grey-border utilities, so all public-site borders render dark grey
+   regardless of their `border-gray-*` classes. The token also powers the CRM's
+   dark UI, so it must stay. Scope a light-neutral override (#d1d5db) to the
+   public website only via the #cover-site hook on the marketing shell. */
+#cover-site,
+#cover-site * {
+  border-color: #d1d5db;
+}
+
+/* Re-apply the few public-site borders that are intentionally NOT neutral
+   dark grey: transparent underlines, near-white chrome on navy sections,
+   error/validation red, success/status emerald, and brand-coloured
+   (accent / navy) affordances. */
+#cover-site [class*="border-transparent"] {
+  border-color: transparent;
+}
+#cover-site [class*="border-white"] {
+  border-color: rgb(255 255 255 / 0.15);
+}
+#cover-site [class*="border-brand-accent"] {
+  border-color: #3b5bff;
+}
+#cover-site [class*="border-brand-navy"],
+#cover-site [class*="border-brand-dark"] {
+  border-color: #151e3d;
+}
+#cover-site [class*="border-red-"] {
+  border-color: #ef4444;
+}
+#cover-site [class*="border-emerald-"] {
+  border-color: #10b981;
+}
+
+/* Public vCard portal theme scope — light default, themed per-card via inline vars */
+.vcard-root {
+  --v-bg: #ffffff;
+  --v-surface: #f8fafc;
+  --v-text: #111827;
+  --v-muted: #4b5563;
+  --v-border: #e5e7eb;
+  --v-accent: #2563eb;
+  --v-on-accent: #ffffff;
+
+  color: var(--v-text);
+}
+
+* {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  input,
+  textarea,
+  select {
+    @apply transition-colors duration-200;
+  }
+
+  :focus-visible {
+    outline: none;
+  }
+}
+
+@layer components {
+  .skeleton {
+    @apply rounded-lg animate-pulse;
+    background-color: var(--surface-2);
+  }
+
+  .dark-input {
+    @apply w-full h-11 rounded-lg px-3 text-sm text-ink placeholder:text-ink-faint border border-line focus:border-accent-500 focus:ring-2 focus:ring-accent-500/25 transition-shadow;
+    background-color: var(--input-bg);
+  }
+
+  .dark-label {
+    @apply block text-sm font-medium text-ink-mute mb-1.5;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Marketing site helpers (migrated from the standalone landing page) */
+@keyframes bounceSlow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounceSlow 4s ease-in-out infinite;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
