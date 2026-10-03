@@ -19,6 +19,113 @@ import { canUseFeature, featureMax } from '@/lib/services/feature-access';
 
 type Params = { params: { id: string } };
 
+/**
+ * Extract the storage key from a `/media/…` URL.
+ *
+ * Mirrors the client's `mediaKeyFromUrl` (lib/hooks/use-card-draft.ts). The
+ * `/media/` prefix is the safety boundary: only keys this app minted are ever
+ * delete candidates, so an external URL a customer pasted (Unsplash, an R2
+ * public URL) is never treated as ours.
+ */
+function mediaKeyFromUrl(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  if (!url.startsWith('/media/')) return null;
+  const key = url.slice('/media/'.length);
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * Keys that the incoming update replaces, computed from the *persisted* card
+ * before any mutation.
+ *
+ * Set-difference on gallery keys rather than index comparison, because the
+ * gallery UI supports drag-reordering (builder/tabs/gallery-tab.tsx `move`) —
+ * index-based matching would mark reordered-but-live images as superseded.
+ *
+ * `coverValue` is only media when the incoming cover is not a colour: switching
+ * to a hex colour clears the field (builder/tabs/cover-tab.tsx `handleTypeChange`)
+ * and must not delete the image it used to point at.
+ */
+function collectSupersededKeys(
+  card: { profileImageUrl?: string; coverValue?: string; coverType?: string; galleryImages?: Array<{ imageUrl?: string }> },
+  data: Record<string, unknown>
+): string[] {
+  const superseded = new Set<string>();
+
+  if (data.profileImageUrl !== undefined) {
+    const before = mediaKeyFromUrl(card.profileImageUrl);
+    const after = mediaKeyFromUrl(data.profileImageUrl);
+    if (before && before !== after) superseded.add(before);
+  }
+
+  if (data.coverValue !== undefined) {
+    const nextCoverType =
+      data.coverType !== undefined ? data.coverType : card.coverType;
+    // Colour covers hold a hex value, never media — nothing to reclaim.
+    if (nextCoverType !== 'color') {
+      const before = mediaKeyFromUrl(card.coverValue);
+      const after = mediaKeyFromUrl(data.coverValue);
+      if (before && before !== after) superseded.add(before);
+    }
+  }
+
+  if (data.galleryImages !== undefined) {
+    const before = (card.galleryImages ?? [])
+      .map((image) => mediaKeyFromUrl(image?.imageUrl))
+      .filter((key): key is string => Boolean(key));
+    const after = new Set(
+      (data.galleryImages as Array<{ imageUrl?: string }> | undefined ?? [])
+        .map((image) => mediaKeyFromUrl(image?.imageUrl))
+        .filter((key): key is string => Boolean(key))
+    );
+    for (const key of before) {
+      if (!after.has(key)) superseded.add(key);
+    }
+  }
+
+  return [...superseded];
+}
+
+/**
+ * Best-effort removal of media superseded by a successful update.
+ *
+ * Called ONLY after `card.save()` resolves, so the replacement is durably
+ * persisted before any old bytes are touched: if the save failed the old image
+ * is still referenced and intact. Each key is independent — a storage failure
+ * logs and continues rather than failing the request the customer just made.
+ */
+async function cleanupSupersededMedia(
+  keys: string[],
+  userId: string,
+  cardId: string
+): Promise<void> {
+  if (keys.length === 0) return;
+
+  for (const key of keys) {
+    try {
+      // Ownership gate: only media belonging to the requesting user may be
+      // removed, so a crafted PATCH cannot delete another tenant's object even
+      // if a stale URL were ever written into their own card.
+      const media = await Media.findOne({ key, userId });
+      if (!media) {
+        // No row — nothing to reconcile. Leave any object alone; a
+        // row-less key may predate tracking or belong to another system.
+        console.warn(
+          `[media] superseded key has no Media row, skipping delete key=${key} card=${cardId}`
+        );
+        continue;
+      }
+
+      await getStorage().deleteObject(key);
+      await media.deleteOne();
+    } catch (storageErr) {
+      // Never propagate: the card update already succeeded and the old object
+      // merely becomes an orphan rather than a broken image.
+      console.error(`[media] superseded cleanup failed key=${key}:`, storageErr);
+    }
+  }
+}
+
 // GET /api/cards/[id]
 export async function GET(request: NextRequest, { params }: Params) {
   try {
@@ -175,6 +282,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     }
 
+    // Compute superseded media from the persisted card BEFORE mutating it.
+    const supersededKeys = collectSupersededKeys(card, data);
+
     for (const key of [
       'name',
       'cardLabel',
@@ -200,6 +310,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     await card.save();
+
+    // Durable first, reclaim second. Replaces the client-invisible leak where
+    // uploading a new avatar/cover/gallery image orphaned the previous object
+    // forever (no delete on replace, and the TTL purge only covers 'pending').
+    await cleanupSupersededMedia(supersededKeys, user._id, String(card._id));
+
     return ok({ card });
   } catch (error) {
     console.error('Card PATCH error:', error);
