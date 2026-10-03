@@ -39,10 +39,21 @@ function getClient(): S3Client {
 
   // AWS_* names are canonical; fall back to the S3_* spellings that existed
   // in .env.example before this module landed.
-  const region = process.env.AWS_REGION || process.env.S3_REGION;
+  //
+  // 'auto' is the default because that is the only region Cloudflare R2
+  // accepts, and an undefined region makes the SDK throw at construction time
+  // ("Region is missing") rather than at request time — which surfaced as an
+  // opaque 500 on the first media read. Non-R2 backends (MinIO / Wasabi) still
+  // set a concrete region explicitly, which is preserved here.
+  const region = process.env.AWS_REGION || process.env.S3_REGION || 'auto';
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY;
   const endpoint = getEndpoint();
+
+  // Safe to log: endpoint + region are routing config, not credentials. The
+  // accessKeyId/secret are deliberately NOT logged. Fires once per cold start
+  // (the client is a lazily-memoised singleton), so it cannot flood a log.
+  console.log('[S3 Init] Endpoint:', endpoint, 'Region:', region);
 
   client = new S3Client({
     region,
@@ -72,7 +83,12 @@ function mapNotFound(err: unknown): never {
     e?.name === 'NoSuchKey' ||
     e?.name === 'NotFound' ||
     e?.$metadata?.httpStatusCode === 404;
-  throw notFound ? new Error('NOT_FOUND') : err;
+  // Preserve the original SDK fault as `cause` even when normalizing to
+  // NOT_FOUND: the wrapper's bare message would otherwise discard the
+  // AccessDenied / InvalidAccessKeyId / ExpiredToken details that identify an
+  // auth failure in server logs.
+  if (notFound) throw new Error('NOT_FOUND', { cause: err });
+  throw err;
 }
 
 function buildS3Driver(): StorageDriver {

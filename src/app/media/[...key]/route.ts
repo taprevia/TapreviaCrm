@@ -26,12 +26,59 @@ function notFound(key: string, reason: string): Response {
   });
 }
 
+/**
+ * Emit a structured, greppable line for any storage-layer failure so the exact
+ * network/auth fault is visible in Vercel logs.
+ *
+ * The SDK's `name` + `$metadata.httpStatusCode` are what actually classify the
+ * failure (`AccessDenied` 403, `InvalidAccessKeyId` 403, `ExpiredToken` 403,
+ * `SlowDown` 503, `NetworkingError` with no status) — and those details are
+ * destroyed by the driver's normalisation to `Error('NOT_FOUND')`, so they are
+ * read defensively here. Never logs credentials.
+ */
+function logStorageError(key: string, stage: string, err: unknown): void {
+  const e = err as {
+    name?: string;
+    message?: string;
+    code?: string;
+    cause?: { message?: string; code?: string };
+    $metadata?: { httpStatusCode?: number };
+    $response?: { statusCode?: number };
+  };
+  // When the driver normalized to Error('NOT_FOUND'), the discriminating detail
+  // (SDK error name, HTTP status) lives on `cause` — read both levels so the
+  // log names the real fault rather than the wrapper.
+  const cause = e?.cause as
+    | {
+        name?: string;
+        message?: string;
+        code?: string;
+        $metadata?: { httpStatusCode?: number };
+        $response?: { statusCode?: number };
+      }
+    | undefined;
+
+  console.error('[Media Storage Error]', {
+    key,
+    stage,
+    driver: driverName(),
+    name: e?.name ?? null,
+    message: e?.message ?? null,
+    code: e?.code ?? cause?.code ?? null,
+    causeName: cause?.name ?? null,
+    causeMessage: cause?.message ?? null,
+    httpStatus:
+      e?.$metadata?.httpStatusCode ??
+      e?.$response?.statusCode ??
+      cause?.$metadata?.httpStatusCode ??
+      cause?.$response?.statusCode ??
+      null,
+  });
+}
+
 /** Storage unreachable/misconfigured (e.g. S3_BUCKET unset) — never a 404. */
-function storageUnavailable(key: string, err: unknown): Response {
-  console.error(
-    `Media storage unavailable key=${key} driver=${driverName()}:`,
-    err
-  );
+function storageUnavailable(key: string, err: unknown, stage = 'unknown'): Response {
+  logStorageError(key, stage, err);
   return new Response('Storage unavailable', {
     status: 503,
     headers: { 'Content-Type': 'text/plain', 'Retry-After': '30' },
@@ -84,7 +131,7 @@ export async function GET(
         if (!head) return notFound(key, 'object-missing-in-storage');
         signed = await storage.presignGetUrl(key, 604800);
       } catch (err) {
-        return storageUnavailable(key, err);
+        return storageUnavailable(key, err, 'headObject');
       }
       if (!signed) return notFound(key, 'presign-returned-empty');
       // Keys embed a uuid and objects are immutable, so the redirect target is
@@ -104,12 +151,15 @@ export async function GET(
       buffer = await storage.getObject(key);
     } catch (err) {
       if ((err as Error)?.message === 'NOT_FOUND') {
+        // Genuinely absent object — expected, not a fault. Logged for parity
+        // with the s3 branch so a missing asset is still greppable.
+        logStorageError(key, 'getObject', err);
         return notFound(key, 'object-missing-in-storage');
       }
       if ((err as Error)?.message === 'INVALID_KEY') {
         return notFound(key, 'invalid-key');
       }
-      return storageUnavailable(key, err);
+      return storageUnavailable(key, err, 'getObject');
     }
 
     const body = new Uint8Array(buffer);
