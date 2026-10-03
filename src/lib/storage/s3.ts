@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { StorageDriver } from './index';
 
@@ -69,6 +70,19 @@ function getClient(): S3Client {
     // than surfacing the error. Callers retry at a higher level — /media
     // returns 503 + Retry-After and the browser refetches.
     maxAttempts: 1,
+    // Bound the socket so a stalled R2 edge cannot hold a serverless
+    // invocation open until the platform kills it — which surfaces as a
+    // function timeout rather than a diagnosable error.
+    //
+    // Scope is deliberately narrow: on this driver the only server-side
+    // network call is HEAD (object metadata); uploads and downloads are
+    // presigned and travel browser<->R2 directly, so 1s/2s applies to a
+    // metadata probe and cannot truncate an 8MB body transfer.
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: 1000, // socket connect limit
+      requestTimeout: 2000, // total request + response limit
+      throwOnRequestTimeout: true,
+    }),
     // Path-style is required by R2 and every other S3-compatible store once a
     // custom endpoint is set; virtual-host style yields unresolvable subdomains.
     ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
