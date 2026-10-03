@@ -120,7 +120,7 @@ export const Hero: React.FC = () => {
               {/* Overlapping Physical NFC Card */}
               <div className="absolute left-1 sm:-left-4 bottom-14 w-40 sm:w-52 aspect-[1.58/1] rounded-2xl overflow-hidden shadow-2xl transform -rotate-12 hover:rotate-0 transition-transform duration-300">
                 <Image
-                  src="/images/MarketingImg/Metal%20card.svg"
+                  src="/images/MarketingImg/metal-card.svg"
                   alt="Taprevia Metal NFC Business Card"
                   fill
                   className="object-cover"

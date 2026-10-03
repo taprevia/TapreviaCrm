@@ -10,6 +10,12 @@ const nextConfig = {
       .map((h) => h.trim())
       .filter(Boolean)
       .map((hostname) => ({ protocol: 'https', hostname })),
+    // Candidate widths the optimizer will generate for `sizes`-based images.
+    // Next rejects any requested width that is not in this list with a 400
+    // Bad Request from /_next/image. The marketing product grid uses
+    // `fill` with large `sizes` (up to 100vw), so 3840 must be reachable or
+    // wide viewports 400. Image filenames are kebab-case and URL-safe.
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
   },
   // Legacy CRM routes removed in the redesign — permanently redirect
   // bookmarks/history entries so users never land on stale UI again.
