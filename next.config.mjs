@@ -2,19 +2,35 @@
 const nextConfig = {
   images: {
     // The app renders media through plain <img> (uploaded via the storage
-    // layer), so no remote hosts are needed. Open remotePatterns is an SSRF
-    // hazard for any future next/image adoption. Explicitly allow remote hosts
-    // via IMAGE_HOSTS (comma-separated), otherwise only same-origin media works.
+    // layer), so no remote hosts are needed today. Open remotePatterns is an
+    // SSRF hazard for any future next/image adoption. Allowlist remote hosts
+    // via IMAGE_HOSTS (comma-separated) instead.
+    //
+    // Hostnames must NOT include a scheme or path: next/image matches
+    // `hostname` literally, so an operator writing the natural
+    // "https://cdn.example.com" silently produced a pattern that could never
+    // match (and images then failed validation). Normalise it away, and add
+    // port + wildcard variants for convenience.
     remotePatterns: (process.env.IMAGE_HOSTS ?? '')
       .split(',')
-      .map((h) => h.trim())
+      .map((entry) => entry.trim())
       .filter(Boolean)
-      .map((hostname) => ({ protocol: 'https', hostname })),
-    // Candidate widths the optimizer will generate for `sizes`-based images.
-    // Next rejects any requested width that is not in this list with a 400
-    // Bad Request from /_next/image. The marketing product grid uses
-    // `fill` with large `sizes` (up to 100vw), so 3840 must be reachable or
-    // wide viewports 400. Image filenames are kebab-case and URL-safe.
+      .map((entry) => {
+        // Strip scheme, credentials, path and trailing slash -> bare hostname.
+        const hostname = entry
+          .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+          .replace(/^[^@/]*@/, '')
+          .replace(/[/?#].*$/, '')
+          .replace(/:(\d+)$/, '')
+          .toLowerCase();
+        return hostname ? [{ protocol: 'https', hostname }] : [];
+      })
+      .flat(),
+    // Candidate widths the optimizer may generate for `sizes`-based images;
+    // any requested width outside this list 400s at /_next/image.
+    // NOTE: this is byte-identical to next's built-in default, so it is
+    // documentation rather than a fix — see git history for the real cause of
+    // the earlier 400s (pre-encoded `%20` image paths, since resolved).
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
   },
   // Legacy CRM routes removed in the redesign — permanently redirect

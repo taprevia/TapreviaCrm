@@ -71,10 +71,16 @@ export const ShopByCategory: React.FC = () => {
               className="group relative h-72 md:h-96 rounded-3xl overflow-hidden shadow-brandCard block transition-transform duration-300 hover:-translate-y-1"
             >
               {/* Background Image */}
+              {/* Without `sizes`, next/image assumes 100vw and the optimizer
+                  fetches a full-width asset (up to 3840px on a 4K display) for
+                  a card that renders at ~384px. Grid is grid-cols-1 below
+                  `md` (768px) then grid-cols-3, inside a max-w-7xl (1280px)
+                  container — so past 1344px the column is pinned at 384px. */}
               <Image
                 src={item.image}
                 alt={item.title}
                 fill
+                sizes="(max-width: 767px) calc(100vw - 2rem), (max-width: 1343px) 33vw, 384px"
                 className="object-cover group-hover:scale-105 transition-transform duration-500"
               />
 
