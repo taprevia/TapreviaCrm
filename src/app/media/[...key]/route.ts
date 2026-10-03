@@ -13,6 +13,38 @@ const MEDIA_KEY_RE =
   /^[0-9a-f]{24}\/\d{4}-\d{2}\/[A-Za-z0-9_-]+\.(webp|png|jpg|jpeg|pdf|doc|docx|mp4)$/;
 
 /**
+ * Normalise the raw catch-all segments into a bare storage key.
+ *
+ * Three normalisations, in order:
+ *  1. Drop empty segments — an empty one (`/media//a/b`) makes join('/') emit a
+ *     double slash, which becomes a literal "Key" in the S3 command and fails
+ *     signature verification.
+ *  2. Strip leading slashes so the key is never rooted.
+ *  3. Strip a leading `media/` segment, so `media/<userId>/…` and
+ *     `/media/<userId>/…` both resolve to `<userId>/…`. Callers (and older
+ *     stored URLs) sometimes persist the public route prefix as if it were
+ *     part of the key.
+ *
+ * The result is still validated against MEDIA_KEY_RE before any storage call,
+ * so this can only ever narrow the accepted input — `..` traversal and any
+ * non-canonical shape remain rejected at route.ts.
+ */
+function sanitizeKey(segments: string[]): string {
+  let key = segments
+    .filter((segment) => segment.length > 0)
+    .join('/')
+    .replace(/^\/+/, '');
+
+  // Bounded: strip a repeated `media/` prefix without looping unbounded on
+  // adversarial input like `media/media/media/…`.
+  for (let i = 0; i < 3 && key.startsWith('media/'); i += 1) {
+    key = key.slice('media/'.length);
+  }
+
+  return key;
+}
+
+/**
  * 404 with a server-side breadcrumb. Every rejection reason is logged with the
  * key so a broken avatar is diagnosable from logs alone — previously all four
  * 404 paths were silent, which made "image not served" indistinguishable from
@@ -127,16 +159,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { key: string[] } }
 ): Promise<Response> {
-  // Build the object key defensively, outside try so the catch can log it too.
-  // Catch-all segments never carry a leading '/', but an empty segment
-  // (`/media//a/b`) would make join('/') emit a leading slash — and that key
-  // becomes a literal "Key" in the S3 command, producing a double-slash path
-  // that fails signature verification. Normalise so MEDIA_KEY_RE only ever
-  // sees a bare key.
-  const key = params.key
-    .filter((segment) => segment.length > 0)
-    .join('/')
-    .replace(/^\/+/, '');
+  const key = sanitizeKey(params.key);
 
   try {
     if (!MEDIA_KEY_RE.test(key) || key.includes('..')) {
