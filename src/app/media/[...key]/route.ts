@@ -76,6 +76,41 @@ function logStorageError(key: string, stage: string, err: unknown): void {
   });
 }
 
+/**
+ * Legacy layout prefix.
+ *
+ * Early uploads were written by tooling that prepended the bucket name into
+ * the object key itself (`taprevia-media/<userId>/…`) instead of relying on the
+ * SDK's Bucket parameter, so those objects sit one level deeper in the bucket
+ * than the canonical key implies. New uploads never do this (see
+ * `api/uploads/presign`), so this is read-side compatibility only.
+ */
+const LEGACY_KEY_PREFIX = 'taprevia-media/';
+
+/**
+ * Resolve the key an object is actually stored under: try the exact requested
+ * key, and on absence fall back once to the legacy-prefixed form.
+ *
+ * At most ONE extra call, and only on a genuine miss. Errors (auth, network,
+ * throttle) are rethrown untouched rather than triggering a retry, so a real
+ * fault can't be masked as a 404 or double the request count.
+ */
+async function resolveStoredKey(
+  probe: (candidate: string) => Promise<boolean>,
+  key: string
+): Promise<string | null> {
+  if (await probe(key)) return key;
+
+  const prefixed = `${LEGACY_KEY_PREFIX}${key}`;
+  // Already prefixed — never double up.
+  if (key.startsWith(LEGACY_KEY_PREFIX) || !(await probe(prefixed))) return null;
+
+  console.warn(
+    `[Media Storage] serving via legacy prefix key=${key} resolved=${prefixed}`
+  );
+  return prefixed;
+}
+
 /** Storage unreachable/misconfigured (e.g. S3_BUCKET unset) — never a 404. */
 function storageUnavailable(key: string, err: unknown, stage = 'unknown'): Response {
   logStorageError(key, stage, err);
@@ -121,15 +156,22 @@ export async function GET(
     const storage = getStorage();
 
     if (storage.presignGetUrl) {
-      let signed: string | null;
+let signed: string | null;
       try {
-        // Presigning succeeds for absent keys, so this can hand back a URL that
+        // Presigning succeeds for absent keys, so this can hand out a URL that
         // R2 then 404s — surfacing as a broken <img> with nothing logged here.
         // HEAD first: a cheap metadata call that turns a silent downstream 404
         // into an explicit, logged one.
-        const head = await storage.headObject(key);
-        if (!head) return notFound(key, 'object-missing-in-storage');
-        signed = await storage.presignGetUrl(key, 604800);
+        //
+        // `probe` maps a HEAD result to "exists"; the driver already collapses
+        // 404 to null and rethrows everything else, so at most one extra HEAD
+        // (the legacy-prefix retry) ever reaches R2.
+        const resolved = await resolveStoredKey(
+          async (candidate) => (await storage.headObject(candidate)) !== null,
+          key
+        );
+        if (!resolved) return notFound(key, 'object-missing-in-storage');
+        signed = await storage.presignGetUrl(resolved, 604800);
       } catch (err) {
         return storageUnavailable(key, err, 'headObject');
       }
@@ -146,13 +188,39 @@ export async function GET(
       });
     }
 
-    let buffer: Buffer;
+    let buffer: Buffer | null = null;
     try {
-      buffer = await storage.getObject(key);
+      // Same exact-then-legacy-prefix resolution as the s3 branch, but the
+      // probe caches the bytes so a legacy hit does not re-read the object.
+      // Only a NOT_FOUND triggers the second GET; any other fault propagates.
+      const read = async (candidate: string): Promise<Buffer | null> => {
+        try {
+          return await storage.getObject(candidate);
+        } catch (err) {
+          if ((err as Error)?.message === 'NOT_FOUND') return null;
+          throw err;
+        }
+      };
+
+      buffer = await read(key);
+      if (!buffer) {
+        const prefixed = `${LEGACY_KEY_PREFIX}${key}`;
+        buffer = await read(prefixed);
+        if (buffer) {
+          console.warn(
+            `[Media Storage] serving via legacy prefix key=${key} resolved=${prefixed}`
+          );
+        }
+      }
+
+      if (!buffer) {
+        // Genuinely absent under both layouts — expected, not a fault. Logged
+        // for parity with the s3 branch so a missing asset is still greppable.
+        logStorageError(key, 'getObject', new Error('NOT_FOUND'));
+        return notFound(key, 'object-missing-in-storage');
+      }
     } catch (err) {
       if ((err as Error)?.message === 'NOT_FOUND') {
-        // Genuinely absent object — expected, not a fault. Logged for parity
-        // with the s3 branch so a missing asset is still greppable.
         logStorageError(key, 'getObject', err);
         return notFound(key, 'object-missing-in-storage');
       }
