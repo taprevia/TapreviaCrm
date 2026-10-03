@@ -19,6 +19,21 @@ function requireBucket(): string {
   return bucket;
 }
 
+/**
+ * Normalise the optional custom endpoint (MinIO / R2 / Wasabi …).
+ *
+ * Trailing slashes are stripped: the SDK appends "/<bucket>/<key>" itself, so
+ * an endpoint ending in "/" yields a doubled separator in the path-style
+ * request URL. The signature is computed over the canonical request, so the
+ * doubled path makes the string sent differ from the one signed and R2
+ * rejects it with SignatureDoesNotMatch — which surfaces as an opaque 403.
+ */
+function getEndpoint(): string | undefined {
+  const raw = process.env.S3_ENDPOINT?.trim();
+  if (!raw) return undefined;
+  return raw.replace(/\/+$/, '') || undefined;
+}
+
 function getClient(): S3Client {
   if (client) return client;
 
@@ -27,6 +42,7 @@ function getClient(): S3Client {
   const region = process.env.AWS_REGION || process.env.S3_REGION;
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY;
+  const endpoint = getEndpoint();
 
   client = new S3Client({
     region,
@@ -37,11 +53,14 @@ function getClient(): S3Client {
     responseChecksumValidation: 'WHEN_REQUIRED',
     credentials:
       accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : undefined,
-    // Optional custom endpoint (MinIO / R2 / Wasabi …). Path-style is what
-    // most S3-compatible stores expect when an endpoint is overridden.
-    ...(process.env.S3_ENDPOINT
-      ? { endpoint: process.env.S3_ENDPOINT, forcePathStyle: true }
-      : {}),
+    // Single attempt: presigning is pure local signing (no network), and media
+    // reads are latency-sensitive, so a retry storm on a slow R2 edge is worse
+    // than surfacing the error. Callers retry at a higher level — /media
+    // returns 503 + Retry-After and the browser refetches.
+    maxAttempts: 1,
+    // Path-style is required by R2 and every other S3-compatible store once a
+    // custom endpoint is set; virtual-host style yields unresolvable subdomains.
+    ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
   });
   return client;
 }
