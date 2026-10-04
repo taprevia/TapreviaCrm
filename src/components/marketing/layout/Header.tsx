@@ -47,12 +47,12 @@ export const Header: React.FC = () => {
 
         {/* Right Actions */}
         <div className="hidden md:flex items-center gap-4">
-          <Link
-            href="/login"
-            className="text-sm font-semibold text-gray-600 hover:text-brand-navy transition-colors"
-          >
-            Login
-          </Link>
+<Link
+              href="/login"
+              className="mk-login text-sm font-semibold text-gray-600 hover:text-brand-navy"
+            >
+              Login
+            </Link>
 
           <a href="#order">
             <Button variant="primary" size="sm" pill className="gap-2 bg-brand-accent hover:bg-blue-700 border-none text-white font-bold">
@@ -92,7 +92,7 @@ export const Header: React.FC = () => {
               href="/login"
               onClick={() => setMobileMenuOpen(false)}
             >
-              <Button variant="outline" size="md" pill className="w-full gap-2 border border-gray-200 text-brand-navy font-bold bg-white">
+              <Button variant="outline" size="md" pill className="mk-login mk-login-pill w-full gap-2 border border-gray-200 text-brand-navy font-bold bg-white">
                 Login
               </Button>
             </Link>
