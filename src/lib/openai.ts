@@ -41,7 +41,12 @@ export async function chatCompletion(input: ChatCompletionInput): Promise<ChatCo
         { role: 'user', content: user },
       ],
     }),
-    signal: AbortSignal.timeout(30_000),
+    // Client-side deadline, deliberately shorter than the route's `maxDuration`
+    // (60s) so a stalled upstream produces a caught error and a clean 503 rather
+    // than a platform-level function kill that never reaches our logs. Also
+    // shorter than a typical chat completion, so timeouts mean "upstream is
+    // genuinely stuck", not "we cut it off early".
+    signal: AbortSignal.timeout(20_000),
   });
 
   if (!res.ok) {

@@ -302,10 +302,28 @@ export async function getReviewTemplateSuggestions(
   const keywords = cleanTags(cfg.keywords);
   const values = { businessName, employees, services, keywords };
 
+  // Bounded, projected candidate fetch.
+  //
+  // This used to hydrate the ENTIRE category pool into the serverless function
+  // and then filter/bucket/sort it in JavaScript — latency and memory that grow
+  // without limit as the library grows, inside a platform that bills and kills
+  // on both.
+  //
+  // `language: { $in: [language, English] }` pushes the two buckets the ranking
+  // below actually consults (exact match, then English top-up) down into Mongo
+  // so the existing `{ categoryKey, active, language }` index serves the query,
+  // while `languageBucket()` still applies the exact-match-preferred ordering.
+  // The projection keeps only fields the ranker reads, and the cap bounds the
+  // worst case. Templates outside the cap are simply never suggested.
   const candidates = (await ReviewTemplate.find({
     categoryKey,
     active: true,
+    language: { $in: Array.from(new Set([language, FALLBACK_LANGUAGE])) },
   })
+    .select(
+      '_id scenario text length language style compatibleKeywords usageCount lastShownAt'
+    )
+    .limit(500)
     .lean()
     .exec()) as unknown as EdibleCandidate[];
 

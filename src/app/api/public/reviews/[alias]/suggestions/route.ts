@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
 import { z } from 'zod';
 import { connectDB } from '@/lib/db';
@@ -104,11 +104,20 @@ export async function POST(request: NextRequest, { params }: Params) {
         ...(parsed.data.init === true ? { init: true } : {}),
       }),
       request.headers
-    ).catch(() => {});
+    ).catch((err) => {
+      // Telemetry must never break a served suggestion, but it must be visible:
+      // a connection race here is a real signal about DB health on serverless.
+      console.error('[review-suggestions] analytics write failed:', err);
+    });
 
     return ok({ mode: 'template', suggestions });
   } catch (error) {
+    // Distinguish "we have nothing to suggest" from "we broke". The client
+    // treats a non-`template` mode identically either way, so returning a real
+    // 503 is backward-compatible for visitors while making outages visible in
+    // Vercel logs, error tracking and uptime monitors instead of being
+    // swallowed into a cheerful empty state.
     console.error('Review suggestions POST error:', error);
-    return NextResponse.json({ ok: false, mode: 'none', suggestions: [] });
+    return fail(503, 'INTERNAL_ERROR', 'Suggestions are temporarily unavailable');
   }
 }

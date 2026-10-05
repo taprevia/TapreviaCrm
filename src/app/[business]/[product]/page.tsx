@@ -83,6 +83,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function PublicHumanUrlPage({ params }: Params) {
   const card = await resolveCard(params.business, params.product);
   if (card) {
+    // SECURITY: pass a faithful snapshot. PublicCardPage needs _id, userId /
+    // assignedUserId, reviewAssistant and redirectUrl server-side — mapping
+    // through toPublicCardDto() strips them and breaks the entitlement gate.
+    // That mapper belongs only at JSON API boundaries.
     return <PublicCardPage card={toPlain<ICard>(card)!} />;
   }
   const panel = await resolveStandee(params.business, params.product);

@@ -8,6 +8,7 @@ import { buildVcf, vcfFilename, vcfFilenameStar } from '@/lib/vcf';
 import { check } from '@/lib/rate-limit';
 import { fail } from '@/lib/api';
 import { getPublicCardByAlias, isPublicProfileCard } from '@/lib/services/card-access';
+import { toPublicCardDto } from '@/lib/dto/card.dto';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,7 +92,12 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
 
     const base = request.nextUrl.origin;
-    const doc = card.toObject();
+    // Build the vCard from the public DTO rather than the raw document: this
+    // endpoint is anonymous, so the serialised output must not be able to pick
+    // up internal fields (userId, physical serials, basic.dateOfBirth) even
+    // if buildVcf is later extended. The DTO's shape is a structural subset of
+    // ICard, so it satisfies buildVcf without a cast.
+    const doc = toPublicCardDto(card);
     const body = buildVcf(doc, base);
 
     return new Response(body, {

@@ -70,13 +70,24 @@ export async function PublicCardPage({ card }: { card: ICard }) {
     await dispatchReviewCard(card, (card.urlAlias || card.slug || '').toLowerCase());
   }
 
+  // Resolve the owning account ONCE, before any tenant-scoped query.
+  //
+  // SECURITY: a card must always resolve to an owner. If it does not, every
+  // downstream lookup degrades into an unscoped read — `Product.find({})` and
+  // `TenantSettings.findOne({})` both match an arbitrary document when their
+  // filter key is undefined, which would leak another tenant's products and
+  // settings onto this page. Fail closed instead.
+  const ownerId = (card.userId ?? card.assignedUserId) ?? null;
+  if (!ownerId) notFound();
+
   // Product feature gate: profile pages are a Profile vCard feature. Fails
   // closed for cards whose owner's products don't include it.
-  const profileAllowed = await canUseFeature(
-    (card.userId ?? card.assignedUserId) ?? null,
-    'profile'
-  );
+  const profileAllowed = await canUseFeature(ownerId, 'profile');
   if (!profileAllowed) notFound();
+
+  // Both queries are owner/card scoped. `cardId` and `userId` are guaranteed
+  // defined by the guard above, so neither filter can collapse to `{}`.
+  if (!card._id) notFound();
 
   const products = (await Product.find({
     cardId: card._id,
@@ -86,19 +97,16 @@ export async function PublicCardPage({ card }: { card: ICard }) {
     .select('title description priceMinor currency imageUrl category active')
     .lean()) as unknown as IProduct[];
 
-  const settings = (await TenantSettings.findOne({ userId: card.userId }).lean()) as {
+  const settings = (await TenantSettings.findOne({ userId: ownerId }).lean()) as {
     general?: { newsletterModalDelaySeconds?: number };
   } | null;
 
   // The newsletter popup is opt-in per customer (default OFF). Resolve the
   // card owner's preference server-side so the client component only arms
   // its delay timer when the owner enabled it.
-  const ownerId = card.userId ?? card.assignedUserId ?? null;
-  const owner = ownerId
-    ? ((await User.findById(ownerId).select('isNewsletterEnabled').lean()) as {
-        isNewsletterEnabled?: boolean;
-      } | null)
-    : null;
+  const owner = (await User.findById(ownerId).select('isNewsletterEnabled').lean()) as {
+    isNewsletterEnabled?: boolean;
+  } | null;
   const newsletterEnabled = owner?.isNewsletterEnabled === true;
 
   const accent = /^#[0-9a-fA-F]{6}$/.test(card.themeConfig?.accentColor ?? '')

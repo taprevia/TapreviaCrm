@@ -3,12 +3,12 @@
  *
  * `X-Forwarded-For` is client-controllable when the request doesn't cross a
  * trust boundary that overwrites it, so the raw header must never be used
- * verbatim as a rate-limit key. This module prefers hop headers set by the
- * edge proxy (`X-Real-IP`, `CF-Connecting-IP`) and only falls back to
- * `X-Forwarded-For`'s RIGHT-MOST entry — the value appended by the nearest
- * trusted proxy, not the attacker-supplied left side. Unparseable values
- * collapse to `'unknown'`, which bounds spoofing to a single shared bucket
- * instead of a per-spoofed-value bypass.
+ * verbatim as a rate-limit key. This module prefers hop headers set by the edge
+ * proxy (`X-Vercel-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`) and only
+ * falls back to `X-Forwarded-For`'s RIGHT-MOST entry — the value appended by
+ * the nearest trusted proxy, not the attacker-supplied left side. Unparseable
+ * values collapse to `'unknown'`, which bounds spoofing to a single shared
+ * bucket instead of a per-spoofed-value bypass.
  */
 
 import type { NextRequest } from 'next/server';
@@ -46,6 +46,15 @@ export function clientIp(request: NextRequest): string {
 
 /** Same hardening against a plain headers object (ReadonlyHeaders/Headers). */
 export function clientIpFromHeaders(headers: HeadersLike): string {
+  // Highest priority: Vercel's own edge header. It is set by the platform and
+  // carries the true client IP, so it cannot be a shared proxy hop. It must be
+  // checked before X-Real-IP / X-Forwarded-For because those can terminate at
+  // an intermediary (or a customer-fronted Cloudflare), whose right-most entry
+  // is then shared by every visitor — collapsing all production traffic into a
+  // single rate-limit bucket.
+  const vercelIp = headers.get('x-vercel-forwarded-for');
+  if (vercelIp && plausibleIp(vercelIp)) return vercelIp.trim();
+
   const realIp = headers.get('x-real-ip');
   if (realIp && plausibleIp(realIp)) return realIp.trim();
 

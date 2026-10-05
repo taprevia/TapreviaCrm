@@ -56,6 +56,7 @@ import { getBrandIcon } from '@/utils/getBrandIcon';
 import { safeExternalUrl } from '@/lib/safe-url';
 import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
 import type { IProduct, IVcard } from '../types';
+import { SafeHtml } from '@/lib/sanitizer';
 
 /* ─────────────────────────────────────────────────────────────────────
  * Data view-model (bridge between CRM schema and the reference layout)
@@ -765,12 +766,9 @@ export function ProfessionalProfileTemplate({
                 </div>
               )}
               {data.bioHtml && (
-                <p
-                  className="ppc-bio mt-3 text-sm leading-relaxed text-zinc-600 text-pretty"
-                  // descriptionHtml is sanitized server-side before render; matches
-                  // the trusted rich-text bio handling used by the other templates.
-                  dangerouslySetInnerHTML={{ __html: data.bioHtml }}
-                />
+                <div className="ppc-bio mt-3 text-sm leading-relaxed text-zinc-600 text-pretty">
+                  <SafeHtml html={data.bioHtml} />
+                </div>
               )}
             </div>
           </div>

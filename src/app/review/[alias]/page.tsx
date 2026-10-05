@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
-import { notFound } from 'next/navigation';
 import { connectDB } from '@/lib/db';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
 import { hasCapability } from '@/lib/services/capability-access';
@@ -8,7 +7,6 @@ import { getInitials, vcardDisplayName } from '@/components/public/hero';
 import { ReviewAssistantFlow } from '@/components/review/review-assistant';
 import { getReviewLanguageOptions } from '@/lib/services/review-templates';
 import type { ICard, IReviewAssistantConfig } from '@/types';
-
 
 export const dynamic = 'force-dynamic';
 
@@ -21,54 +19,6 @@ function luminance(hex: string): number {
   const g = parseInt(m.slice(2, 4), 16) / 255;
   const b = parseInt(m.slice(4, 6), 16) / 255;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-const loadCard = cache(async (alias: string) => {
-  await connectDB();
-  return getPublicCardByAlias(alias) as unknown as Promise<ICard | null>;
-});
-
-/**
- * Eligibility for the public Review Assistant.
- *
- * The authoritative gate for this flow is the `review_ai_suggestions`
- * capability (granted through ProductDefinition/UserProduct — see
- * `resolveEntitlement`). Page and review APIs must agree so a customer can
- * never load an assistant that later rejects their request. The owner
- * identity uses `userId ?? assignedUserId` to match how cards are resolved
- * elsewhere (a bound card may only carry the physical-holder id).
- */
-const canUseReview = cache(async (card: ICard | null): Promise<boolean> => {
-  if (!card) return false;
-  const ownerId = (card.userId ?? card.assignedUserId) ?? null;
-  if (!ownerId) return false;
-  return hasCapability(ownerId, 'review_ai_suggestions');
-});
-
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  try {
-    const card = await loadCard(params.alias);
-    if (!card || !card.reviewAssistant?.enabled || !(await canUseReview(card))) {
-      return { title: 'Review not available', robots: { index: false, follow: false } };
-    }
-    return {
-      title: `Leave a review for ${vcardDisplayName(card)}`,
-      robots: { index: false, follow: false },
-    };
-  } catch {
-    return { title: 'Leave a review' };
-  }
-}
-
-/** Public "unavailable" state — used for disabled Review Assistant. */
-function Unavailable() {
-  return (
-    <div className="vcard-root flex min-h-screen items-center justify-center px-6">
-      <div className="max-w-sm text-center">
-        <p className="text-sm font-medium text-[var(--v-text)]">Reviews aren’t available right now.</p>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -90,14 +40,89 @@ async function resolveReviewLanguages(config: IReviewAssistantConfig): Promise<s
   return ['English'];
 }
 
-export default async function ReviewPage({ params }: Params) {
-  const card = await loadCard(params.alias);
-  if (!card) notFound();
+interface OwnerAccess {
+  card: ICard;
+  config: IReviewAssistantConfig;
+  languages: string[];
+}
+
+/**
+ * Single cached entry point for every read this page needs.
+ *
+ * Keyed on the PRIMITIVE `alias` string, never on a freshly-built object:
+ * React `cache()` dedupes by argument identity, so passing a per-call DTO or
+ * mapped object produced a cache miss on every call and re-ran the whole
+ * entitlement sweep (~3 extra Atlas queries per render).
+ *
+ * `generateMetadata` and the page component share this resolver, so the card
+ * lookup, the capability check and the language resolution each execute exactly
+ * once per request.
+ *
+ * SECURITY: returns the RAW document. The entitlement gate needs `userId ??
+ * assignedUserId` and the enabled flag needs `reviewAssistant`; both are
+ * intentionally absent from `toPublicCardDto`, which belongs only at JSON API
+ * boundaries.
+ *
+ * Eligibility rule (unchanged): the authoritative gate is the
+ * `review_ai_suggestions` capability granted through
+ * ProductDefinition/UserProduct — see `resolveEntitlement`. Page and review
+ * APIs must agree so a customer can never load an assistant that later rejects
+ * their request. Owner identity uses `userId ?? assignedUserId` to match how
+ * cards are resolved elsewhere (a card bound to a physical holder may only
+ * carry the holder id).
+ */
+const resolveOwnerAccess = cache(async (alias: string): Promise<OwnerAccess | null> => {
+  await connectDB();
+  const card = (await getPublicCardByAlias(alias)) as unknown as ICard | null;
+  if (!card) return null;
 
   const config = card.reviewAssistant as IReviewAssistantConfig | undefined;
-  if (!config?.enabled || !(await canUseReview(card))) {
-    return <Unavailable />;
+  if (!config?.enabled) return null;
+
+  const ownerId = (card.userId ?? card.assignedUserId) ?? null;
+  if (!ownerId) return null;
+
+  // Parallel: the capability sweep and the language lookup are independent
+  // round-trips, so serialising them doubled the page's DB wall-clock.
+  const [allowed, languages] = await Promise.all([
+    hasCapability(ownerId, 'review_ai_suggestions'),
+    resolveReviewLanguages(config),
+  ]);
+
+  return allowed ? { card, config, languages } : null;
+});
+
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  try {
+    const access = await resolveOwnerAccess(params.alias);
+    if (!access) {
+      return { title: 'Review not available', robots: { index: false, follow: false } };
+    }
+    return {
+      title: `Leave a review for ${vcardDisplayName(access.card)}`,
+      robots: { index: false, follow: false },
+    };
+  } catch {
+    return { title: 'Leave a review' };
   }
+}
+
+/** Public "unavailable" state — used for disabled Review Assistant. */
+function Unavailable() {
+  return (
+    <div className="vcard-root flex min-h-screen items-center justify-center px-6">
+      <div className="max-w-sm text-center">
+        <p className="text-sm font-medium text-[var(--v-text)]">Reviews aren’t available right now.</p>
+      </div>
+    </div>
+  );
+}
+
+export default async function ReviewPage({ params }: Params) {
+  const access = await resolveOwnerAccess(params.alias);
+  if (!access) return <Unavailable />;
+
+  const { card, config, languages } = access;
 
   const accent = /^#[0-9a-fA-F]{6}$/.test(card.themeConfig?.accentColor ?? '')
     ? card.themeConfig.accentColor
@@ -127,7 +152,6 @@ export default async function ReviewPage({ params }: Params) {
 
   const name = vcardDisplayName(card);
   const avatarUrl = card.profileImageUrl?.trim();
-  const languages = await resolveReviewLanguages(config);
 
   return (
     <div className="vcard-root min-h-screen" style={themeVars}>

@@ -36,6 +36,13 @@ export default async function ProfilePage({ params }: Params) {
   // that blow React's flight serializer when the whole vcard is forwarded to
   // client boundaries (StickyDock). toObject() yields a JSON-safe snapshot of
   // the exact same stored fields.
+  //
+  // SECURITY: this must stay a FAITHFUL snapshot. PublicCardPage is a server
+  // component that legitimately needs internal fields (_id for the product
+  // query, userId/assignedUserId for the entitlement gate, reviewAssistant
+  // and redirectUrl for kind dispatch). Do NOT map this through
+  // toPublicCardDto() — that mapper belongs only at genuine JSON API
+  // boundaries, where stripping those fields is the whole point.
   const card = (raw as { toObject?: () => ICard }).toObject?.() ?? (raw as unknown as ICard);
 
   // Kind dispatch, feature gate, catalog + settings and themed rendering all

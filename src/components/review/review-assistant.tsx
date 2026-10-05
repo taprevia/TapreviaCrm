@@ -121,11 +121,32 @@ const readyStatus = (count: number): string =>
 type GenerationMode = 'template' | 'ai';
 
 function track(alias: string, action: string): void {
+  // Best-effort telemetry — must never surface an error or block the UI.
+  //
+  // `navigator.sendBeacon` is the correct primitive here: it is explicitly
+  // designed to outlive the document and is not subject to the in-flight
+  // request budget, so the browser will actually deliver it while the visitor
+  // is copying a draft or navigating to Google. A plain `fetch` on a page that
+  // is already settled is routinely cancelled by the browser, and even when it
+  // isn't, the serverless instance can be frozen the moment the response is
+  // flushed — either way these events were being silently dropped in
+  // production while working fine in dev.
+  const payload = JSON.stringify({ alias, action });
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      const blob = new Blob([payload], { type: 'application/json' });
+      if (navigator.sendBeacon('/api/public/track', blob)) return;
+    }
+  } catch {
+    /* fall through to the fetch path */
+  }
+  // Fallback for browsers/contexts without sendBeacon. keepalive lets the
+  // request outlive the page without blocking unload.
   void fetch('/api/public/track', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     keepalive: true,
-    body: JSON.stringify({ alias, action }),
+    body: payload,
   }).catch(() => {});
 }
 

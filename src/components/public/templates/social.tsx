@@ -5,6 +5,7 @@ import { getBrandIcon } from '@/utils/getBrandIcon';
 import { safeExternalUrl } from '@/lib/safe-url';
 import { downloadVcfForCard } from '@/lib/vcf-download';
 import type { IProduct, IVcard } from '../types';
+import { SafeHtml } from '@/lib/sanitizer';
 
 /**
  * SocialTemplate — "Social" smart card (`social`).
@@ -102,12 +103,9 @@ export function SocialTemplate({
           </p>
         )}
         {bio && (
-          <p
-            className="text-xs sm:text-sm text-slate-300 max-w-xs mx-auto mt-2 px-4 leading-relaxed"
-            // descriptionHtml is sanitized server-side before render; matches
-            // the other templates' trusted rich-text bio handling.
-            dangerouslySetInnerHTML={{ __html: bio }}
-          />
+          <div className="text-xs sm:text-sm text-slate-300 max-w-xs mx-auto mt-2 px-4 leading-relaxed">
+            <SafeHtml html={bio} />
+          </div>
         )}
       </div>
 

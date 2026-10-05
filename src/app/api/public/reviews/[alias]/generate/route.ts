@@ -8,6 +8,15 @@ import { reviewPreferredLengthSchema } from '@/lib/validation/card';
 
 export const dynamic = 'force-dynamic';
 
+// This route blocks on a synchronous OpenAI chat-completion round-trip. Vercel's
+// default Node function timeout is far below the upstream client's own abort, so
+// without an explicit budget the platform hard-kills the invocation and returns
+// a bare 504/timeout with nothing in the function logs. Declare a budget that
+// comfortably exceeds the 20s client-side abort in src/lib/openai.ts, so a slow
+// OpenAI surfaces as a clean, logged 503 instead of an opaque platform kill.
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 type Params = { params: { alias: string } };
 
 const GENERATE_WINDOW_MS = 60_000;

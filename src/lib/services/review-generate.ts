@@ -133,7 +133,19 @@ export async function generateReviewSuggestion(
   let apiKey: string;
   try {
     apiKey = decryptSecret(openai.apiKeyEnc);
-  } catch {
+  } catch (error) {
+    // Never swallow this silently. A decrypt failure is almost always an
+    // APP_KEY / JWT_SECRET divergence (the tenant's key was encrypted under a
+    // different key than the one currently loaded), which is invisible at the
+    // HTTP layer because every decrypt error collapses into the same generic
+    // UNAVAILABLE message the visitor sees. Log enough to identify the tenant
+    // and the cause — never the payload or the plaintext key.
+    console.error(
+      `[review-generate] decryptSecret failed for tenant cardId=${String(card._id)} — ` +
+        'APP_KEY mismatch, rotated JWT_SECRET, or a tampered/truncated payload. ' +
+        'Run `npm run check:appkey` to audit. Cause:',
+      error instanceof Error ? error.message : error
+    );
     return {
       ok: false,
       code: 'UNAVAILABLE',

@@ -1,4 +1,37 @@
-import type { ICard } from '@/types';
+/**
+ * The exact surface `buildVcf` and the filename helpers read.
+ *
+ * Narrowing to an explicit interface (rather than `ICard`) does two things: it
+ * documents the builder's real data dependency, and it lets the anonymous
+ * `/api/public/cards/[alias]/vcf` route pass the public DTO without a cast —
+ * so the serialised contact can never start carrying internal fields like
+ * `userId`, physical serials or `basic.dateOfBirth`, even if this builder is
+ * later extended by accident.
+ */
+export interface VcfCardSource {
+  _id?: unknown;
+  name?: string;
+  cardUid?: string;
+  urlAlias?: string;
+  occupation?: string;
+  profileImageUrl?: string;
+  /** Tolerated as absent so a legacy card without the block still exports. */
+  basic?: {
+    firstName?: string;
+    lastName?: string;
+    jobTitle?: string;
+    company?: string;
+    phone?: string;
+    alternatePhone?: string;
+    email?: string;
+    alternateEmail?: string;
+  };
+  location?: {
+    address?: string;
+    mapsUrl?: string;
+  };
+  socialLinks?: Array<{ platform?: string; url?: string }>;
+}
 
 /**
  * Canonical vCard builder — the single source of truth for every .vcf payload
@@ -83,8 +116,14 @@ function revStamp(date: Date): string {
  * Build an RFC 2426 (vCard 3.0) payload for a card document.
  * `base` is used to absolutize relative media paths (PHOTO/URL/SOCIALPROFILE).
  */
-export function buildVcf(card: ICard, base: string, now: Date = new Date()): string {
-  const b = card.basic;
+export function buildVcf(
+  card: VcfCardSource,
+  base: string,
+  now: Date = new Date()
+): string {
+  const b = card.basic ?? {};
+  const location = card.location ?? {};
+  const socialLinks = card.socialLinks ?? [];
   const fullName =
     card.name ||
     joinNonEmpty([b.firstName, b.lastName]) ||
@@ -95,7 +134,7 @@ export function buildVcf(card: ICard, base: string, now: Date = new Date()): str
     'BEGIN:VCARD',
     'VERSION:3.0',
     'PRODID:-//Taprevia//CRM//vCard 3.0//EN',
-    `UID:${esc(card.cardUid || card.urlAlias || card._id)}`,
+    `UID:${esc(card.cardUid || card.urlAlias || String(card._id ?? ''))}`,
     `N;CHARSET=UTF-8:${esc(b.lastName || '')};${esc(b.firstName || '')};;;`,
     `FN;CHARSET=UTF-8:${esc(displayName)}`,
   ];
@@ -109,13 +148,13 @@ export function buildVcf(card: ICard, base: string, now: Date = new Date()): str
   if (b.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(b.email)}`);
   if (b.alternateEmail) lines.push(`EMAIL;TYPE=WORK:${esc(b.alternateEmail)}`);
 
-  if (card.location.address) {
+  if (location.address) {
     lines.push(
-      `ADR;TYPE=WORK;CHARSET=UTF-8:;;${esc(card.location.address)};;;;`,
+      `ADR;TYPE=WORK;CHARSET=UTF-8:;;${esc(location.address)};;;;`,
     );
   }
 
-  const website = card.socialLinks.find((l) => l.platform === 'website')?.url;
+  const website = socialLinks.find((l) => l.platform === 'website')?.url;
   if (website) lines.push(`URL:${esc(absoluteUrl(website, base))}`);
 
   const publicUrl = absoluteUrl(`/profile/${card.urlAlias}`, base);
@@ -125,15 +164,15 @@ export function buildVcf(card: ICard, base: string, now: Date = new Date()): str
     lines.push(`PHOTO;VALUE=URI:${esc(absoluteUrl(card.profileImageUrl, base))}`);
   }
 
-  for (const link of card.socialLinks) {
+  for (const link of socialLinks) {
     if (link.platform === 'website' || !link.url) continue;
     lines.push(
-      `X-SOCIALPROFILE;TYPE=${esc(link.platform)}:${esc(absoluteUrl(link.url, base))}`,
+      `X-SOCIALPROFILE;TYPE=${esc(link.platform ?? '')}:${esc(absoluteUrl(link.url, base))}`,
     );
   }
 
-  if (card.location.mapsUrl) {
-    lines.push(`X-MAPS-URL:${esc(card.location.mapsUrl)}`);
+  if (location.mapsUrl) {
+    lines.push(`X-MAPS-URL:${esc(location.mapsUrl)}`);
   }
 
   lines.push(`REV:${revStamp(now)}`);
@@ -161,15 +200,15 @@ function slugify(value: string): string {
  * Devanagari or Tamil display name), because a header containing raw
  * non-ASCII corrupts Content-Disposition on iOS.
  */
-export function vcfFilename(card: ICard): string {
+export function vcfFilename(card: Pick<VcfCardSource, 'urlAlias' | 'name'>): string {
   const alias = (card.urlAlias || '').trim();
-  return `${alias || slugify(card.name || '') || 'contact'}.vcf`;
+  return `${alias || slugify(card.name ?? '') || 'contact'}.vcf`;
 }
 
 /** RFC 5987 `filename*` companion, for headers carrying non-ASCII names. */
-export function vcfFilenameStar(card: ICard): string | null {
+export function vcfFilenameStar(card: Pick<VcfCardSource, 'urlAlias' | 'name'>): string | null {
   const alias = (card.urlAlias || '').trim();
   if (alias) return null;
-  const name = (card.name || '').trim();
+  const name = (card.name ?? '').trim();
   return /[^\x20-\x7e]/.test(name) ? `UTF-8''${encodeURIComponent(name)}.vcf` : null;
 }

@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/db';
 import Product from '@/models/Product';
 import { fail, ok } from '@/lib/api';
 import { getPublicCardByAlias, isPublicProfileCard } from '@/lib/services/card-access';
+import { toPublicCardDto } from '@/lib/dto/card.dto';
 
 type Params = { params: { alias: string } };
 
@@ -22,7 +23,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .lean();
 
     return ok({
-      card: card.toObject(),
+      card: toPublicCardDto(card),
       products,
     });
   } catch (error) {

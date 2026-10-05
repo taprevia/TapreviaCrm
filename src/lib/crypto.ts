@@ -6,7 +6,8 @@ import { requireJwtSecret } from './env';
  *
  * Key resolution:
  *  - APP_KEY (base64 of exactly 32 bytes, e.g. `openssl rand -base64 32`)
- *  - Dev fallback: sha256(JWT_SECRET) when APP_KEY is unset.
+ *  - Dev/test fallback ONLY: sha256(JWT_SECRET) when APP_KEY is unset.
+ *    In production an unset APP_KEY throws — see resolveKey().
  *
  * Payload format: `v1:<iv.base64>:<authTag.base64>:<ciphertext.base64>`
  * The version prefix allows future algorithm rotations without re-encrypting
@@ -35,6 +36,21 @@ function resolveKey(): Buffer {
     return cachedKey;
   }
 
+  // SECURITY: the dev fallback below is a silent, unrecoverable trap in
+  // production. A tenant secret encrypted while APP_KEY was unset is sealed
+  // with sha256(JWT_SECRET); once APP_KEY is later set (or JWT_SECRET is
+  // rotated) the payload becomes undecryptable — and because every caller
+  // treats a decrypt failure as a generic "unavailable", the breakage is
+  // invisible. Refuse to operate rather than fall back.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'APP_KEY is required in production. Tenant secrets (OpenAI API keys) are ' +
+        'AES-256-GCM encrypted with it and cannot be read with a JWT_SECRET-derived ' +
+        'key. Generate one with `openssl rand -base64 32`, set it, then re-save each ' +
+        "tenant's API key in Settings. Run `npm run check:appkey` to audit existing rows."
+    );
+  }
+
   // Dev fallback — deterministic derivation from JWT_SECRET so secrets survive
   // restarts without extra env setup. Never rely on this in production.
   const jwtSecret = requireJwtSecret();
@@ -45,8 +61,12 @@ function resolveKey(): Buffer {
 /** Encrypt a plaintext secret. Returns the versioned payload string. */
 export function encryptSecret(plain: string): string {
   if (!plain) throw new Error('encryptSecret: plaintext must be non-empty');
+  // Resolve the key OUTSIDE the crypto try/catch so a configuration problem
+  // (e.g. APP_KEY unset in production) surfaces with its own actionable
+  // message instead of being relabelled as a crypto failure.
+  const key = resolveKey();
   const iv = crypto.randomBytes(IV_BYTES);
-  const cipher = crypto.createCipheriv(ALGORITHM, resolveKey(), iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `${VERSION}:${iv.toString('base64')}:${tag.toString('base64')}:${ciphertext.toString('base64')}`;
@@ -62,8 +82,12 @@ export function decryptSecret(payload: string): string {
   if (version !== VERSION) {
     throw new Error(`decryptSecret: unsupported payload version "${version}"`);
   }
+  // Key resolution stays outside the try: a key-configuration failure is a
+  // deployment problem with its own remedy, while everything below is genuine
+  // AEAD failure (wrong key for THIS payload, or tampered ciphertext).
+  const key = resolveKey();
   try {
-    const decipher = crypto.createDecipheriv(ALGORITHM, resolveKey(), Buffer.from(ivB64, 'base64'));
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, Buffer.from(ivB64, 'base64'));
     decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]).toString('utf8');
   } catch {

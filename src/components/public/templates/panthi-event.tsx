@@ -26,6 +26,7 @@ import { brandLabelFromUrl } from '@/utils/get-link-icon';
 import { getBrandIcon } from '@/utils/getBrandIcon';
 import type { IVcard } from '../types';
 import type { IProduct } from '../types';
+import { SafeHtml } from '@/lib/sanitizer';
 
 /* ─────────────────────────────────────────────────────────────────────
  * Types
@@ -1028,10 +1029,9 @@ export function PanthiEventTemplate({
                 /* SECURITY: descriptionHtml must be sanitized server-side before render.
                    Rendered as trusted rich text to match the other templates and the
                    builder's rich-text editor. */
-                <div
-                  className="pep2-bio"
-                  dangerouslySetInnerHTML={{ __html: data.bio }}
-                />
+                <div className="pep2-bio">
+                  <SafeHtml html={data.bio} />
+                </div>
               ) : null}
             </div>
           </section>

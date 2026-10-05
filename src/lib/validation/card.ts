@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sanitizeHtml } from '@/lib/sanitizer';
 import {
   aliasSchema,
   optionalEmailField,
@@ -160,7 +161,11 @@ export const updateCardSchema = z
     cardLabel: z.string().trim().max(80).optional(),
     urlAlias: aliasSchema.optional(),
     occupation: z.string().max(120).optional(),
-    descriptionHtml: z.string().max(20000).optional(),
+    descriptionHtml: z
+      .string()
+      .max(20000)
+      .optional()
+      .transform((v) => (v === undefined || v === null ? undefined : sanitizeHtml(String(v)))),
     templateKey: templateKeySchema.optional(),
     kind: cardKindSchema.optional(),
     redirectUrl: externalUrlOrEmptySchema.optional(),
