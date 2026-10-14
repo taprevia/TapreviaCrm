@@ -77,6 +77,31 @@ export function isMarkupFreeText(text: string): boolean {
   return !/[<>&]/.test(text);
 }
 
+/** `{businessName}`, `{employee}`, … opening a template text. */
+const LEADING_PLACEHOLDER = new RegExp(
+  `^\\{(${Array.from(ALLOWED_PLACEHOLDERS).join('|')})\\}`
+);
+
+/**
+ * True when text is free of raw, stringified JSON structure.
+ *
+ * A JSON array or object accidentally saved into a template — e.g.
+ * `[{"key":"…","text":"…"}]` or `{"key":"…"}` — contains no `<>&` and no
+ * `{token}`, so `isMarkupFreeText` and the placeholder check both let it
+ * through. This detects that shape directly instead.
+ *
+ * A leading `{` is only tolerated when it opens an allowed placeholder, so
+ * legitimate `{businessName} …` wording is preserved while JSON braces
+ * (`{"`, `[{`) and JSON field syntax (`"key":`) are rejected. Interior square
+ * brackets are intentionally left alone to avoid false positives on plain
+ * wording.
+ */
+export function isRawJsonFreeText(text: string): boolean {
+  const trimmed = text.trim();
+  if (/^[\[{]/.test(trimmed) && !LEADING_PLACEHOLDER.test(trimmed)) return false;
+  return !/"[A-Za-z_][\w-]*"\s*:/.test(text);
+}
+
 export interface ReviewTemplateInput {
   /** Hydrated card — only the fields the engine needs. */
   card: {

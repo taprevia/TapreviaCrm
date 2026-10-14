@@ -3,6 +3,7 @@ import {
   ALLOWED_PLACEHOLDERS,
   extractPlaceholders,
   isMarkupFreeText,
+  isRawJsonFreeText,
 } from '@/lib/services/review-templates';
 import { reviewPreferredLengthSchema, reviewWritingStyleSchema } from '@/lib/validation/card';
 
@@ -46,7 +47,11 @@ export const reviewTemplateUpsertSchema = z
       .trim()
       .min(1, 'Template text is required')
       .max(1000, 'Template text is too long')
-      .refine(isMarkupFreeText, 'Template text must not contain markup (< > &)'),
+      .refine(isMarkupFreeText, 'Template text must not contain markup (< > &)')
+      .refine(
+        isRawJsonFreeText,
+        'Template text must be plain wording, not raw JSON or bracket structure'
+      ),
     length: reviewPreferredLengthSchema,
     style: reviewWritingStyleSchema.optional(),
     compatibleKeywords: z.array(reviewTagSchema).max(12).optional(),

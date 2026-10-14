@@ -27,6 +27,7 @@
     "test:identity": "tsx scripts/test-customer-identity.ts",
     "seed:review-library": "tsx scripts/seed-review-library.ts",
     "test:review": "tsx scripts/test-review-templates.ts",
+    "test:review-import": "tsx scripts/test-review-import-validation.ts",
     "backfill:identity": "tsx scripts/backfill-customer-identities.ts",
     "e2e:entitlement": "bash scripts/run-e2e-entitlement.sh",
     "e2e:entitlement:direct": "npx tsx scripts/e2e-dashboard-entitlement.ts"
