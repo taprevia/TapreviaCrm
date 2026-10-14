@@ -10,6 +10,7 @@ import Appointment from '@/models/Appointment';
 import ProductEnquiry from '@/models/ProductEnquiry';
 import NewsletterSubscriber from '@/models/NewsletterSubscriber';
 import Media from '@/models/Media';
+import ReviewCategory from '@/models/ReviewCategory';
 import { getStorage } from '@/lib/storage';
 import { updateCardSchema } from '@/lib/validation/card';
 import { fail, ok } from '@/lib/api';
@@ -220,6 +221,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (data.reviewAssistant) {
       if (!(await canUseFeature(ownerId, 'review'))) {
         return fail(403, 'FORBIDDEN', 'The AI Review Assistant is not included in your current products');
+      }
+    }
+
+    // Controlled category selection: when a category is set it must reference an
+    // ACTIVE ReviewCategory by its key. An empty string clears the selection and
+    // is allowed through untouched.
+    if (data.reviewAssistant?.category) {
+      const category = await ReviewCategory.findOne({
+        key: data.reviewAssistant.category.trim().toLowerCase(),
+        active: true,
+      })
+        .select('key')
+        .lean();
+      if (!category) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid category selected.' },
+          { status: 400 }
+        );
       }
     }
 

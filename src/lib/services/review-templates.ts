@@ -106,6 +106,12 @@ export interface ReviewTemplateInput {
    * never acts as authorization.
    */
   excludeTemplateIds?: string[];
+  /**
+   * Dynamic substitution seed for employee/service/keyword rotation. When
+   * omitted, a runtime-random offset is used so consecutive serves vary their
+   * concrete wording; tests may pin it for deterministic output.
+   */
+  seedOffset?: number;
   /** Test seam — defaults to now. */
   now?: Date;
 }
@@ -133,7 +139,20 @@ function cleanTags(tags: string[] | null | undefined): string[] {
   return Array.from(new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0)));
 }
 
-/** Rotating fallback pick: employees/services cycle, keyword picks first match. */
+/**
+ * Rotating, occurrence-aware placeholder substitution (Option C).
+ *
+ * Employee/service/keyword picks rotate by `(candidateIndex + seedOffset)`
+ * across the business's own arrays, so consecutive single-suggestion serves
+ * (MAX_SUGGESTIONS = 1) naturally vary their concrete wording. Multiple
+ * occurrences of the SAME placeholder within one template advance one array
+ * slot each (`+ occurrence`), yielding distinct items whenever the array is at
+ * least as long as the number of occurrences.
+ *
+ * Safety: a placeholder is only replaced when its array has values; with no
+ * value the original `{token}` is left intact, so a missing token is never
+ * fabricated. Unknown placeholders are likewise passed through unchanged.
+ */
 function substitute(
   text: string,
   values: {
@@ -142,20 +161,37 @@ function substitute(
     services: string[];
     keywords: string[];
   },
-  index: number
+  candidateIndex: number,
+  seedOffset = 0
 ): string {
+  const base = candidateIndex + seedOffset;
+  // Per-type occurrence counters so repeated tokens of the same kind dedupe.
+  const occurrence: Record<'employee' | 'service' | 'keyword', number> = {
+    employee: 0,
+    service: 0,
+    keyword: 0,
+  };
+
+  const rotate = (
+    list: string[],
+    kind: 'employee' | 'service' | 'keyword',
+    full: string
+  ): string => {
+    if (list.length === 0) return full;
+    const pick = list[(base + occurrence[kind]++) % list.length];
+    return pick ?? full;
+  };
+
   return text.replace(/\{(\w+)\}/g, (full, name: string) => {
-    const n = values.employees.length > 0 ? index % values.employees.length : 0;
-    const s = values.services.length > 0 ? index % values.services.length : 0;
     switch (name) {
       case 'businessName':
         return values.businessName;
       case 'employee':
-        return values.employees[n] ?? full;
+        return rotate(values.employees, 'employee', full);
       case 'service':
-        return values.services[s] ?? full;
+        return rotate(values.services, 'service', full);
       case 'keyword':
-        return values.keywords[0] ?? full;
+        return rotate(values.keywords, 'keyword', full);
       default:
         return full;
     }
@@ -411,10 +447,17 @@ export async function getReviewTemplateSuggestions(
     }
   }
 
+  // Dynamic runtime seed (Option C): varies which employee/service/keyword item
+  // each occurrence draws, so consecutive single-suggestion serves
+  // (MAX_SUGGESTIONS = 1) naturally differ in wording even when the same
+  // template wins the slot. Ranking/selection stays deterministic. Callers may
+  // pin `seedOffset` for reproducible output.
+  const seedOffset = input.seedOffset ?? Math.floor(Math.random() * 100);
+
   const suggestions: ReviewTemplateSuggestion[] = selected.map((t, index) => ({
     templateId: String(t._id),
     scenario: t.scenario,
-    text: substitute(t.text, values, index),
+    text: substitute(t.text, values, index, seedOffset),
   }));
 
   // Best-effort usage tracking — never blocks or fails the response.

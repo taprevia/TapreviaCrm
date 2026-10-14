@@ -7,9 +7,9 @@
  * /review/[alias] page so the business can print/scan access directly.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
-import { ExternalLink, Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
 import { Button, Input, Select, SegmentedControl, Switch } from '@/components/ui';
 import { generateQRDataURL } from '@/utils/qr';
 import { useBuilder } from '../context';
@@ -116,6 +116,170 @@ function TagInput({ id, label, hint, tags, placeholder, onChange }: TagInputProp
   );
 }
 
+/**
+ * Controlled multi-select popover for the language set. Options come from the
+ * server (distinct active-template languages); the operator may also add a
+ * custom language so the selector is never a dead end before templates exist.
+ * Capped at MAX_TAGS to mirror the API's zod `max(12)`.
+ */
+interface LanguageMultiSelectProps {
+  id: string;
+  label: string;
+  hint?: string;
+  options: string[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}
+
+function LanguageMultiSelect({
+  id,
+  label,
+  hint,
+  options,
+  selected,
+  onChange,
+}: LanguageMultiSelectProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const toggle = (value: string) => {
+    if (selected.includes(value)) {
+      onChange(selected.filter((v) => v !== value));
+    } else if (selected.length < MAX_TAGS) {
+      onChange([...selected, value]);
+    }
+  };
+
+  const trimmedQuery = query.trim();
+  const filtered = trimmedQuery
+    ? options.filter((option) => option.toLowerCase().includes(trimmedQuery.toLowerCase()))
+    : options;
+  const canAddCustom =
+    trimmedQuery.length > 0 &&
+    !options.some((option) => option.toLowerCase() === trimmedQuery.toLowerCase()) &&
+    !selected.includes(trimmedQuery) &&
+    selected.length < MAX_TAGS;
+
+  return (
+    <div className="min-w-0" ref={rootRef}>
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        <label htmlFor={id} className="block text-sm font-medium text-ink-mute">
+          {label}
+        </label>
+        {hint && <span className="text-xs text-ink-faint">{hint}</span>}
+      </div>
+
+      {selected.length > 0 && (
+        <ul className="mb-2 flex flex-wrap items-center gap-1.5" role="list" aria-label={`${label} chips`}>
+          {selected.map((value) => (
+            <li
+              key={value}
+              className="inline-flex items-center gap-1 rounded-full bg-line px-2.5 py-1 text-xs font-medium text-ink"
+            >
+              {value}
+              <button
+                type="button"
+                aria-label={`Remove ${value}`}
+                onClick={() => toggle(value)}
+                className="rounded-full text-ink-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="relative">
+        <button
+          type="button"
+          id={id}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((prev) => !prev)}
+          className={cn(
+            'flex h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/25',
+            darkInput
+          )}
+        >
+          <span className={cn('truncate', selected.length === 0 && 'text-ink-faint')}>
+            {selected.length > 0 ? `${selected.length} selected` : 'Select languages…'}
+          </span>
+          <ChevronDown
+            className={cn('h-4 w-4 shrink-0 text-ink-faint transition-transform', open && 'rotate-180')}
+            aria-hidden="true"
+          />
+        </button>
+
+        {open && (
+          <div className="absolute z-20 mt-1 w-full rounded-lg border border-line bg-surface p-2 shadow-lg">
+            <Input
+              className={darkInput}
+              placeholder="Search or type a language…"
+              value={query}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+            />
+            <ul role="listbox" aria-multiselectable="true" className="mt-2 max-h-52 space-y-0.5 overflow-y-auto">
+              {filtered.map((option) => {
+                const active = selected.includes(option);
+                return (
+                  <li key={option}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => toggle(option)}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                        active ? 'bg-accent-600/10 text-accent-400' : 'text-ink hover:bg-bg-raised'
+                      )}
+                    >
+                      <span className="truncate">{option}</span>
+                      {active && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                    </button>
+                  </li>
+                );
+              })}
+              {canAddCustom && (
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => {
+                      onChange([...selected, trimmedQuery]);
+                      setQuery('');
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-ink hover:bg-bg-raised"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Add “{trimmedQuery}”
+                  </button>
+                </li>
+              )}
+              {filtered.length === 0 && !canAddCustom && (
+                <li className="px-2.5 py-2 text-xs text-ink-faint">No languages found.</li>
+              )}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ReviewAssistantTab() {
   const { draft, setField } = useBuilder();
   const config: IReviewAssistantConfig = draft.reviewAssistant ?? {
@@ -152,6 +316,23 @@ export function ReviewAssistantTab() {
         }
       } catch (error) {
         console.error('Failed to fetch review categories:', error);
+      }
+    })();
+  }, []);
+
+  /* Available languages — derived from active templates, served to the
+     controlled multi-select. Falls back to the API's ['English'] default. */
+  const [languageOptions, setLanguageOptions] = useState<string[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/public/review-languages');
+        if (res.ok) {
+          const data = await res.json();
+          setLanguageOptions(Array.isArray(data?.languages) ? data.languages : []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch review languages:', error);
       }
     })();
   }, []);
@@ -270,12 +451,12 @@ export function ReviewAssistantTab() {
           />
         </div>
 
-        <TagInput
+        <LanguageMultiSelect
           id="ra-languages"
           label="Languages"
           hint="Customers can choose one"
-          tags={languages}
-          placeholder="e.g. English, Spanish…"
+          options={languageOptions}
+          selected={languages}
           onChange={(value) => setField('reviewAssistant.languages', value)}
         />
 

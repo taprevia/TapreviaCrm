@@ -107,9 +107,8 @@ const sectionsPartialSchema = z.object({
   newsletterPopup: z.boolean().optional(),
 });
 
-const tagListSchema = z
-  .array(z.string().trim().min(1, 'Tag cannot be empty').max(60))
-  .max(12);
+/** Review Assistant tag lists — hard cap 12 entries, each ≤50 chars. */
+const tagListSchema = z.array(z.string().trim().max(50)).max(12);
 
 /** External http(s) destination or empty string — external redirects only, never media paths. */
 export const externalUrlOrEmptySchema = z
