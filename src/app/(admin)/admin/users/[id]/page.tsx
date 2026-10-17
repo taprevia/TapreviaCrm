@@ -18,6 +18,7 @@ import { getFixedStandeeProfiles } from '@/config/products';
 import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { isCardCompatible } from '@/lib/services/product-experience';
 import { Modal } from '@/components/ui/modal';
+import { formatPriceMinor } from '@/lib/format';
 
 const PRODUCT_KIND_LABEL: Record<string, string> = {
   profile: 'Business Profile',
@@ -415,10 +416,6 @@ export default function AdminUserDetailPage() {
       setAssignError('Enter the NFC Card UID to bind');
       return;
     }
-    if (selectedCatalogItem.category === 'standee' && assignPlatforms.length === 0) {
-      setAssignError('Select at least one platform for the standee QR codes');
-      return;
-    }
 
     setAssigning(true);
     try {
@@ -429,7 +426,9 @@ export default function AdminUserDetailPage() {
           catalogProductId: selectedCatalogItem._id,
           quantity: Math.max(1, Number.parseInt(assignForm.quantity, 10) || 1),
           ...(selectedCatalogItem.category === 'card' && !assignWithoutCard ? { cardUid: assignForm.cardUid } : {}),
-          ...(selectedCatalogItem.category === 'standee' ? { platforms: assignPlatforms } : {}),
+          ...(selectedCatalogItem.category === 'standee' && assignPlatforms.length > 0
+            ? { platforms: assignPlatforms }
+            : {}),
           notes: assignForm.notes,
         }),
       });
@@ -560,7 +559,7 @@ export default function AdminUserDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-ink tracking-tight">{user.name}</h1>
+            <h1 className="text-2xl font-bold text-ink tracking-tight">{user.name || 'Unnamed customer'}</h1>
             <p className="text-ink-mute text-sm mt-0.5">Customer detail view</p>
           </div>
         </div>
@@ -590,7 +589,7 @@ export default function AdminUserDetailPage() {
               <img src={profile.personalInfo.avatarUrl} alt={user.name} className="h-16 w-16 rounded-full object-cover" />
             ) : (
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent-600/15 text-xl font-bold text-accent-400">
-                {user.name.charAt(0).toUpperCase()}
+                {(user.name || '?').charAt(0).toUpperCase()}
               </div>
             )}
             <div>
@@ -674,7 +673,7 @@ export default function AdminUserDetailPage() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-ink-mute">Slug</span>
-                          <span className="font-mono text-accent-400">/c/{c.slug}</span>
+                          <span className="font-mono text-accent-400">/c/{c.slug || '—'}</span>
                         </div>
                         {c.routeSlug && (
                           <div className="flex justify-between">
@@ -684,7 +683,7 @@ export default function AdminUserDetailPage() {
                         )}
                         <div className="flex justify-between">
                           <span className="text-ink-mute">UID</span>
-                          <span className="font-mono text-ink">{c.cardUid}</span>
+                          <span className="font-mono text-ink">{c.cardUid || '—'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-ink-mute">Template</span>
@@ -901,7 +900,7 @@ export default function AdminUserDetailPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-ink truncate">{(record.productTitle ?? item?.name) || 'Unknown product'}</p>
                         <p className="text-xs text-ink-mute">
-                          {record.quantity} × ₹{(record.unitPriceMinor / 100).toLocaleString('en-IN')}
+                          {record.quantity} × {formatPriceMinor(record.unitPriceMinor, item?.currency)}
                           {record.cardId && ' · card bound'}
                           {record.standeeId && ' · QR codes generated'}
                           {' · '}{new Date(record.createdAt).toLocaleDateString()}
@@ -1143,11 +1142,18 @@ export default function AdminUserDetailPage() {
                 className="w-full rounded-lg border border-line bg-field px-3 py-2.5 text-sm text-ink hover:border-line-strong focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/25 transition-all duration-200"
               >
                 <option value="">Select a product</option>
-                {catalogItems.map((item) => (
-                  <option key={item._id} value={item._id}>
-                    {item.name} — ₹{(item.priceMinor / 100).toLocaleString('en-IN')} ({catalogTypeLabel(item)})
-                  </option>
-                ))}
+                {catalogItems.map((item) => {
+                  const name = item.name || 'Unnamed product';
+                  const typeLabel = catalogTypeLabel(item);
+                  const optionLabel = Number.isFinite(item.priceMinor)
+                    ? `${name} — ${formatPriceMinor(item.priceMinor, item.currency)} (${typeLabel})`
+                    : `${name} (${typeLabel})`;
+                  return (
+                    <option key={item._id} value={item._id}>
+                      {optionLabel}
+                    </option>
+                  );
+                })}
               </select>
             ) : (
               <div className="flex items-center gap-3 rounded-lg border border-line-subtle bg-field p-3.5 text-sm text-ink-mute">
@@ -1166,12 +1172,12 @@ export default function AdminUserDetailPage() {
                   onChange={(e) => setAssignWithoutCard(e.target.checked)}
                   className="h-4 w-4 rounded border-line-strong text-accent-600 focus:ring-accent-500"
                 />
-                Assign without a physical card (link later)
+                Assign without a physical card (UID optional)
               </label>
               {!assignWithoutCard ? (
                 <div className="mt-2 space-y-1">
                   <label htmlFor="assign-card" className="block text-sm font-medium text-gray-700">
-                    Bind NFC Card (UID)
+                    Bind NFC Card (UID) — optional
                   </label>
                   <Input
                     id="assign-card"
@@ -1181,14 +1187,16 @@ export default function AdminUserDetailPage() {
                     className="font-mono bg-field border-line text-ink placeholder:text-ink-faint hover:border-line-strong focus:border-accent-500 focus:ring-accent-500/25"
                   />
                   <p className="text-xs text-ink-mute">
-                    The physical card is bound directly by its UID — no pre-registration needed. Its experience
-                    will be set to &quot;{catalogTypeLabel(selectedCatalogItem)}&quot; automatically.
+                    Only needed if the physical card is available now. When provided, the card is bound directly by
+                    its UID and its experience is set to &quot;{catalogTypeLabel(selectedCatalogItem)}&quot;
+                    automatically. Not sure of the UID? Leave it blank and tick the option above.
                   </p>
                 </div>
               ) : (
                 <p className="mt-1 text-xs text-ink-mute">
-                  The product is created without a physical card. The customer can configure it now; a card can be
-                  linked later.
+                  No NFC Card UID required. The product is created unbound so the customer can configure it
+                  immediately; its permanent digital route is generated automatically when a physical card is later
+                  bound.
                 </p>
               )}
             </div>
@@ -1243,6 +1251,9 @@ export default function AdminUserDetailPage() {
                       </label>
                     ))}
                   </div>
+                  <p className="mt-2 text-xs text-ink-faint">
+                    Optional — when no platform is selected, all platforms are enabled.
+                  </p>
                 </>
               )}
             </div>

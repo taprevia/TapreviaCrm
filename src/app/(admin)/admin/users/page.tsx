@@ -11,6 +11,7 @@ import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard,
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { getFixedStandeeProfiles } from '@/config/products';
 import { isPasswordCompliant, PASSWORD_POLICY_MESSAGE } from '@/lib/auth/password-policy';
+import { formatPriceMinor } from '@/lib/format';
 
 interface User {
   _id: string;
@@ -169,30 +170,43 @@ export default function AdminUsersPage() {
       setFormError(PASSWORD_POLICY_MESSAGE);
       return;
     }
-    for (const id of selectedProductIds) {
-      const item = catalogItems.find((c) => c._id === id);
-      if (!item) continue;
-      if (item.category === 'card' && !skipCardUids[id] && !(productCardUids[id] ?? '').trim()) {
+
+    const selectedItems = selectedProductIds
+      .map((id) => catalogItems.find((c) => c._id === id))
+      .filter((item): item is CatalogProductLite => Boolean(item));
+
+    // A card can only be created with its physical UID when it is bound now;
+    // products flagged "without a physical card" skip this and are added after
+    // the account exists.
+    for (const item of selectedItems) {
+      if (item.category === 'card' && !skipCardUids[item._id] && !(productCardUids[item._id] ?? '').trim()) {
         setFormError(`Enter the NFC Card UID for ${item.name}`);
-        return;
-      }
-      if (item.category === 'standee' && (productPlatforms[id] ?? []).length === 0) {
-        setFormError(`Select at least one platform for ${item.name}`);
         return;
       }
     }
 
-    const products = selectedProductIds
-      .map((id) => {
-        const item = catalogItems.find((c) => c._id === id);
-        if (!item) return null;
-        return {
-          catalogProductId: id,
-          ...(item.category === 'card' && !skipCardUids[id] ? { cardUid: productCardUids[id].trim() } : {}),
-          ...(item.category === 'standee' ? { platforms: productPlatforms[id] ?? [] } : {}),
-        };
-      })
-      .filter(Boolean);
+    // Split the selection: cards flagged "without a physical card" are deferred
+    // to a follow-up assign call (the create API requires a UID for cards);
+    // everything else (bound cards, standees, other) is created together.
+    const isDeferredCard = (item: CatalogProductLite) =>
+      item.category === 'card' && skipCardUids[item._id] === true;
+    const deferred = selectedItems.filter(isDeferredCard);
+    const bindNow = selectedItems.filter((item) => !isDeferredCard(item));
+
+    if (bindNow.length === 0 && deferred.length > 0) {
+      setFormError(
+        'The customer must be created with at least one bindable product. A card product assigned without a physical card can be added from the customer page after the account is created.'
+      );
+      return;
+    }
+
+    const products = bindNow.map((item) => ({
+      catalogProductId: item._id,
+      ...(item.category === 'card' ? { cardUid: (productCardUids[item._id] ?? '').trim() } : {}),
+      ...(item.category === 'standee' && (productPlatforms[item._id] ?? []).length > 0
+        ? { platforms: productPlatforms[item._id] }
+        : {}),
+    }));
 
     setCreating(true);
     try {
@@ -217,8 +231,38 @@ export default function AdminUsersPage() {
         return;
       }
 
+      // Customer exists now — attach every deferred card as an uninstantiated
+      // product (no physical UID), which the assign endpoint supports.
+      const newUserId: string | undefined = data?.user?._id;
+      const failedDeferred: string[] = [];
+      for (const item of deferred) {
+        if (!newUserId) {
+          failedDeferred.push(item.name);
+          continue;
+        }
+        try {
+          const deferredRes = await fetch(`/api/admin/users/${newUserId}/products`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ catalogProductId: item._id, quantity: 1 }),
+          });
+          if (!deferredRes.ok) failedDeferred.push(item.name);
+        } catch (error) {
+          console.error('Deferred product assignment failed:', error);
+          failedDeferred.push(item.name);
+        }
+      }
+
       setShowCreateModal(false);
       fetchUsers();
+
+      if (failedDeferred.length > 0) {
+        alert(
+          `Customer created, but these card products could not be added without a physical card: ${failedDeferred.join(
+            ', '
+          )}. Add them from the customer's page.`
+        );
+      }
     } catch (error) {
       setFormError('An error occurred');
       console.error('Create user failed:', error);
@@ -442,11 +486,11 @@ export default function AdminUsersPage() {
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-600/15 text-sm font-semibold text-accent-400 ring-1 ring-accent-500/25">
-                          {user.name.charAt(0).toUpperCase()}
+                          {(user.name || '?').charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-medium text-ink">{user.name}</p>
-                          <p className="text-sm text-ink-mute">{user.email}</p>
+                          <p className="font-medium text-ink">{user.name || 'Unnamed customer'}</p>
+                          <p className="text-sm text-ink-mute">{user.email || '—'}</p>
                           {user.customerId && (
                             <p className="font-mono text-[11px] text-ink-faint pt-0.5">
                               {user.customerId}
@@ -465,7 +509,7 @@ export default function AdminUsersPage() {
                           <div className="flex flex-col items-start gap-1">
                             {userCards.map((c) => (
                               <span key={c._id || c.slug} className="font-mono text-sm text-accent-400 bg-accent-600/15 px-2 py-0.5 rounded">
-                                /c/{c.slug}
+                                /c/{c.slug || '—'}
                               </span>
                             ))}
                           </div>
@@ -630,9 +674,9 @@ export default function AdminUsersPage() {
                           className="h-4 w-4 rounded border-line-strong text-accent-600 focus:ring-accent-500"
                         />
                         <ProductIcon className={`h-4 w-4 ${checked ? 'text-accent-400' : 'text-ink-faint'}`} />
-                        <span className="flex-1">{product.name}</span>
+                        <span className="flex-1">{product.name || 'Unnamed product'}</span>
                         <span className="text-xs text-ink-faint tabular-nums">
-                          ₹{(product.priceMinor / 100).toLocaleString('en-IN')}
+                          {formatPriceMinor(product.priceMinor, product.currency)}
                         </span>
                       </label>
 
@@ -651,8 +695,9 @@ export default function AdminUsersPage() {
                           </label>
                           {skipCardUids[product._id] ? (
                             <p className="text-xs text-ink-faint">
-                              The product is created without a physical card. The customer can configure it now; a
-                              card can be linked later.
+                              No NFC Card UID needed. This card product is added right after the customer is created
+                              as an unbound product — the customer can configure it now and its permanent digital
+                              route is generated automatically when a physical card is later bound.
                             </p>
                           ) : (
                             <>
@@ -709,6 +754,9 @@ export default function AdminUsersPage() {
           </label>
         ))}
       </div>
+      <p className="mt-2 text-xs text-ink-faint">
+        Optional — when no platform is selected, all platforms are enabled.
+      </p>
     </div>
   );
 })()}
