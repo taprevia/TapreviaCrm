@@ -25,7 +25,6 @@ import {
   ensureUserBizSlug,
   resolveBusinessNameSource,
 } from '@/lib/services/human-url';
-import { generateSlug } from '@/lib/utils';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -57,6 +57,7 @@ async function request(path: string, cookie?: string, init: RequestInit = {}) {
   const text = await res.text().catch(() => '');
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* not JSON */ }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- HTTP test harness parses arbitrary JSON
   return { status: res.status, json: json as any, setCookie: res.headers.get('set-cookie') ?? '', text };
 }
 
@@ -122,7 +123,6 @@ async function main() {
     );
 
     // ── Ownership: PATCHing one card never touches the other or the product ─
-    const beforeA = (await Card.findById(cardA).lean()) as unknown as CardSnap;
     const beforeB = (await Card.findById(cardB).lean()) as unknown as CardSnap;
     const beforeProd = (await CatalogProduct.findById(catalogProduct._id).lean()) as unknown as CardSnap;
 

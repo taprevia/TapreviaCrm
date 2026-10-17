@@ -11,7 +11,9 @@ const nextConfig = {
     // "https://cdn.example.com" silently produced a pattern that could never
     // match (and images then failed validation). Normalise it away, and add
     // port + wildcard variants for convenience.
-    remotePatterns: (process.env.IMAGE_HOSTS ?? '')
+    // res.cloudinary.com is the CDN used by the /contacts profile page for its
+    // optimized hero + avatar images.
+    remotePatterns: `${process.env.IMAGE_HOSTS ?? ''},res.cloudinary.com`
       .split(',')
       .map((entry) => entry.trim())
       .filter(Boolean)

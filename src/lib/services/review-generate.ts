@@ -87,7 +87,7 @@ export async function generateReviewSuggestion(
 
   const config = card.reviewAssistant;
 
-  const settings = await TenantSettings.findOne({ userId: card.userId }).lean<{
+  const settings = await TenantSettings.findOne({ userId: ownerId }).lean<{
     openai?: { enabled?: boolean; apiKeyEnc?: string; model?: string; dailyLimit?: number };
   } | null>();
   const openai = settings?.openai;
@@ -115,8 +115,8 @@ export async function generateReviewSuggestion(
   const daily = openai.dailyLimit ?? DEFAULT_AI_GENERATION_DAILY_LIMIT;
   if (daily > 0) {
     const reserved = await TenantSettings.findOneAndUpdate(
-      { userId: card.userId },
-      { $inc: { [`openai.usage.${today}`]: 1 }, $setOnInsert: { userId: card.userId } },
+      { userId: ownerId },
+      { $inc: { [`openai.usage.${today}`]: 1 }, $setOnInsert: { userId: ownerId } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     const used = Number(reserved?.openai.usage?.get?.(today) ?? 0);

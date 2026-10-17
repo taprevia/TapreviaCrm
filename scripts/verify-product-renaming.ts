@@ -56,6 +56,7 @@ async function request(path: string, cookie?: string, init: RequestInit = {}) {
   const text = await res.text().catch(() => '');
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* not JSON */ }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- HTTP test harness parses arbitrary JSON
   return { status: res.status, json: json as any, setCookie: res.headers.get('set-cookie') ?? '', text };
 }
 

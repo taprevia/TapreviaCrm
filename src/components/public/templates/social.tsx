@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { FaChevronRight, FaEnvelope, FaPhone, FaUserPlus } from 'react-icons/fa6';
 import { getBrandIcon } from '@/utils/getBrandIcon';
 import { safeExternalUrl } from '@/lib/safe-url';
@@ -78,17 +79,22 @@ export function SocialTemplate({
       <div className="h-36 sm:h-44 w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 relative overflow-hidden">
         {coverImage && (
           // Cover image, when set — SECURITY: coverValue is sanitized to
-          // http(s) remote/S3 sources by the card save pipeline.
-          <img src={coverImage} alt="Cover" className="w-full h-full object-cover" />
+          // http(s) remote/S3 sources by the card save pipeline. Rendered
+          // unoptimized so any sanitized remote host loads without needing a
+          // next.config remotePatterns entry.
+          <Image src={coverImage} alt="Cover" fill sizes="100vw" unoptimized className="object-cover" />
         )}
       </div>
 
       {/* Profile Header */}
       <div className="relative z-10 text-center">
         {avatarUrl ? (
-          <img
+          <Image
             src={avatarUrl}
             alt={name}
+            width={112}
+            height={112}
+            unoptimized
             className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-slate-900 -mt-12 mx-auto shadow-xl object-cover bg-slate-800"
           />
         ) : (

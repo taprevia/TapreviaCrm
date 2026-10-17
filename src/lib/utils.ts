@@ -13,13 +13,33 @@ export function generateSlug(name: string): string {
     .slice(0, 40);
 }
 
-export function generateCardUid(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+/**
+ * Cryptographically secure random string over a fixed charset.
+ *
+ * Uses Web Crypto (`crypto.getRandomValues`) so it behaves identically in the
+ * browser and on the Node/server runtime (Next 14 requires Node >= 18). Bytes
+ * at or above the largest whole multiple of the charset size are rejected and
+ * redrawn, which removes modulo bias. Output length and charset are identical
+ * to the previous Math.random implementation, so generated IDs keep the same
+ * shape and uniqueness guarantees.
+ */
+function secureRandomChars(length: number, chars: string): string {
+  const out: string[] = [];
+  const limit = 256 - (256 % chars.length);
+  const buffer = new Uint8Array(length);
+  while (out.length < length) {
+    crypto.getRandomValues(buffer);
+    for (const byte of buffer) {
+      if (byte >= limit) continue;
+      out.push(chars.charAt(byte % chars.length));
+      if (out.length === length) break;
+    }
   }
-  return result;
+  return out.join('');
+}
+
+export function generateCardUid(): string {
+  return secureRandomChars(8, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
 }
 
 /**
@@ -44,12 +64,7 @@ export function formatDate(date: Date | string): string {
 }
 
 export function generateQrId(length = 8): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  return secureRandomChars(length, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789');
 }
 
 export function formatNumber(num: number): string {

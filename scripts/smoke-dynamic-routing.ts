@@ -55,7 +55,6 @@ async function request(path: string, cookie?: string, init: RequestInit = {}) {
   return { status: res.status, location: res.headers.get('location') ?? '', body };
 }
 
-const URL_RE = /^https?:\/\/.+/;
 const REDIRECT = (s: number) => s === 307 || s === 302;
 
 async function loginCookie(email: string, password: string): Promise<string | null> {
@@ -77,8 +76,6 @@ async function createUser(email: string, password: string) {
   });
   return res;
 }
-
-const REGISTERED: string[] = [];
 
 async function ensureUser(email: string, password: string): Promise<string> {
   // Try login; if it fails, register.
@@ -203,7 +200,7 @@ async function run() {
   const bCat = await CatalogProduct.findOne({ slug: 'business-nfc-card' });
   const bCard = await Card.create({ cardUid: `SDYNB${Math.floor(Math.random() * 10000)}`, slug: `sdynb-${Math.floor(Math.random() * 10000)}`, routeSlug: `r${Math.floor(Math.random() * 100000000)}`, status: 'unassigned', kind: 'profile' });
   if (userB) {
-    const bAssign = await fetch(`${BASE}/api/admin/users/${userB._id}/products`, {
+    await fetch(`${BASE}/api/admin/users/${userB._id}/products`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: admin!, origin: BASE },
       body: JSON.stringify({ catalogProductId: bCat!._id, quantity: 1, cardUid: bCard.cardUid }),

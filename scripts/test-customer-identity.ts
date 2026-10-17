@@ -19,9 +19,6 @@ import { connectDB } from '@/lib/db';
 import User from '@/models/User';
 import Counter from '@/models/Counter';
 import Card from '@/models/Card';
-import CatalogProduct from '@/models/CatalogProduct';
-import { assignCustomerId, formatCustomerId, nextPermUniqueNumber } from '@/lib/services/customer-identity';
-import { assignUserProduct } from '@/lib/services/user-product-assignment';
 import { generateSlug } from '@/lib/utils';
 import {
   RESERVED_PUBLIC_SEGMENTS,
@@ -40,17 +37,6 @@ function report(name: string, ok: boolean, detail = ''): void {
     failures += 1;
     console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
   }
-}
-
-async function getCatalog(slug: string) {
-  const cat = (await CatalogProduct.findOne({ slug }).lean()) as unknown as {
-    slug: string;
-    kind: string;
-    category: string;
-    _id: unknown;
-  } | null;
-  if (!cat) throw new Error(`catalog item ${slug} not found — run npm run seed first`);
-  return cat;
 }
 
 const stamp = Date.now().toString(36).toUpperCase();

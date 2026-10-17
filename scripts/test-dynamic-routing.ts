@@ -21,8 +21,8 @@ import Standee from '@/models/Standee';
 import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import { assignUserProduct } from '@/lib/services/user-product-assignment';
-import { hasCapability, hasAllCapabilities } from '@/lib/services/capability-access';
-import { isProductId, getProductDef, getStandeeProfileConfig } from '@/config/products';
+import { hasCapability } from '@/lib/services/capability-access';
+import { isProductId, getStandeeProfileConfig } from '@/config/products';
 
 // ─── Test harness ───────────────────────────────────────────────────────────
 
@@ -90,7 +90,6 @@ async function run() {
     await unassignUserProducts(user._id);
 
     const cat = await getCatalog('insta-card');
-    const productId = toProductId(cat.slug)!;
     const card = await Card.create({
       cardUid: `DYNA${Math.floor(Math.random() * 10000)}`,
       slug: `dyna-${Math.floor(Math.random() * 10000)}`,
@@ -136,7 +135,6 @@ async function run() {
     await unassignUserProducts(user._id);
     const cat = await getCatalog('all-in-one-standee-3');
     const productId = toProductId(cat.slug)!;
-    const def = getProductDef(productId);
     const cfg = getStandeeProfileConfig(productId);
     report('3a. ALL_IN_ONE_STANDEE_3 has 3 profiles', cfg?.maxProfiles === 3, JSON.stringify(cfg));
     report('3b. fixed profiles correct order', JSON.stringify(cfg?.fixedProfiles) === JSON.stringify(['google_review', 'instagram', 'facebook']),
@@ -156,7 +154,7 @@ async function run() {
         JSON.stringify(standee.fixedProfiles) === JSON.stringify(['google_review', 'instagram', 'facebook']),
         JSON.stringify(standee.fixedProfiles));
       report('3f. standee socialQrs length = 3', (standee.socialQrs?.length ?? 0) === 3, `len=${standee.socialQrs?.length}`);
-      report('3g. slot order preserved', JSON.stringify(standee.socialQrs?.map((q: any) => q.platform)) === JSON.stringify(['google_review', 'instagram', 'facebook']));
+      report('3g. slot order preserved', JSON.stringify(standee.socialQrs?.map((q: { platform?: string }) => q.platform)) === JSON.stringify(['google_review', 'instagram', 'facebook']));
       report('3h. standee has permanent routeSlug', !!standee.routeSlug);
       report('3i. standee capability granted', await hasCapability(user._id, 'standee_multi_profile'));
     }
@@ -183,7 +181,7 @@ async function run() {
     if (result.ok) {
       const standee = result.data.standee!;
       report('4d. standee socialQrs length = 4', (standee.socialQrs?.length ?? 0) === 4, `len=${standee.socialQrs?.length}`);
-      report('4e. slot order preserved', JSON.stringify(standee.socialQrs?.map((q: any) => q.platform)) === JSON.stringify(['google_review', 'instagram', 'whatsapp', 'facebook']));
+      report('4e. slot order preserved', JSON.stringify(standee.socialQrs?.map((q: { platform?: string }) => q.platform)) === JSON.stringify(['google_review', 'instagram', 'whatsapp', 'facebook']));
     }
   }
 

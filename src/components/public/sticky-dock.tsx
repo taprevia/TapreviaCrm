@@ -79,11 +79,14 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const focusTimer = window.setTimeout(() => gateNameRef.current?.focus(), 40);
+    // Capture the ref value so cleanup restores focus to the same node it
+    // observed when the gate opened (the ref may have changed by cleanup time).
+    const addToContact = addToContactRef.current;
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = previous;
       window.clearTimeout(focusTimer);
-      addToContactRef.current?.focus();
+      addToContact?.focus();
     };
   }, [gateOpen]);
 

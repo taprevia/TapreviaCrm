@@ -244,7 +244,7 @@ async function main() {
     const newUid = freshUid();
     const replaced = card2
       ? await replaceCardForAssignment({
-          card: card2 as any,
+          card: card2 as unknown as ReturnType<typeof Card.hydrate>,
           ownerUserId: userA._id.toString(),
           newUid,
         })
@@ -261,7 +261,7 @@ async function main() {
 
     // ── S9 — removed product: no renumbering, no re-issue ──
     if (card2) {
-      await unbindAssignedCard(card2 as any);
+      await unbindAssignedCard(card2 as unknown as ReturnType<typeof Card.hydrate>);
     }
     const retreat = (await Card.findById(card2?._id).lean()) as unknown as CardSnapshot | null;
     report('S9  removed card stays offline but retains slug slot',

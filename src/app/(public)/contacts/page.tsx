@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { brandLabelFromUrl } from "@/utils/get-link-icon";
 import { getBrandIcon } from "@/utils/getBrandIcon";
 import { buildVcf } from "@/lib/vcf";
@@ -38,7 +39,7 @@ interface CardData {
 // EDIT THIS SECTION — CARD_DATA
 // Single source of truth for the Taprevia profile.
 // Data sourced from https://taprevia.com/
-// TODO(client): re-host avatar/hero/product/gallery images on your own
+// NOTE: re-host avatar/hero/product/gallery images on your own
 // CDN and swap the URLs below before launch.
 // =====================================================================
 const CARD_DATA: CardData = {
@@ -50,10 +51,10 @@ const CARD_DATA: CardData = {
   website: "https://taprevia.com/",
   cardUrl: "https://taprevia.com/",
   bio: "Premium NFC business cards engineered for entrepreneurs, sales teams and enterprises. Share contacts, capture leads and project a brand that earns trust on first impression.",
-  // TODO(client): swap with actual Taprevia logo/avatar image URL
+  // NOTE: swap with actual Taprevia logo/avatar image URL
   avatarUrl:
     "https://res.cloudinary.com/dju7dmfib/image/upload/v1779963658/nfc-profiles/aca46f59-805d-44c6-b12c-c38e84b6f028/avatar_url/bxxkfzcjjchjhcgu995l.jpg",
-  // TODO(client): swap with actual Taprevia hero/banner image URL
+  // NOTE: swap with actual Taprevia hero/banner image URL
   heroUrl:
     "https://res.cloudinary.com/dju7dmfib/image/upload/v1779963674/nfc-profiles/aca46f59-805d-44c6-b12c-c38e84b6f028/hero_bg_url/a8khsmpoobyxwf1nw6ch.jpg",
   socials: [
@@ -118,7 +119,7 @@ const CARD_DATA: CardData = {
     "Instagram Profile Cards",
     "LinkedIn Social Cards",
   ],
-  // TODO(client): swap with actual Taprevia product photos / lifestyle shots
+  // NOTE: swap with actual Taprevia product photos / lifestyle shots
   gallery: [
     "https://taprevia.com/images/product-nfc-black.svg",
     "https://taprevia.com/images/product-linkedin.svg",
@@ -139,7 +140,7 @@ interface TapreviaProps {
 type OverlayKind = "closed" | "open" | "closing";
 
 const WA_NUMBER = CARD_DATA.phoneRaw;
-// TODO(client): replace with actual Google Place ID before launch
+// NOTE: replace with actual Google Place ID before launch
 const GOOGLE_REVIEW_URL = "https://g.page/r/REPLACE_WITH_PLACE_ID/review";
 
 const buildWaLink = (message: string): string =>
@@ -728,7 +729,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
         recentering.current = false;
       });
     });
-  }, []);
+  }, [CAROUSEL_CLONES]);
 
   const openLightbox = (photos: string[], index: number): void => setLightbox({ photos, index });
 
@@ -939,13 +940,13 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
 
       <div className="tv2-card">
         <header className="tv2-hero">
-          <img
+          <Image
             className="tv2-hero-img"
             src={CARD_DATA.heroUrl}
             alt=""
             width={896}
             height={352}
-            fetchPriority="high"
+            priority
             onError={handleImgError}
           />
           <span className="tv2-hero-dim" aria-hidden="true" />
@@ -972,7 +973,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
 
         <main className="tv2-main">
           <section className="tv2-identity">
-            <img
+            <Image
               className="tv2-avatar"
               src={CARD_DATA.avatarUrl}
               alt={CARD_DATA.name}
@@ -1074,7 +1075,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
                         }
                         aria-label={`Open ${product.title} photo`}
                       >
-                        <img
+                        <Image
                           className="tv2-psimg"
                           src={product.imageUrl}
                           alt={`${product.title} photo`}
@@ -1082,6 +1083,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
                           height={450}
                           loading="lazy"
                           decoding="async"
+                          unoptimized
                           onError={handleImgError}
                         />
                         <span className="tv2-pill" aria-hidden="true" />
@@ -1176,7 +1178,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
                   onClick={() => openLightbox(CARD_DATA.gallery, index)}
                   aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
                 >
-                  <img
+                  <Image
                     className="tv2-gimg"
                     src={imageUrl}
                     alt={`${CARD_DATA.name} gallery photo ${index + 1}`}
@@ -1184,6 +1186,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
                     height={400}
                     loading="lazy"
                     decoding="async"
+                    unoptimized
                     onError={handleImgError}
                   />
                 </button>
@@ -1563,11 +1566,14 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
             >
               <Icon name="chevron-left" size={20} />
             </button>
-            <img
+            <Image
               key={lightbox.index}
               className="tv2-lb-img"
               src={lightbox.photos[lightbox.index]}
               alt={`${CARD_DATA.name} photo ${lightbox.index + 1}`}
+              width={1200}
+              height={1200}
+              unoptimized
               onError={handleImgError}
             />
             <button
