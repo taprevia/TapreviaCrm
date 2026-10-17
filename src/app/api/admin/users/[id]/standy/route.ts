@@ -1,55 +1,72 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { requireAdminStrict } from '@/lib/auth';
-import { fail } from '@/lib/api';
+import { fail, ok } from '@/lib/api';
 import User from '@/models/User';
-import Standee from '@/models/Standee';
-import { generateQrId } from '@/lib/utils';
-import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
+import CatalogProduct from '@/models/CatalogProduct';
+import { assignUserProduct } from '@/lib/services/user-product-assignment';
+import { deleteStandeeCascade } from '@/lib/services/standee-deletion';
+import { objectIdSchema } from '@/lib/validation/common';
+import { addStandeeSchema, deleteStandeeSchema } from '@/lib/validation/catalog';
 
 type Params = { params: { id: string } };
 
-function buildSocialQrs(platforms: string[]) {
-  return platforms.map((platform) => ({
-    qrId: generateQrId(),
-    platform,
-    qrColor: '#000000',
-    label: getStandeePlatformById(platform)?.name ?? platform,
-  }));
-}
-
-/** POST /api/admin/users/[id]/standy — add a standee (upgrade or additional unit). */
-export async function POST(
-  request: NextRequest,
-  { params }: Params
-) {
+/**
+ * POST /api/admin/users/[id]/standy — add a standee (upgrade or additional unit).
+ *
+ * Canonical path only: every standee is created through `assignUserProduct`,
+ * so it systematically receives its `routeSlug`, `publicSlug`, `displayName`,
+ * `productKey`, `maxProfiles` and `fixedProfiles`, and is linked to a
+ * `UserProduct` assignment. A catalog product id is therefore required.
+ */
+export async function POST(request: NextRequest, { params }: Params) {
   try {
     const admin = await requireAdminStrict(request);
     if (admin.kind === 'unauthorized') return fail(401, 'UNAUTHORIZED', 'Unauthorized');
     if (admin.kind === 'forbidden') return fail(403, 'FORBIDDEN', 'Forbidden');
 
+    const idParsed = objectIdSchema.safeParse(params.id);
+    if (!idParsed.success) {
+      return fail(400, 'VALIDATION_ERROR', 'Invalid user id');
+    }
+
     await connectDB();
-    const user = await User.findById(params.id);
+
+    const body = await request.json().catch(() => null);
+    const parsed = addStandeeSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(400, 'VALIDATION_ERROR', 'Validation failed', parsed.error.flatten().fieldErrors);
+    }
+
+    const user = await User.findById(idParsed.data);
     if (!user) {
       return fail(404, 'NOT_FOUND', 'User not found');
     }
 
-    const body = await request.json().catch(() => ({}));
-    const requested: string[] = Array.isArray(body?.platforms)
-      ? body.platforms
-      : STANDEE_PLATFORMS.map((p) => p.id);
-    const validPlatforms = Array.from(new Set(requested.filter((p) => getStandeePlatformById(p))));
+    const item = await CatalogProduct.findById(parsed.data.catalogProductId);
+    if (!item) {
+      return fail(404, 'NOT_FOUND', 'Catalog product not found');
+    }
+    if (!item.active) {
+      return fail(400, 'BAD_REQUEST', 'Catalog product is inactive');
+    }
+    if (item.category !== 'standee') {
+      return fail(400, 'BAD_REQUEST', 'Selected product is not a standee');
+    }
 
-    const standee = await Standee.create({
-      userId: user._id,
-      panelQr: { qrId: generateQrId(), qrColor: '#000000' },
-      socialQrs: buildSocialQrs(validPlatforms),
+    const result = await assignUserProduct({
+      user,
+      catalogItem: item,
+      quantity: parsed.data.quantity,
+      platforms: parsed.data.platforms,
+      notes: parsed.data.notes,
+      assignedBy: admin.user._id,
     });
+    if (!result.ok) {
+      return fail(result.status, result.status === 409 ? 'CONFLICT' : 'BAD_REQUEST', result.error);
+    }
 
-    user.hasStandy = true;
-    await user.save();
-
-    return NextResponse.json({ standee }, { status: 201 });
+    return ok({ standee: result.data.standee, userProduct: result.data.userProduct }, 201);
   } catch (error) {
     console.error('Admin standy upgrade error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');
@@ -57,35 +74,41 @@ export async function POST(
 }
 
 /** DELETE /api/admin/users/[id]/standy — remove one standee ({ standeeId }). */
-export async function DELETE(
-  request: NextRequest,
-  { params }: Params
-) {
+export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const admin = await requireAdminStrict(request);
     if (admin.kind === 'unauthorized') return fail(401, 'UNAUTHORIZED', 'Unauthorized');
     if (admin.kind === 'forbidden') return fail(403, 'FORBIDDEN', 'Forbidden');
 
+    const idParsed = objectIdSchema.safeParse(params.id);
+    if (!idParsed.success) {
+      return fail(400, 'VALIDATION_ERROR', 'Invalid user id');
+    }
+
     await connectDB();
-    const user = await User.findById(params.id);
+
+    const body = await request.json().catch(() => null);
+    const parsed = deleteStandeeSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(400, 'VALIDATION_ERROR', 'Validation failed', parsed.error.flatten().fieldErrors);
+    }
+
+    const user = await User.findById(idParsed.data);
     if (!user) {
       return fail(404, 'NOT_FOUND', 'User not found');
     }
 
-    const { standeeId } = await request.json().catch(() => ({}));
-    if (!standeeId) {
-      return fail(400, 'BAD_REQUEST', 'standeeId is required');
+    const result = await deleteStandeeCascade(parsed.data.standeeId, {
+      userId: idParsed.data,
+    });
+    if (!result.ok) {
+      return fail(result.status, 'NOT_FOUND', result.error);
     }
 
-    await Standee.deleteOne({ _id: standeeId, userId: user._id });
-
-    const remaining = await Standee.countDocuments({ userId: user._id });
-    if (remaining === 0 && user.hasStandy) {
-      user.hasStandy = false;
-      await user.save();
-    }
-
-    return NextResponse.json({ success: true, remainingStandees: remaining });
+    return NextResponse.json({
+      success: true,
+      remainingStandees: result.remainingStandees,
+    });
   } catch (error) {
     console.error('Admin standy delete error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');

@@ -13,6 +13,8 @@
     "smoke": "tsx scripts/smoke-public-routes.ts",
     "smoke:dynamic": "tsx scripts/smoke-dynamic-routing.ts",
     "test:dynamic": "tsx scripts/test-dynamic-routing.ts",
+    "test:standee": "tsx scripts/verify-standee-lifecycle.ts",
+    "test:uid": "tsx scripts/verify-timestamp-uid.ts",
     "migrate:standee-config": "tsx scripts/migrate-standee-config.ts",
     "backfill:routes": "tsx scripts/backfill-route-slugs.ts",
     "migrate:cards": "tsx scripts/migrate-normalize-card-uids.ts",

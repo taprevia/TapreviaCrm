@@ -23,7 +23,7 @@ export function generateSlug(name: string): string {
  * to the previous Math.random implementation, so generated IDs keep the same
  * shape and uniqueness guarantees.
  */
-function secureRandomChars(length: number, chars: string): string {
+export function secureRandomChars(length: number, chars: string): string {
   const out: string[] = [];
   const limit = 256 - (256 % chars.length);
   const buffer = new Uint8Array(length);

@@ -11,7 +11,7 @@ import { clientIp } from '@/lib/request-ip';
  * Dynamic QR resolver.
  *
  * Resolution order:
- *  0. Card by routeSlug (new unified route) — redirect based on card kind.
+ *  0. Card by routeSlug/uid (new unified route) — redirect based on card kind.
  *  1. Standee social QR → redirect to the customer's current URL for that
  *     platform (from Profile.socialLinks).
  *  2. Standee panel QR → redirect to the customer's public profile page.
@@ -46,9 +46,13 @@ export async function GET(
   try {
     await connectDB();
     const { id } = params;
+    const key = id.toLowerCase();
 
-    // 0. Card by routeSlug — new unified permanent route.
-    const cardBySlug = (await Card.findOne({ routeSlug: id.toLowerCase(), isActive: true })
+    // 0. Card by routeSlug/uid — new unified permanent route (dual-track).
+    const cardBySlug = (await Card.findOne({
+      isActive: true,
+      $or: [{ routeSlug: key }, { uid: key }],
+    })
       .select('urlAlias slug kind redirectUrl')
       .lean()) as {
       urlAlias: string;
@@ -95,8 +99,12 @@ export async function GET(
       return redirectToProfilePage(request, standee.userId);
     }
 
-    // 2. Panel QR — entry point to the customer's public profile.
-    const panel = (await Standee.findOne({ 'panelQr.qrId': id })
+    // 2. Panel QR — entry point to the customer's public profile. Also accepts
+    // the standee's permanent routeSlug/uid (dual-track) so newly issued
+    // timestamp identifiers resolve through the legacy QR surface too.
+    const panel = (await Standee.findOne({
+      $or: [{ 'panelQr.qrId': id }, { routeSlug: key }, { uid: key }],
+    })
       .select('userId')
       .lean()) as { userId: unknown } | null;
     if (panel) {

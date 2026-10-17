@@ -72,6 +72,30 @@ export type AssignProductInput = z.infer<typeof assignProductSchema>;
 export type CardMaterial = z.infer<typeof cardMaterialSchema>;
 
 /**
+ * POST /api/admin/users/:id/standy — add a standee.
+ *
+ * The standee is created exclusively through the canonical `assignUserProduct`
+ * path, so a catalog product is always required. `platforms` is only consulted
+ * for generic standees that declare no fixed profile set; fixed-profile
+ * products (all seeded standees) ignore it and use their definition.
+ */
+export const addStandeeSchema = z.object({
+  catalogProductId: objectIdSchema,
+  quantity: z.number().int().min(1).max(99).default(1),
+  platforms: z.array(z.string()).max(8).optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export type AddStandeeInput = z.infer<typeof addStandeeSchema>;
+
+/** Shared DELETE body for standee endpoints (global + per-user). */
+export const deleteStandeeSchema = z.object({
+  standeeId: objectIdSchema,
+});
+
+export type DeleteStandeeInput = z.infer<typeof deleteStandeeSchema>;
+
+/**
  * Payload for transactional admin customer creation.
  *
  * Cards are bound by entering the physical NFC Card UID directly at creation

@@ -2,6 +2,7 @@ import Card from '@/models/Card';
 import type { CardKind } from '@/types';
 import { bindAssignedCard } from '@/lib/services/card-access';
 import { generateQrId, generateSlug, normalizeCardUid } from '@/lib/utils';
+import { generateUniqueTimestampUid } from '@/lib/uid';
 
 /**
  * Single source of truth for physical Card identity.
@@ -69,6 +70,21 @@ async function createUniqueCardSlug(uid: string): Promise<string> {
 }
 
 /**
+ * Allocate a permanent card route identifier for a NEW assignment.
+ *
+ * Uses the timestamp UID generator and checks BOTH identifier fields
+ * (`routeSlug` and the new `uid`) so a fresh identifier can never collide with
+ * an existing legacy routeSlug or a previously issued timestamp UID.
+ */
+export async function allocateCardRouteSlug(): Promise<string> {
+  return generateUniqueTimestampUid(async (candidate) =>
+    Boolean(
+      await Card.exists({ $or: [{ routeSlug: candidate }, { uid: candidate }] })
+    )
+  );
+}
+
+/**
  * Find-or-create the physical card for a UID and bind it to a user.
  *
  * The card is provisioned at binding time — no pre-registered inventory record
@@ -104,11 +120,13 @@ export async function provisionCardForAssignment(opts: {
       return { ok: false, status: 409, error: 'This Card UID is already assigned' };
     }
   } else {
+    const timestampUid = await allocateCardRouteSlug();
     card = await Card.create({
       cardUid: normalized,
       status: 'unassigned',
       slug: await createUniqueCardSlug(normalized),
-      routeSlug: generateQrId(8),
+      routeSlug: timestampUid,
+      uid: timestampUid,
       kind: 'profile',
       isActive: false,
     });
@@ -123,7 +141,11 @@ export async function provisionCardForAssignment(opts: {
     card.kind = opts.kind;
   }
   if (!card.routeSlug) {
-    card.routeSlug = generateQrId(8);
+    // Forward-only backfill for a legacy card that never received a routeSlug.
+    // Never overwrites an existing (printed) routeSlug.
+    const timestampUid = await allocateCardRouteSlug();
+    card.routeSlug = timestampUid;
+    if (!card.uid) card.uid = timestampUid;
   }
   // Default the card's management label to the purchased product name when it
   // has no label yet. Idempotent and never clobbers a custom label — each card

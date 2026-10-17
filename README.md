@@ -233,7 +233,7 @@
 
   ### Admin console (`/admin`, role-gated — admins only)
   - **Overview** — KPI totals: users (split admin/customer), cards by status (active/unassigned/suspended), inquiries + new, appointments + upcoming, products, product enquiries, newsletter subscribers, media files/bytes; recent inquiries; quick links.
-  - **Users** — list with role badges + status, create account, suspend/activate. **Standee upgrade** per user (`POST/DELETE /api/admin/users/[id]/standy`) creates a `Standee` (panel QR + social QRs) and sets `hasStandy`.
+  - **Users** — list with role badges + status, create account, suspend/activate. **Standee upgrade** per user (`POST /api/admin/users/[id]/standy { catalogProductId }` and `DELETE … { standeeId }`) creates/removes a `Standee` exclusively through the canonical product-assignment path — every standee gets its `routeSlug`, `publicSlug`, `displayName`, `productKey`, `maxProfiles`/`fixedProfiles` and a linked `UserProduct`; deletes cascade to the assignment and `hasStandy`.
   - **Cards** — physical NFC inventory: provision `cardUid` + slug, bind/assign to a customer (sets `assignedUserId`, status `active`), suspend/unassign.
   - **Templates** — legacy HTML card templates.
   - **Products / Catalog** — platform catalog (`CatalogProduct`: cards, standees, other) and **assignment to customers** → creates `UserProduct` (auto-assigns matching NFC card / standee, `assignedBy` = admin). This is the platform's monetization backoffice.

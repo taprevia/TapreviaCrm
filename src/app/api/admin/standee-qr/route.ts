@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/db';
 import { requireAdminStrict } from '@/lib/auth';
 import { fail } from '@/lib/api';
 import Standee from '@/models/Standee';
+import { deleteStandeeCascade } from '@/lib/services/standee-deletion';
+import { deleteStandeeSchema } from '@/lib/validation/catalog';
 
 interface PopulatedUser {
   _id: unknown;
@@ -29,7 +31,11 @@ export async function GET(request: NextRequest) {
       return {
         _id: s._id,
         name: s.name,
+        // Canonical title source (mirrors Card.cardLabel). Falls back to the
+        // schema default `name` only for legacy docs that never got one.
+        displayName: s.displayName ?? '',
         routeSlug: s.routeSlug ?? '',
+        publicSlug: s.publicSlug ?? '',
         userId: owner?._id ?? null,
         userName: owner?.name || 'Unassigned',
         userEmail: owner?.email || '',
@@ -54,17 +60,21 @@ export async function DELETE(request: NextRequest) {
     if (admin.kind === 'forbidden') return fail(403, 'FORBIDDEN', 'Forbidden');
 
     await connectDB();
-    const { standeeId } = await request.json();
-    if (!standeeId) {
-      return fail(400, 'BAD_REQUEST', 'standeeId is required');
+
+    const body = await request.json().catch(() => null);
+    const parsed = deleteStandeeSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(400, 'VALIDATION_ERROR', 'Validation failed', parsed.error.flatten().fieldErrors);
     }
 
-    const deleted = await Standee.findByIdAndDelete(standeeId);
-    if (!deleted) {
-      return fail(404, 'NOT_FOUND', 'Standee not found');
+    // Cascades the linked UserProduct and recomputes the owner's hasStandy flag
+    // so no orphaned reference or stale standee entitlement is left behind.
+    const result = await deleteStandeeCascade(parsed.data.standeeId);
+    if (!result.ok) {
+      return fail(result.status, 'NOT_FOUND', result.error);
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, remainingStandees: result.remainingStandees });
   } catch (error) {
     console.error('Admin standee delete error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');

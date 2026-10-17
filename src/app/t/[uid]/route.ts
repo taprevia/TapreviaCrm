@@ -54,11 +54,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       // lookup simply won't match and we redirect home.
     }
 
-    // Try routeSlug first (new permanent identifier), then fall back to cardUid.
+    // Try routeSlug first (new permanent identifier), then the mirrored
+    // timestamp `uid`, then fall back to the physical cardUid.
     const card = await Card.findOne({
       isActive: true,
       $or: [
         { routeSlug: raw.toLowerCase() },
+        { uid: raw.toLowerCase() },
         { cardUid: raw.toUpperCase() },
       ],
     }).lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();

@@ -37,6 +37,11 @@ const StandeeSchema = new Schema(
     // fallback when the owner has no Profile document.
     displayName: { type: String, default: '', trim: true },
     routeSlug: { type: String, default: '' },
+    // Timestamp-based unique identifier for NEW standee links (mirrors
+    // routeSlug for freshly created standees). Additive + sparse: legacy
+    // standees have no `uid` and continue to resolve by routeSlug. Never used
+    // to overwrite an existing routeSlug.
+    uid: { type: String, trim: true },
     // Human-readable public URL path ("{business-slug}/standee[-N]"). Permanent
     // identity for printed material — allocated once, never regenerated.
     publicSlug: { type: String, default: '' },
@@ -60,6 +65,7 @@ StandeeSchema.index({ userId: 1 });
 StandeeSchema.index({ 'panelQr.qrId': 1 }, { unique: true });
 StandeeSchema.index({ 'socialQrs.qrId': 1 }, { unique: true, sparse: true });
 StandeeSchema.index({ routeSlug: 1 }, { unique: true, sparse: true });
+StandeeSchema.index({ uid: 1 }, { unique: true, sparse: true });
 StandeeSchema.index({ publicSlug: 1 }, { unique: true, sparse: true });
 
 export default mongoose.models.Standee || mongoose.model('Standee', StandeeSchema);

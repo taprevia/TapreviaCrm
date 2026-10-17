@@ -196,6 +196,8 @@ export interface ICard {
   cardUid: string;
   slug: string;
   routeSlug: string;
+  /** Timestamp-based unique identifier for new links (sparse). */
+  uid?: string;
   publicSlug?: string | null;
   assignedUserId?: string;
   status: 'unassigned' | 'active' | 'suspended';
@@ -496,6 +498,13 @@ export interface IStandee {
   userId: string;
   name: string;
   routeSlug: string;
+  /** Timestamp-based unique identifier for new links (sparse). */
+  uid?: string;
+  displayName?: string;
+  publicSlug?: string;
+  productKey?: string;
+  maxProfiles?: number;
+  fixedProfiles?: string[];
   panelQr: { qrId: string; qrColor: string };
   socialQrs: IStandySocialQr[];
   zones: IStandeeZone[];

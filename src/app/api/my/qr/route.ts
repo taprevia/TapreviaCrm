@@ -45,7 +45,8 @@ export async function GET(request: NextRequest) {
     };
 
     // Verify ownership: the route must belong to one of the user's active products.
-    const card = (await Card.findOne({ routeSlug: slug }).lean()) as
+    // Dual-track: resolve legacy `routeSlug` and new timestamp `uid` in parallel.
+    const card = (await Card.findOne({ $or: [{ routeSlug: slug }, { uid: slug }] }).lean()) as
       | (Record<string, unknown> & { _id: string; publicSlug?: string })
       | null;
     if (card) {
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
       return makeQr(card.publicSlug);
     }
 
-    const standee = (await Standee.findOne({ routeSlug: slug }).lean()) as
+    const standee = (await Standee.findOne({ $or: [{ routeSlug: slug }, { uid: slug }] }).lean()) as
       | (Record<string, unknown> & { _id: string; publicSlug?: string })
       | null;
     if (standee) {

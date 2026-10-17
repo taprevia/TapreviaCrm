@@ -14,8 +14,8 @@ import { isSafeExternalUrl } from '@/lib/safe-url';
  * Resolves the current destination from the database and redirects.
  *
  * Resolution:
- *  1. Card by routeSlug → redirect based on card kind
- *  2. Standee by routeSlug → panel redirect or zone slot redirect
+ *  1. Card by routeSlug/uid → redirect based on card kind
+ *  2. Standee by routeSlug/uid → panel redirect or zone slot redirect
  *  3. Legacy fallback: cardUid, slug, urlAlias
  *  4. 404
  *
@@ -65,8 +65,13 @@ export async function GET(
     const routeKey = (parts[0] ?? '').toLowerCase();
     const slotParam = parts[1] ?? null;
 
-    // ── 1. Card by routeSlug ──────────────────────────────────────────────
-    const card = (await Card.findOne({ routeSlug: routeKey, isActive: true })
+    // ── 1. Card by routeSlug / uid ────────────────────────────────────────
+    // Dual-track lookup: legacy `routeSlug` and the new timestamp `uid` are
+    // matched in parallel so both identifier generations resolve identically.
+    const card = (await Card.findOne({
+      isActive: true,
+      $or: [{ routeSlug: routeKey }, { uid: routeKey }],
+    })
       .select('urlAlias slug kind redirectUrl reviewAssistant instagramConfig whatsappConfig linkedinConfig facebookConfig userId')
       .lean()) as {
       _id: unknown;
@@ -122,11 +127,15 @@ export async function GET(
       return new Response('Profile not configured', { status: 404 });
     }
 
-    // ── 2. Standee by routeSlug ──────────────────────────────────────────
+    // ── 2. Standee by routeSlug / uid ────────────────────────────────────
     // Standee routeSlugs are NOT lowercased on save (unlike Cards), so match
-    // case-insensitively against the URL key (which is lowercased above).
+    // case-insensitively against the URL key (which is lowercased above). The
+    // new timestamp `uid` is already lowercase and matched directly.
     const standee = (await Standee.findOne({
-      $expr: { $eq: [{ $toLower: '$routeSlug' }, routeKey] },
+      $or: [
+        { $expr: { $eq: [{ $toLower: '$routeSlug' }, routeKey] } },
+        { uid: routeKey },
+      ],
     })
       .select('userId panelQr socialQrs maxProfiles fixedProfiles')
       .lean()) as {

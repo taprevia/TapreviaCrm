@@ -78,6 +78,11 @@ const CardSchema = new Schema(
     previousCardUids: { type: [String], default: [] },
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
     routeSlug: { type: String, default: '', lowercase: true, trim: true },
+    // Timestamp-based unique identifier for NEW card links (mirrors routeSlug
+    // for freshly provisioned cards). Additive + sparse: legacy cards have no
+    // `uid` and continue to resolve by routeSlug/cardUid. Never used to
+    // overwrite an existing routeSlug.
+    uid: { type: String, lowercase: true, trim: true },
     assignedUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
@@ -240,6 +245,7 @@ CardSchema.index({ assignedUserId: 1 });
 CardSchema.index({ urlAlias: 1 });
 CardSchema.index({ status: 1 });
 CardSchema.index({ routeSlug: 1 }, { unique: true, sparse: true });
+CardSchema.index({ uid: 1 }, { unique: true, sparse: true });
 CardSchema.index({ publicSlug: 1 }, { unique: true, sparse: true });
 
 export default mongoose.models.Card || mongoose.model('Card', CardSchema);

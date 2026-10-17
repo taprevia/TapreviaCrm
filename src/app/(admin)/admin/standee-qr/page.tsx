@@ -17,7 +17,10 @@ interface SocialQrEntry {
 interface StandeeEntry {
   _id: string;
   name: string;
+  /** Canonical title (mirrors Card.cardLabel); falls back to `name`. */
+  displayName?: string;
   routeSlug?: string;
+  publicSlug?: string;
   userId: string | null;
   userName: string;
   userEmail: string;
@@ -105,6 +108,7 @@ export default function AdminStandeeQrPage() {
     return (
       s.userName.toLowerCase().includes(q) ||
       s.userEmail.toLowerCase().includes(q) ||
+      (s.displayName ?? '').toLowerCase().includes(q) ||
       s.panelQr.qrId.toLowerCase().includes(q) ||
       s.socialQrs.some((qr) => qr.platform.toLowerCase().includes(q) || qr.qrId.toLowerCase().includes(q))
     );
@@ -158,7 +162,7 @@ export default function AdminStandeeQrPage() {
                     <p className="text-sm font-semibold text-ink">{standee.userName}</p>
                     <span className="text-xs text-ink-mute">{standee.userEmail}</span>
                     <Badge variant="default" className="ring-line-subtle bg-field text-ink-mute">
-                      {standee.name || 'Counter Standee'}
+                      {standee.displayName || standee.name || 'Counter Standee'}
                     </Badge>
                   </div>
 

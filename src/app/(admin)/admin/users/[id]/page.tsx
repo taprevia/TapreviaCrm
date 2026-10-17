@@ -96,7 +96,13 @@ interface SocialQrEntry {
 interface StandeeData {
   _id: string;
   name: string;
+  /** Canonical title (mirrors Card.cardLabel); falls back to `name`. */
+  displayName?: string;
   routeSlug?: string;
+  publicSlug?: string;
+  productKey?: string;
+  maxProfiles?: number;
+  fixedProfiles?: string[];
   // Guarded defensively — legacy/malformed docs may lack these subdocs.
   panelQr?: { qrId: string; qrColor: string };
   socialQrs?: SocialQrEntry[];
@@ -170,14 +176,12 @@ export default function AdminUserDetailPage() {
   const [loading, setLoading] = useState(true);
   const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
   const [copiedQrId, setCopiedQrId] = useState('');
-  const [showAddStandy, setShowAddStandy] = useState(false);
-  const [addStandyPlatforms, setAddStandyPlatforms] = useState<string[]>(
-    STANDEE_PLATFORMS.map((p) => p.id as string)
-  );
-  const [addingStandy, setAddingStandy] = useState(false);
 
   const [purchasedProducts, setPurchasedProducts] = useState<UserProductRecord[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  // When true, the Assign Product modal is scoped to standee products and used
+  // as the canonical "Add Standee" flow (no bespoke creation path).
+  const [assignStandeeOnly, setAssignStandeeOnly] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogProductLite[]>([]);
   const [assignForm, setAssignForm] = useState({
     catalogProductId: '',
@@ -327,35 +331,6 @@ export default function AdminUserDetailPage() {
     }
   };
 
-  const toggleAddStandyPlatform = (id: string) => {
-    setAddStandyPlatforms((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
-    );
-  };
-
-  const handleAddStandee = async () => {
-    if (!user || addStandyPlatforms.length === 0) return;
-    setAddingStandy(true);
-    try {
-      const res = await fetch(`/api/admin/users/${user._id}/standy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platforms: addStandyPlatforms }),
-      });
-      if (res.ok) {
-        setShowAddStandy(false);
-        fetchUserDetail();
-      } else {
-        const data = await res.json().catch(() => null);
-        alert(data?.error || 'Failed to add standee');
-      }
-    } catch (error) {
-      console.error('Add standee failed:', error);
-    } finally {
-      setAddingStandy(false);
-    }
-  };
-
   const handleDeleteStandee = async (standeeId: string) => {
     if (!user || !confirm('Delete this standee? Its printed QR codes will stop resolving.')) return;
     try {
@@ -400,18 +375,22 @@ export default function AdminUserDetailPage() {
       ? getFixedStandeeProfiles(selectedCatalogItem.slug)
       : null;
 
-  const openAssignModal = async () => {
+  const openAssignModal = async (standeeOnly = false) => {
     setAssignForm({ catalogProductId: '', quantity: '1', cardUid: '', notes: '' });
     setAssignWithoutCard(false);
     setAssignPlatforms(STANDEE_PLATFORMS.map((p) => p.id as string));
     setAssignError('');
     setAssignResult(null);
+    setAssignStandeeOnly(standeeOnly);
     setShowAssignModal(true);
     try {
       const catalogRes = await fetch('/api/admin/catalog');
       if (catalogRes.ok) {
         const data = await catalogRes.json();
-        setCatalogItems((data.catalog || []).filter((item: CatalogProductLite & { active: boolean }) => item.active));
+        const active = (data.catalog || []).filter((item: CatalogProductLite & { active: boolean }) => item.active);
+        setCatalogItems(
+          standeeOnly ? active.filter((item: CatalogProductLite) => item.category === 'standee') : active
+        );
       }
     } catch (error) {
       console.error('Failed to load assign modal data:', error);
@@ -809,7 +788,7 @@ export default function AdminUserDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { setAddStandyPlatforms(STANDEE_PLATFORMS.map((p) => p.id as string)); setShowAddStandy(true); }}
+            onClick={() => openAssignModal(true)}
             className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
           >
             <Plus className="mr-1.5 h-3.5 w-3.5 text-accent-400" />
@@ -828,7 +807,7 @@ export default function AdminUserDetailPage() {
               <div key={standee._id} className="rounded-xl border border-line-subtle p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-ink">
-                    {standee.name || 'Counter Standee'} {standees.length > 1 && `#${idx + 1}`}
+                    {standee.displayName || standee.name || 'Counter Standee'} {standees.length > 1 && `#${idx + 1}`}
                   </p>
                   <button
                     type="button"
@@ -889,7 +868,7 @@ export default function AdminUserDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={openAssignModal}
+            onClick={() => openAssignModal()}
             className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
           >
             <ShoppingCart className="mr-1.5 h-3.5 w-3.5 text-accent-400" />
@@ -1056,48 +1035,13 @@ export default function AdminUserDetailPage() {
         </Card>
       )}
 
-      {showAddStandy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-bg-raised text-ink ring-1 ring-line-subtle shadow-pop mx-4 animate-fade-in">
-            <div className="flex-1 overflow-y-auto p-6">
-            <h3 className="text-lg font-semibold text-ink mb-1">Add Standee</h3>
-            <p className="text-sm text-ink-mute mb-4">
-              Generates a panel QR plus one dynamic QR per selected platform.
-            </p>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {STANDEE_PLATFORMS.map((platform) => (
-                <label
-                  key={platform.id}
-                  className="flex items-center gap-2 rounded-lg border border-line-subtle px-3 py-2.5 text-sm text-ink cursor-pointer hover:bg-white/5 transition-colors"
-                >
-                  <input
-                    type="checkbox"
-                    checked={addStandyPlatforms.includes(platform.id)}
-                    onChange={() => toggleAddStandyPlatform(platform.id)}
-                    className="h-4 w-4 rounded border-line-strong text-accent-600 focus:ring-accent-500"
-                  />
-                  {platform.name}
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowAddStandy(false)} className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong">
-                Cancel
-              </Button>
-              <Button size="sm" disabled={addStandyPlatforms.length === 0} isLoading={addingStandy} onClick={handleAddStandee}>
-                <QrCode className="mr-2 h-4 w-4" />
-                Generate QR Codes
-              </Button>
-            </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Legacy "Add Standee" modal removed — standees are created via the
+          canonical product-assignment flow above. */}
 
       <Modal
         isOpen={showAssignModal}
         onClose={() => setShowAssignModal(false)}
-        title="Assign Product"
+        title={assignStandeeOnly ? 'Add Standee' : 'Assign Product'}
         className="bg-bg-raised text-ink ring-1 ring-line-subtle shadow-pop [&>div]:border-line-subtle [&_h2]:text-ink [&_button]:text-ink-faint hover:[&_button]:text-ink hover:[&_button]:bg-white/5"
       >
         {assignResult ? (

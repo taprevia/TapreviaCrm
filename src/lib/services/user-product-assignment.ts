@@ -5,10 +5,11 @@ import User from '@/models/User';
 import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import { deriveCardKind } from '@/lib/services/product-experience';
-import { provisionCardForAssignment } from '@/lib/services/card-identity';
+import { provisionCardForAssignment, allocateCardRouteSlug } from '@/lib/services/card-identity';
 import { ensureCardPublicSlug, ensureStandeePublicSlug } from '@/lib/services/human-url';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { generateQrId } from '@/lib/utils';
+import { generateUniqueTimestampUid } from '@/lib/uid';
 import { isProductId, getProductDef, getStandeeProfileConfig } from '@/config/products';
 
 type UserDoc = ReturnType<typeof User.hydrate>;
@@ -23,6 +24,21 @@ export interface AssignedProductData {
   standee?: StandeeDoc;
   /** True when the physical Card record was created during this call. */
   cardCreated?: boolean;
+}
+
+/**
+ * Allocate a permanent standee route identifier for a NEW assignment.
+ *
+ * Mirrors `allocateCardRouteSlug`: timestamp UID checked against BOTH the
+ * `routeSlug` and the new `uid` field so it can never collide with a legacy
+ * routeSlug or a previously issued timestamp UID.
+ */
+async function allocateStandeeRouteSlug(): Promise<string> {
+  return generateUniqueTimestampUid(async (candidate) =>
+    Boolean(
+      await Standee.exists({ $or: [{ routeSlug: candidate }, { uid: candidate }] })
+    )
+  );
 }
 
 export type AssignUserProductResult =
@@ -109,7 +125,8 @@ export async function assignUserProduct({
       try {
         // Generate routeSlug if not set (permanent dynamic route identifier).
         if (!assigned.routeSlug) {
-          assigned.routeSlug = generateQrId(8);
+          assigned.routeSlug = await allocateCardRouteSlug();
+          if (!assigned.uid) assigned.uid = assigned.routeSlug;
           await assigned.save();
         }
 
@@ -179,13 +196,18 @@ export async function assignUserProduct({
 
       const validPlatforms = Array.from(new Set(fixedProfiles.filter((p) => getStandeePlatformById(p))));
 
+      const routeSlug = await allocateStandeeRouteSlug();
+
       const standee = await Standee.create({
         userId: user._id,
         // The purchased product name becomes the standee's public/title label
         // (Standy.displayName) so the CRM and the panel picker agree on its
         // name from day one. `name` remains the schema fallback.
         displayName: catalogItem.name,
-        routeSlug: generateQrId(8),
+        routeSlug,
+        // Mirror the timestamp UID onto the dedicated `uid` field so resolvers
+        // can dual-track legacy `routeSlug` and new timestamp identifiers.
+        uid: routeSlug,
         productKey: isProductId(productId) ? productId : '',
         maxProfiles,
         fixedProfiles: validPlatforms,
