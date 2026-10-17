@@ -36,15 +36,19 @@ const StandeeSchema = new Schema(
     // Public display name shown on the panel/QR picker page and as the brand
     // fallback when the owner has no Profile document.
     displayName: { type: String, default: '', trim: true },
-    routeSlug: { type: String, default: '' },
+    // Route identifier. No `default: ''` — an absent value must stay undefined
+    // so the unique+sparse index skips it instead of colliding on duplicate
+    // empty strings (E11000).
+    routeSlug: { type: String },
     // Timestamp-based unique identifier for NEW standee links (mirrors
     // routeSlug for freshly created standees). Additive + sparse: legacy
     // standees have no `uid` and continue to resolve by routeSlug. Never used
     // to overwrite an existing routeSlug.
     uid: { type: String, trim: true },
     // Human-readable public URL path ("{business-slug}/standee[-N]"). Permanent
-    // identity for printed material — allocated once, never regenerated.
-    publicSlug: { type: String, default: '' },
+    // identity for printed material — allocated once, never regenerated. No
+    // `default: ''`: absent stays undefined so the unique+sparse index skips it.
+    publicSlug: { type: String },
     // Product-level configuration: how many fixed slots this physical standee
     // has and which platform profile type each slot maps to (in 1-indexed order).
     // The customer may change each slot's *destination* but not the slot types.

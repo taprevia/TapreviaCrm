@@ -5,7 +5,7 @@
  *   - customer creation binds a physical card by UID directly (no inventory)
  *   - UID normalization (lowercase input stored uppercase)
  *   - duplicate UID across customers is rejected
- *   - missing UID for a card product is rejected
+ *   - missing UID for a card product → uninstantiated (pendingConfig) assignment
  *   - non-card products need no UID
  *   - mixed standee + card customer creation
  *   - card replacement preserves route + ownership, updates UID + audit trail
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n── 4. Missing UID for a card product is rejected (nothing created) ──');
+  console.log('\n── 4. Missing UID for a card product creates an uninstantiated assignment ──');
   {
     const res = await createCustomerWithProducts({
       name: 'No UID',
@@ -173,9 +173,18 @@ async function main(): Promise<void> {
       products: [{ catalogProductId: cardProduct._id.toString() }],
       assignedBy: ADMIN_ID,
     });
-    check('rejected with 400', !res.ok && res.status === 400, res);
-    const ghost = await User.findOne({ email: email('nocard') });
-    check('no user left behind (rollback / preflight)', !ghost);
+    check('creation succeeds without a UID', res.ok, res.ok ? undefined : res);
+    if (res.ok) {
+      createdUsers.push(_user(res)._id as string);
+      check('no physical card bound', created(res).cardCount === 0, created(res).cardCount);
+      const assignment = await UserProduct.findOne({
+        userId: _user(res)._id,
+        catalogProductId: cardProduct._id,
+      });
+      check('uninstantiated assignment persisted (no cardId)', !!assignment && !assignment.cardId, assignment?.cardId);
+      check('pendingConfig seeded for later linking', !!assignment?.pendingConfig);
+      check('no Card record created', !(await Card.findOne({ userId: _user(res)._id })));
+    }
   }
 
   console.log('\n── 5. Duplicate UID within one request is rejected ──');

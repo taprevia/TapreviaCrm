@@ -175,38 +175,27 @@ export default function AdminUsersPage() {
       .map((id) => catalogItems.find((c) => c._id === id))
       .filter((item): item is CatalogProductLite => Boolean(item));
 
-    // A card can only be created with its physical UID when it is bound now;
-    // products flagged "without a physical card" skip this and are added after
-    // the account exists.
+    // A physical card is bound only when its UID is supplied. Leaving the UID
+    // blank (or ticking "Assign without a physical card") creates an
+    // uninstantiated product; its permanent route is minted automatically when a
+    // card is later bound — handled natively by the create API.
     for (const item of selectedItems) {
       if (item.category === 'card' && !skipCardUids[item._id] && !(productCardUids[item._id] ?? '').trim()) {
-        setFormError(`Enter the NFC Card UID for ${item.name}`);
+        setFormError(`Enter the NFC Card UID for ${item.name}, or tick "Assign without a physical card".`);
         return;
       }
     }
 
-    // Split the selection: cards flagged "without a physical card" are deferred
-    // to a follow-up assign call (the create API requires a UID for cards);
-    // everything else (bound cards, standees, other) is created together.
-    const isDeferredCard = (item: CatalogProductLite) =>
-      item.category === 'card' && skipCardUids[item._id] === true;
-    const deferred = selectedItems.filter(isDeferredCard);
-    const bindNow = selectedItems.filter((item) => !isDeferredCard(item));
-
-    if (bindNow.length === 0 && deferred.length > 0) {
-      setFormError(
-        'The customer must be created with at least one bindable product. A card product assigned without a physical card can be added from the customer page after the account is created.'
-      );
-      return;
-    }
-
-    const products = bindNow.map((item) => ({
-      catalogProductId: item._id,
-      ...(item.category === 'card' ? { cardUid: (productCardUids[item._id] ?? '').trim() } : {}),
-      ...(item.category === 'standee' && (productPlatforms[item._id] ?? []).length > 0
-        ? { platforms: productPlatforms[item._id] }
-        : {}),
-    }));
+    const products = selectedItems.map((item) => {
+      const cardUid = (productCardUids[item._id] ?? '').trim();
+      return {
+        catalogProductId: item._id,
+        ...(item.category === 'card' && cardUid ? { cardUid } : {}),
+        ...(item.category === 'standee' && (productPlatforms[item._id] ?? []).length > 0
+          ? { platforms: productPlatforms[item._id] }
+          : {}),
+      };
+    });
 
     setCreating(true);
     try {
@@ -231,38 +220,8 @@ export default function AdminUsersPage() {
         return;
       }
 
-      // Customer exists now — attach every deferred card as an uninstantiated
-      // product (no physical UID), which the assign endpoint supports.
-      const newUserId: string | undefined = data?.user?._id;
-      const failedDeferred: string[] = [];
-      for (const item of deferred) {
-        if (!newUserId) {
-          failedDeferred.push(item.name);
-          continue;
-        }
-        try {
-          const deferredRes = await fetch(`/api/admin/users/${newUserId}/products`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ catalogProductId: item._id, quantity: 1 }),
-          });
-          if (!deferredRes.ok) failedDeferred.push(item.name);
-        } catch (error) {
-          console.error('Deferred product assignment failed:', error);
-          failedDeferred.push(item.name);
-        }
-      }
-
       setShowCreateModal(false);
       fetchUsers();
-
-      if (failedDeferred.length > 0) {
-        alert(
-          `Customer created, but these card products could not be added without a physical card: ${failedDeferred.join(
-            ', '
-          )}. Add them from the customer's page.`
-        );
-      }
     } catch (error) {
       setFormError('An error occurred');
       console.error('Create user failed:', error);

@@ -77,7 +77,10 @@ const CardSchema = new Schema(
     // Audit trail of UIDs this physical record has carried (card replacement).
     previousCardUids: { type: [String], default: [] },
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
-    routeSlug: { type: String, default: '', lowercase: true, trim: true },
+    // Route identifier. No `default: ''` — an absent value must stay undefined
+    // so the unique+sparse index skips it rather than colliding on duplicate
+    // empty strings (E11000).
+    routeSlug: { type: String, lowercase: true, trim: true },
     // Timestamp-based unique identifier for NEW card links (mirrors routeSlug
     // for freshly provisioned cards). Additive + sparse: legacy cards have no
     // `uid` and continue to resolve by routeSlug/cardUid. Never used to

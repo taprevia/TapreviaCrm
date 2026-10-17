@@ -60,7 +60,13 @@ export const cardMaterialSchema = z.enum(['pvc', 'metal', 'wooden']);
 export const assignProductSchema = z.object({
   catalogProductId: objectIdSchema,
   quantity: z.number().int().min(1).max(99).default(1),
-  cardUid: z.string().trim().min(1).max(64).optional(),
+  // Blank strings are normalised to `undefined` so an omitted/empty UID means
+  // "no physical card yet" (delegated to the pendingConfig path) rather than a
+  // validation error, and an empty value is never persisted.
+  cardUid: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().trim().min(1).max(64).optional()
+  ),
   platforms: z.array(z.string()).optional(),
   notes: z.string().max(500).optional(),
   material: cardMaterialSchema.default('pvc'),
@@ -112,7 +118,12 @@ export const createCustomerSchema = z.object({
   // via the monotonic bizslug counter — an admin-supplied value is the base,
   // never silently replaced with Card.name. When omitted the slug is derived
   // from the customer name (existing automatic behavior).
-  urlSlug: z.string().trim().min(1).max(40).optional(),
+  // Blank strings are normalised to `undefined` (never persisted empty) so the
+  // optional slug is genuinely optional.
+  urlSlug: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().trim().min(1).max(40).optional()
+  ),
   products: z.array(assignProductSchema).min(1, 'At least one product is required').max(50),
 });
 

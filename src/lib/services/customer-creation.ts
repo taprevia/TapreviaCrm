@@ -111,29 +111,37 @@ export async function createCustomerWithProducts(
 
     if (item.category === 'card') {
       const cardUid = input.cardUid?.trim();
-      if (!cardUid || !normalizeCardUidInput(cardUid)) {
-        return { ok: false, status: 400, error: 'Card UID is required for this product.' };
-      }
-      const normalized = normalizeCardUidInput(cardUid)!;
-      if (usedUids.has(normalized)) {
-        return {
-          ok: false,
-          status: 409,
-          error: 'This Card UID is already used for another selected product.',
-        };
-      }
-      usedUids.add(normalized);
-
-      // UID must not already be bound to another customer.
-      const existingCard = await findCardByUid(normalized);
-      if (existingCard) {
-        const { blocked } = uidConflictForUser(existingCard, '');
-        if (blocked) {
+      // A card product may be created WITHOUT a physical card UID: the
+      // assignment is then "uninstantiated" (UserProduct.pendingConfig) and a
+      // permanent timestamp route is minted automatically by
+      // `generateTimestampUid()` once a physical card is bound later. Only
+      // validate/normalize UIDs that were actually supplied — a blank/absent
+      // UID is deliberately delegated to the pendingConfig path.
+      if (cardUid) {
+        const normalized = normalizeCardUidInput(cardUid);
+        if (!normalized) {
+          return { ok: false, status: 400, error: `Invalid Card UID for '${item.name}'.` };
+        }
+        if (usedUids.has(normalized)) {
           return {
             ok: false,
             status: 409,
-            error: 'This Card UID is already assigned to another customer.',
+            error: 'This Card UID is already used for another selected product.',
           };
+        }
+        usedUids.add(normalized);
+
+        // UID must not already be bound to another customer.
+        const existingCard = await findCardByUid(normalized);
+        if (existingCard) {
+          const { blocked } = uidConflictForUser(existingCard, '');
+          if (blocked) {
+            return {
+              ok: false,
+              status: 409,
+              error: 'This Card UID is already assigned to another customer.',
+            };
+          }
         }
       }
     }
@@ -174,7 +182,7 @@ export async function createCustomerWithProducts(
           typeof input.quantity === 'number' && Number.isInteger(input.quantity)
             ? Math.min(Math.max(input.quantity, 1), 99)
             : 1,
-        cardUid: input.cardUid?.trim(),
+        cardUid: input.cardUid?.trim() || undefined,
         platforms: Array.isArray(input.platforms) ? input.platforms : undefined,
         notes: input.notes,
         assignedBy: args.assignedBy,

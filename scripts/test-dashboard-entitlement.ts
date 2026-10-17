@@ -599,18 +599,19 @@ function main(): void {
   // requires the UID when binding now; unsupported kinds stay blocked.
   check(
     'Assign Product modal offers card-less assignment (link later) but still requires UID when binding now',
-    hasText(adminUserDetailPage, 'Assign without a physical card (link later)') &&
+    hasText(adminUserDetailPage, 'Assign without a physical card') &&
       hasText(adminUserDetailPage, "!assignWithoutCard && !assignForm.cardUid.trim()") &&
       hasText(adminUserDetailPage, 'Enter the NFC Card UID to bind')
   );
   check(
     'Create Customer modal offers card-less assignment (link later)',
-    hasText(adminUsersPage, 'Assign without a physical card (link later)') &&
-      hasText(adminUsersPage, "!skipCardUids[id] && !(productCardUids[id] ?? '').trim()")
+    hasText(adminUsersPage, 'Assign without a physical card') &&
+      hasText(adminUsersPage, "!skipCardUids[item._id] && !(productCardUids[item._id] ?? '').trim()")
   );
   check(
     'shared admin assign schema keeps cardUid optional (card-less contract)',
-    hasText(catalogValidation, 'cardUid: z.string().trim().min(1).max(64).optional()')
+    hasText(catalogValidation, 'cardUid: z.preprocess(') &&
+      hasText(catalogValidation, 'z.string().trim().min(1).max(64).optional()')
   );
 
   // P5-4 — the dashboard destination label prefers the authoritative Google
