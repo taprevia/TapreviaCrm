@@ -6,6 +6,8 @@
  *  - `generateUniqueTimestampUid()` retries when a candidate is taken;
  *  - NEW card assignments stamp `uid` === `routeSlug` with a timestamp UID while
  *    preserving the admin-supplied physical `cardUid`;
+ *  - DIGITAL-FIRST card assignments (no physical UID supplied) mint a synthetic
+ *    `DIGITAL-…` cardUid while still stamping `uid` === `routeSlug`;
  *  - NEW standee assignments stamp `uid` === `routeSlug` with a timestamp UID;
  *  - both NEW (uid) and LEGACY (routeSlug-only) identifiers resolve through the
  *    same dual-track `$or` query used by the resolvers.
@@ -136,6 +138,40 @@ async function run() {
     const key = (c.uid ?? '').toLowerCase();
     const found = await Card.findOne({ isActive: true, $or: [{ routeSlug: key }, { uid: key }] });
     report('4e. card resolves via new uid (dual-track)', !!found && String(found._id) === String(c._id));
+  }
+
+  /* ═══ 4b. Digital-first card assignment (no physical UID supplied) ═══ */
+  const digitalCat = await CatalogProduct.findOne({ category: 'card', active: true }).lean();
+  if (digitalCat) {
+    const digitalRes = await assignUserProduct({
+      user,
+      catalogItem: digitalCat as never,
+      quantity: 1,
+      assignedBy: String(user._id),
+    });
+    report('4f. digital-first card assigned (no UID supplied)', digitalRes.ok);
+    if (digitalRes.ok && digitalRes.data.card) {
+      const d = digitalRes.data.card;
+      report('4g. digital card uid is a timestamp UID', !!d.uid && TS_UID.test(d.uid), `uid=${d.uid}`);
+      report('4h. digital card uid mirrors routeSlug', d.uid === d.routeSlug, `uid=${d.uid} routeSlug=${d.routeSlug}`);
+      report(
+        '4i. digital card cardUid is a synthetic DIGITAL- placeholder',
+        typeof d.cardUid === 'string' && d.cardUid.startsWith('DIGITAL-'),
+        `cardUid=${d.cardUid}`
+      );
+
+      const digitalKey = (d.uid ?? '').toLowerCase();
+      const foundDigital = await Card.findOne({
+        isActive: true,
+        $or: [{ routeSlug: digitalKey }, { uid: digitalKey }],
+      });
+      report(
+        '4j. digital card resolves via new uid (dual-track)',
+        !!foundDigital && String(foundDigital._id) === String(d._id)
+      );
+    }
+  } else {
+    console.log('  (no card-category catalog product seeded — 4f-4j skipped)');
   }
 
   /* ═══ 5. Legacy record (routeSlug only, no uid) still resolves ═══ */

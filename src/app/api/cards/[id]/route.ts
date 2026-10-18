@@ -328,6 +328,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     }
 
+    // Saving the builder IS completing setup: mark the card configured so the
+    // dashboard's "Setup Required" badge clears to "Active". Without this, a
+    // digital-first card (minted with setupComplete=false and with no admin
+    // "link physical card" step to ever complete it) would show "Setup
+    // Required" forever — this builder is the only customer-facing surface
+    // that configures a card. Autosave only fires on genuinely dirty changes,
+    // so merely OPENING the builder never marks a card complete. Idempotent.
+    card.setupComplete = true;
+
     await card.save();
 
     // Durable first, reclaim second. Replaces the client-invisible leak where

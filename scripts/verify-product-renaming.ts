@@ -111,13 +111,24 @@ async function main() {
     report('setup: assign standee', assignStandee.status === 201, `status ${assignStandee.status}`);
     standeeAssignmentId = String(assignStandee.json?.userProduct?._id ?? '');
 
-    // Uninstantiated card assignment (no UID)
-    const assignPending = await request(`/api/admin/users/${customerId}/products`, adminCookie, {
-      method: 'POST',
-      body: JSON.stringify({ catalogProductId: cardCatalog._id.toString(), quantity: 1 }),
+    // Legacy uninstantiated card assignment (pre-digital-first state).
+    //
+    // The API now auto-instantiates card-less assignments as DIGITAL-FIRST
+    // (a synthetic DIGITAL- UID provisions a real Card), so the LEGACY
+    // `cardId: null + pendingConfig` shape is seeded directly to keep
+    // backward-compat coverage of the pendingConfig rename/config path that
+    // still exists for assignments created before that change.
+    const pendingLegacy = await UserProduct.create({
+      userId: customerId,
+      catalogProductId: cardCatalog._id,
+      quantity: 1,
+      pendingConfig: {
+        kind: (cardCatalog as { kind?: string }).kind ?? 'profile',
+        cardLabel: cardCatalog.name,
+      },
     });
-    report('setup: assign uninstantiated card', assignPending.status === 201, `status ${assignPending.status}`);
-    pendingAssignmentId = String(assignPending.json?.userProduct?._id ?? '');
+    report('setup: legacy uninstantiated card seeded', !!pendingLegacy._id, String(pendingLegacy._id));
+    pendingAssignmentId = String(pendingLegacy._id);
 
     const list = await request('/api/my/products', custCookie);
     report('list: fetch my products', list.status === 200, `status ${list.status}`);

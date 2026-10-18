@@ -28,10 +28,12 @@
  *      serve 200 (not redirects). (Inquiries/Appointments are NAV-removed in
  *      the product scope; their API routes remain entitled-guarded.)
  *   F. /api/my/capabilities reflects exactly each product's capability grant.
- *   G. An uninstantiated card assignment (no physical card bound) can be
- *      configured via PATCH before linking; on admin linking the physical card
- *      the pending config is applied to the Card and the public route serves
- *      the destination immediately (P4).
+ *   G. A card-less assignment (no physical card bound) is auto-instantiated
+ *      as DIGITAL-FIRST (synthetic DIGITAL- UID → real Card with a permanent
+ *      route); it is configured via PATCH like any bound card; when an admin
+ *      later binds physical NFC hardware the cardUid is swapped in place while
+ *      the permanent route + config survive, and the public route serves the
+ *      destination immediately (P4).
  *   H. Assignment-rule confirmation (P5): a card product WITH a UID is bound
  *      immediately; the same physical UID is rejected for another customer; an
  *      unsupported kind stays restricted card-less; and a bound review card's
@@ -450,7 +452,8 @@ async function main() {
   const liCat = await CatalogProduct.findOne({ slug: 'linkedin-card' });
   if (!liCat) throw new Error('linkedin-card not seeded');
 
-  // Card-less assignment — no cardUid creates an uninstantiated card product.
+  // Card-less assignment — no cardUid → DIGITAL-FIRST: a synthetic DIGITAL-
+  // UID mints a real Card bound to the assignment.
   const p4AssignRes = await fetch(`${BASE}/api/admin/users/${p4User._id}/products`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', cookie: admin, origin: BASE },
@@ -465,27 +468,30 @@ async function main() {
   );
 
   if (p4AssignmentId) {
-    // P6 (P-A1) — the list must represent the unbound card assignment as a card
-    // needing setup (instanceType 'card', no invented instance, no permanent
-    // route) so My Products renders "Setup Required"/"Set Up" consistently with
-    // the configuration page.
+    // P6/P-A1 — a card assigned WITHOUT a UID is now DIGITAL-FIRST: the list
+    // must represent it as a REAL card (instanceType 'card', a bound instance
+    // with a synthetic DIGITAL- UID and a permanent timestamp route) so My
+    // Products renders a previewable card and a working card-editor link
+    // instead of a dead-end "Setup Required" row with no instance.
     const p4ListRaw = await request('/api/my/products', p4Cookie);
     const p4List = json(p4ListRaw.body) as {
       products?: Array<{
         assignmentId: string;
         instanceType?: string | null;
-        instance?: { id?: string } | null;
+        instance?: { id?: string; cardUid?: string; routeSlug?: string } | null;
         permanentRoute?: string | null;
       }> | null;
     } | null;
     const p4ListEntry = (p4List?.products ?? []).find((p) => p.assignmentId === p4AssignmentId);
     report(
-      'G3b. unbound card assignment listed as a card with no instance/permanent route',
+      'G3b. card-less assignment auto-instantiated (real card, synthetic DIGITAL- UID, permanent route)',
       p4ListRaw.status === 200 &&
         p4ListEntry?.instanceType === 'card' &&
-        p4ListEntry?.instance === null &&
-        p4ListEntry?.permanentRoute == null,
-      `instanceType=${p4ListEntry?.instanceType ?? 'missing'} instance=${p4ListEntry?.instance ? 'present' : 'null'} permanentRoute=${p4ListEntry?.permanentRoute ?? 'null'}`
+        p4ListEntry?.instance?.id != null &&
+        typeof p4ListEntry?.instance?.cardUid === 'string' &&
+        p4ListEntry.instance.cardUid.startsWith('DIGITAL-') &&
+        !!p4ListEntry.instance.routeSlug,
+      `instanceType=${p4ListEntry?.instanceType ?? 'missing'} cardUid=${p4ListEntry?.instance?.cardUid ?? 'none'} routeSlug=${p4ListEntry?.instance?.routeSlug ?? 'none'}`
     );
 
     const p4DetailRaw = await request(`/api/my/products/${p4AssignmentId}`, p4Cookie);
@@ -500,7 +506,7 @@ async function main() {
     } | null;
     const p4Product = p4Detail?.product;
     report(
-      'G4. GET product detail 200 for uninstantiated assignment (no instance yet)',
+      'G4. GET product detail 200 for digital-first assignment (card instance present)',
       p4DetailRaw.status === 200 && p4Product?.catalogProduct?.kind === 'social',
       `status=${p4DetailRaw.status} kind=${p4Product?.catalogProduct?.kind} instanceType=${p4Product?.instanceType}`
     );
@@ -514,9 +520,9 @@ async function main() {
       }),
     });
     const p4PatchBody = await p4PatchRes.text();
-    report('G5. PATCH config 200 for uninstantiated assignment', p4PatchRes.status === 200, `status=${p4PatchRes.status} body=${p4PatchBody.slice(0, 200)}`);
+    report('G5. PATCH config 200 for the digital-first assignment', p4PatchRes.status === 200, `status=${p4PatchRes.status} body=${p4PatchBody.slice(0, 200)}`);
 
-    // Confirm config persisted on the assignment's pendingConfig (synthesized via GET).
+    // Confirm config persisted on the bound Card instance (read back via GET).
     const p4Detail2Raw = await request(`/api/my/products/${p4AssignmentId}`, p4Cookie);
     const p4Detail2 = json(p4Detail2Raw.body) as {
       product?: {
@@ -526,7 +532,7 @@ async function main() {
     } | null;
     const p4Product2 = p4Detail2?.product;
     report(
-      'G6. re-GET confirms redirectUrl persisted on uninstantiated assignment',
+      'G6. re-GET confirms redirectUrl persisted on the card instance',
       p4Detail2Raw.status === 200 &&
         p4Product2?.instanceType === 'card' &&
         p4Product2?.instance?.redirectUrl === 'https://instagram.com/p4test',
@@ -545,38 +551,40 @@ async function main() {
     );
     report('G7. ownership enforced (other customer 404)', p4BadRaw.status === 404, `status=${p4BadRaw.status}`);
 
-    // Admin links a physical card to the uninstantiated assignment.
+    // Admin binds a physical NFC card to the DIGITAL-FIRST assignment.
+    //
+    // The assignment already holds a Card (the auto-instantiated digital one),
+    // so this hits replaceCardForAssignment: it swaps ONLY the cardUid in place
+    // and must preserve the permanent routeSlug/uid + ownership (no pre-created
+    // inventory record is needed — the UID must be free, not claimed).
     const linkUid = `ENTP4${Math.floor(Math.random() * 1e6)}`;
-    const linkCard = await Card.create({
-      cardUid: linkUid,
-      slug: `ent-p4-${Math.floor(Math.random() * 1e6)}`,
-      routeSlug: `r${Math.floor(Math.random() * 1e9)}`,
-      status: 'unassigned',
-      kind: 'profile',
-    });
+    const p4RouteSlugBefore = p4Product?.instance?.routeSlug;
     const p4LinkRes = await fetch(`${BASE}/api/admin/users/${p4User._id}/products/${p4AssignmentId}/card`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', cookie: admin, origin: BASE },
       body: JSON.stringify({ cardUid: linkUid }),
     });
     const p4LinkBody = await p4LinkRes.text();
-    report('G8. admin links physical card to uninstantiated assignment', p4LinkRes.status === 200, `status=${p4LinkRes.status} body=${p4LinkBody.slice(0, 300)}`);
+    report('G8. admin binds physical card to the digital-first assignment', p4LinkRes.status === 200, `status=${p4LinkRes.status} body=${p4LinkBody.slice(0, 300)}`);
 
-    // GET after linking — the instance is now the bound Card with pending config applied.
+    // GET after binding — same Card record, physical UID applied, config intact,
+    // permanent route UNCHANGED so links already shared keep working.
     const p4Detail3Raw = await request(`/api/my/products/${p4AssignmentId}`, p4Cookie);
     const p4Detail3 = json(p4Detail3Raw.body) as {
       product?: {
-        instance?: { cardUid?: string; redirectUrl?: string; routeSlug?: string; isActive?: boolean } | null;
+        instance?: { cardUid?: string; redirectUrl?: string; routeSlug?: string; uid?: string; isActive?: boolean } | null;
       };
     } | null;
     const p4Instance3 = p4Detail3?.product?.instance;
     report(
-      'G9. GET after linking shows bound instance with pending config applied',
+      'G9. physical bind swaps UID in place, preserving route + config',
       p4Detail3Raw.status === 200 &&
         p4Instance3?.cardUid === linkUid &&
         p4Instance3?.redirectUrl === 'https://instagram.com/p4test' &&
-        p4Instance3?.isActive === true,
-      `cardUid=${p4Instance3?.cardUid ?? 'none'} redirectUrl=${p4Instance3?.redirectUrl ?? 'missing'}`
+        p4Instance3?.isActive === true &&
+        !!p4RouteSlugBefore &&
+        p4Instance3?.routeSlug === p4RouteSlugBefore,
+      `cardUid=${p4Instance3?.cardUid ?? 'none'} redirectUrl=${p4Instance3?.redirectUrl ?? 'missing'} routeBefore=${p4RouteSlugBefore ?? 'none'} routeAfter=${p4Instance3?.routeSlug ?? 'none'}`
     );
 
     // Public route serves the destination configured before linking.
@@ -587,8 +595,6 @@ async function main() {
         p4RouteRaw.location?.includes('instagram.com/p4test'),
       `status=${p4RouteRaw.status} loc=${p4RouteRaw.location}`
     );
-
-    if (linkCard?._id) await Card.deleteOne({ _id: linkCard._id });
   }
 
   console.log('\n── H. ASSIGNMENT RULE CONFIRMATION (P5: admin card-less UX + review destination) ──');

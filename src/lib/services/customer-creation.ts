@@ -111,12 +111,13 @@ export async function createCustomerWithProducts(
 
     if (item.category === 'card') {
       const cardUid = input.cardUid?.trim();
-      // A card product may be created WITHOUT a physical card UID: the
-      // assignment is then "uninstantiated" (UserProduct.pendingConfig) and a
-      // permanent timestamp route is minted automatically by
-      // `generateTimestampUid()` once a physical card is bound later. Only
-      // validate/normalize UIDs that were actually supplied — a blank/absent
-      // UID is deliberately delegated to the pendingConfig path.
+      // A card product may be created WITHOUT a physical card UID — the
+      // assignment is then DIGITAL-FIRST: assignUserProduct mints a synthetic
+      // `DIGITAL-…` UID and provisions a real Card so the customer can
+      // configure, preview and find it on the portal immediately (a later
+      // hardware bind only swaps the cardUid in place). Only SUPPLIED UIDs
+      // need conflict preflight; an absent UID has no hardware identity to
+      // validate and cannot collide with anything.
       if (cardUid) {
         const normalized = normalizeCardUidInput(cardUid);
         if (!normalized) {

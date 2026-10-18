@@ -176,9 +176,10 @@ export default function AdminUsersPage() {
       .filter((item): item is CatalogProductLite => Boolean(item));
 
     // A physical card is bound only when its UID is supplied. Leaving the UID
-    // blank (or ticking "Assign without a physical card") creates an
-    // uninstantiated product; its permanent route is minted automatically when a
-    // card is later bound — handled natively by the create API.
+    // blank (or ticking "Assign without a physical card") creates a
+    // DIGITAL-FIRST product: the API mints a synthetic digital UID and provisions
+    // a real, routable card immediately; binding NFC hardware later only swaps
+    // the cardUid in place (permanent route preserved) — handled by the API.
     for (const item of selectedItems) {
       if (item.category === 'card' && !skipCardUids[item._id] && !(productCardUids[item._id] ?? '').trim()) {
         setFormError(`Enter the NFC Card UID for ${item.name}, or tick "Assign without a physical card".`);

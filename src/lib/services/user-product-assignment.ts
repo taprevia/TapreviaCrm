@@ -5,7 +5,7 @@ import User from '@/models/User';
 import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import { deriveCardKind } from '@/lib/services/product-experience';
-import { provisionCardForAssignment, allocateCardRouteSlug } from '@/lib/services/card-identity';
+import { provisionCardForAssignment, allocateCardRouteSlug, allocateDigitalCardUid } from '@/lib/services/card-identity';
 import { ensureCardPublicSlug, ensureStandeePublicSlug } from '@/lib/services/human-url';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { generateQrId } from '@/lib/utils';
@@ -49,6 +49,11 @@ interface AssignUserProductArgs {
   user: UserDoc;
   catalogItem: CatalogProductDoc;
   quantity: number;
+  /**
+   * Admin-supplied physical NFC card UID. When omitted the assignment is
+   * DIGITAL-FIRST: a synthetic `DIGITAL-…` UID is minted so a real Card is
+   * still provisioned and bound (see the `case 'card'` branch below).
+   */
   cardUid?: string;
   platforms?: string[];
   notes?: string;
@@ -58,7 +63,8 @@ interface AssignUserProductArgs {
 
 /**
  * Fulfil a catalog purchase for a user. Creates side-effect records per category:
- * cards are atomically claimed and linked to the profile, standees generate panel +
+ * cards are atomically claimed and linked to the profile (physical UID, or a
+ * synthetic digital-first UID when no hardware is supplied yet), standees generate panel +
  * social QRs, everything else only records the assignment.
  */
 export async function assignUserProduct({
@@ -82,35 +88,31 @@ export async function assignUserProduct({
         };
       }
 
-      // Card-less assignment: no physical NFC card is bound yet, so the
-      // product is an "uninstantiated" card product. Its configuration is
-      // stored on the assignment (UserProduct.pendingConfig) until a card is
-      // bound later; there is no public route until then.
-      if (!cardUid) {
-        const userProduct = await UserProduct.create({
-          userId: user._id,
-          catalogProductId: catalogItem._id,
-          quantity,
-          unitPriceMinor: catalogItem.priceMinor,
-          notes,
-          assignedBy,
-          material,
-          // Seed the product title on the assignment so the uninstantiated
-          // product displays the purchased product name from day one.
-          pendingConfig: {
-            kind: catalogItem.kind,
-            cardLabel: catalogItem.name,
-          },
-        });
+      // DIGITAL-FIRST ASSIGNMENT (no physical NFC card yet):
+      //
+      // A Card document is the only routable/previewable card — the vCards
+      // dashboard reads the Card collection, and `unboundCardNeedsSetup` drives
+      // "Setup Required" off `instance === null`. Leaving the assignment as a
+      // bare `pendingConfig` row (cardId null) therefore produced a product the
+      // customer could never configure into existence, preview, or find on the
+      // portal. A card product sold WITHOUT a hardware UID now still gets a
+      // real Card record: a synthetic `DIGITAL-…` UID is minted and the card is
+      // provisioned/bound exactly like a physical one (timestamp route UID,
+      // active + owned, human public URL, purchased name as its label).
+      //
+      // The initial config the old `pendingConfig` path carried (kind +
+      // cardLabel) lands on the Card itself via `provisionCardForAssignment`,
+      // so the assignment is a single source of truth from day one. When the
+      // physical card is bound later the admin replaces ONLY `cardUid` in place
+      // (see replaceCardForAssignment) — the permanent routeSlug/uid and public
+      // URL are preserved, so nothing already shared or printed breaks.
+      const bindingUid = cardUid ?? (await allocateDigitalCardUid());
 
-        return { ok: true, status: 201, data: { userProduct, card: null, cardCreated: false } };
-      }
-
-      // Provision + bind the physical card directly from the admin-supplied
-      // UID. No pre-registered inventory record is required; an existing
-      // unassigned card record with the same (normalized) UID is claimed.
+      // Provision + bind the card. A physical UID claims/binds directly (no
+      // pre-registered inventory required); the synthetic digital UID does the
+      // same for hardware-less sales.
       const provisioned = await provisionCardForAssignment({
-        uid: cardUid,
+        uid: bindingUid,
         userId: user._id.toString(),
         userName: user.name,
         productName: catalogItem.name,

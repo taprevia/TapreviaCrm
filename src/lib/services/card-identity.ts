@@ -84,6 +84,41 @@ export async function allocateCardRouteSlug(): Promise<string> {
   );
 }
 
+/** Marker prefix for a synthetic (not-yet-printed) NFC card UID. */
+export const DIGITAL_CARD_UID_PREFIX = 'DIGITAL-';
+
+/** Whether a card UID is a synthetic digital-first placeholder (no hardware yet). */
+export function isDigitalCardUid(uid: string | null | undefined): boolean {
+  return typeof uid === 'string' && uid.startsWith(DIGITAL_CARD_UID_PREFIX);
+}
+
+/**
+ * Mint a synthetic UID for a DIGITAL-FIRST card product (sold before any NFC
+ * hardware exists).
+ *
+ * The `Card` document is the ONLY routable/previewable card — the dashboard's
+ * vCards surface reads the Card collection — so a card product with no
+ * physical card still needs a Card record to be useful. Because `cardUid` is
+ * required + unique, we mint a synthetic `DIGITAL-…` placeholder UID instead of
+ * leaving the assignment uninstantiated.
+ *
+ * The prefix keeps it unmistakably distinct from a real NFC UID (which is a
+ * hex string), and it is DB-checked against both live `cardUid` values and
+ * `previousCardUids` (a retired placeholder is never re-issued). When the
+ * physical card eventually arrives, `replaceCardForAssignment` swaps ONLY the
+ * `cardUid` on the same document — the permanent `routeSlug`/`uid`, public URL
+ * and ownership all survive, so a shared/scanned link never breaks.
+ */
+export async function allocateDigitalCardUid(): Promise<string> {
+  const suffix = await generateUniqueTimestampUid(async (candidate) => {
+    const uid = `${DIGITAL_CARD_UID_PREFIX}${candidate.toUpperCase()}`;
+    return Boolean(
+      await Card.exists({ $or: [{ cardUid: uid }, { previousCardUids: uid }] })
+    );
+  });
+  return `${DIGITAL_CARD_UID_PREFIX}${suffix.toUpperCase()}`;
+}
+
 /**
  * Find-or-create the physical card for a UID and bind it to a user.
  *

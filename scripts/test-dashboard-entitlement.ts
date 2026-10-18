@@ -33,10 +33,12 @@
  *      Review single-source-of-truth (redirectUrl scoped to social cards, no
  *      forced reviewAssistant.enabled), and standee single-GET displayName
  *      parity with the list API.
- *   9. P4 uninstantiated assignment configuration — pendingConfig schema on
- *      UserProduct, card-less assignment creation, config PATCH pending branch
- *      (card + standee), GET single-product instance synthesis, admin card
- *      linking, and capability gate parity with bound assignments.
+ *   9. P4 card-less assignment configuration — card-less assignment creation is
+ *      DIGITAL-FIRST (a synthetic UID provisions a real Card, never a bare
+ *      pendingConfig row) and the vCard builder save completes card setup. The
+ *      LEGACY pendingConfig branch stays intact for assignments created before
+ *      that change (config PATCH, GET instance synthesis, admin card linking,
+ *      capability gate parity).
  *
  * Run with: npm run test:entitlement
  */
@@ -522,13 +524,22 @@ function main(): void {
       hasText(userProductModel, 'default: null')
   );
 
-  // P4-2 — assignUserProduct supports card-less assignment (no longer rejects
-  // when cardUid is missing; creates an assignment without a physical card).
+  // P4-2 — assignUserProduct supports card-less assignment as DIGITAL-FIRST:
+  // an absent cardUid mints a synthetic DIGITAL-… UID and provisions a REAL
+  // Card (never a bare pendingConfig row), so the product is instantly
+  // routable, previewable and listed as a vCard.
+  const cardIdentityService = path.join(ROOT, 'src', 'lib', 'services', 'card-identity.ts');
   check(
-    'assignUserProduct supports card-less assignments (no hard UID requirement)',
-    hasText(assignmentService, 'Card-less assignment') &&
-      hasText(assignmentService, 'pendingConfig') &&
+    'assignUserProduct auto-instantiates card-less assignments (digital-first, no hard UID requirement)',
+    hasText(assignmentService, 'allocateDigitalCardUid') &&
+      hasText(assignmentService, 'const bindingUid = cardUid ??') &&
       !hasText(assignmentService, "return { ok: false, status: 400, error: 'Card UID is required")
+  );
+  check(
+    'synthetic digital card UID is prefixed + DB-checked (never collides with live or retired UIDs)',
+    hasText(cardIdentityService, 'DIGITAL_CARD_UID_PREFIX') &&
+      hasText(cardIdentityService, 'allocateDigitalCardUid') &&
+      hasText(cardIdentityService, 'previousCardUids: uid')
   );
 
   // P4-3 — config PATCH persists to pendingConfig for uninstantiated card
@@ -585,6 +596,17 @@ function main(): void {
     'capability gate enforced for uninstantiated card configs',
     hasText(configRoute, 'category === \'card\' && !assignment.cardId') &&
       hasText(configRoute, 'hasCapability(user._id, requiredCap')
+  );
+
+  // P4-8 — a DIGITAL-FIRST card must be completable by the customer: saving the
+  // vCard builder marks the card's setup complete, which clears the dashboard's
+  // "Setup Required" badge. Autosave only fires on genuinely dirty changes, so
+  // merely OPENING the builder never completes setup.
+  const builderCardRoute = apiFileForPath('/cards/[id]');
+  check(
+    'builder save completes card setup (clears the Setup Required badge)',
+    hasText(builderCardRoute, 'card.setupComplete = true') &&
+      hasText(builderCardRoute, 'await card.save()')
   );
 
   // ── 10. P5 ADMIN CARD-LESS ASSIGNMENT UX & REVIEW DESTINATION ──────────────

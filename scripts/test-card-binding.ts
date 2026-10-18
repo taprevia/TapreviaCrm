@@ -5,7 +5,9 @@
  *   - customer creation binds a physical card by UID directly (no inventory)
  *   - UID normalization (lowercase input stored uppercase)
  *   - duplicate UID across customers is rejected
- *   - missing UID for a card product → uninstantiated (pendingConfig) assignment
+ *   - missing UID for a card product → DIGITAL-FIRST card auto-instantiated
+ *     (synthetic DIGITAL- UID, real Card bound), and a later hardware bind
+ *     preserves the permanent route/URL
  *   - non-card products need no UID
  *   - mixed standee + card customer creation
  *   - card replacement preserves route + ownership, updates UID + audit trail
@@ -24,6 +26,7 @@ import Standee from '@/models/Standee';
 import CatalogProduct from '@/models/CatalogProduct';
 import { createCustomerWithProducts } from '@/lib/services/customer-creation';
 import { replaceCardForAssignment } from '@/lib/services/card-replacement';
+import { isDigitalCardUid } from '@/lib/services/card-identity';
 import { assignUserProduct } from '@/lib/services/user-product-assignment';
 
 let passed = 0;
@@ -164,7 +167,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n── 4. Missing UID for a card product creates an uninstantiated assignment ──');
+  console.log('\n── 4. Missing UID → DIGITAL-FIRST card is auto-instantiated ──');
   {
     const res = await createCustomerWithProducts({
       name: 'No UID',
@@ -175,15 +178,54 @@ async function main(): Promise<void> {
     });
     check('creation succeeds without a UID', res.ok, res.ok ? undefined : res);
     if (res.ok) {
-      createdUsers.push(_user(res)._id as string);
-      check('no physical card bound', created(res).cardCount === 0, created(res).cardCount);
+      const owner = _user(res)._id as string;
+      createdUsers.push(owner);
+      check('a card is counted (digital-first)', created(res).cardCount === 1, created(res).cardCount);
+
+      const cardDoc = await Card.findOne({ assignedUserId: owner });
+      check('Card record auto-provisioned', !!cardDoc);
+      check('card carries a synthetic DIGITAL- UID', !!cardDoc && isDigitalCardUid(cardDoc.cardUid), cardDoc?.cardUid);
+      check('card is active + owned', !!cardDoc && cardDoc.status === 'active' && cardDoc.isActive === true);
+      check('permanent timestamp routeSlug minted', !!cardDoc && !!cardDoc.routeSlug);
+      check('uid mirrors routeSlug', !!cardDoc && cardDoc.uid === cardDoc.routeSlug, cardDoc?.uid);
+      check('purchased product name carried over as the card label', !!cardDoc && !!cardDoc.cardLabel, cardDoc?.cardLabel);
+
       const assignment = await UserProduct.findOne({
-        userId: _user(res)._id,
+        userId: owner,
         catalogProductId: cardProduct._id,
       });
-      check('uninstantiated assignment persisted (no cardId)', !!assignment && !assignment.cardId, assignment?.cardId);
-      check('pendingConfig seeded for later linking', !!assignment?.pendingConfig);
-      check('no Card record created', !(await Card.findOne({ userId: _user(res)._id })));
+      check('assignment links the Card (cardId set)', !!assignment?.cardId, assignment?.cardId);
+      check('no pendingConfig needed (single source of truth)', !assignment?.pendingConfig, assignment?.pendingConfig);
+
+      // Requirement 2 — binding physical hardware later must swap ONLY the UID
+      // and preserve the permanent route + public URL + ownership.
+      if (cardDoc) {
+        const before = {
+          uid: cardDoc.uid,
+          routeSlug: cardDoc.routeSlug,
+          publicSlug: cardDoc.publicSlug,
+          owner: cardDoc.assignedUserId?.toString(),
+          digitalUid: cardDoc.cardUid,
+        };
+        const hardware = uid();
+        const replaced = await replaceCardForAssignment({
+          card: (await Card.findById(cardDoc._id))!,
+          ownerUserId: owner,
+          newUid: hardware.toLowerCase(),
+        });
+        check('later hardware bind succeeds', replaced.ok, replaced.ok ? undefined : replaced);
+        const after = await Card.findById(cardDoc._id);
+        check('physical UID applied (normalized)', !!after && after.cardUid === hardware.toUpperCase(), after?.cardUid);
+        check('permanent routeSlug survives the hardware bind', !!after && after.routeSlug === before.routeSlug);
+        check('uid survives the hardware bind', !!after && after.uid === before.uid);
+        check('public URL survives the hardware bind', !!after && after.publicSlug === before.publicSlug);
+        check('owner survives the hardware bind', !!after && after.assignedUserId?.toString() === before.owner);
+        check(
+          'retired DIGITAL- UID archived (never reusable)',
+          !!after && after.previousCardUids?.includes(before.digitalUid),
+          after?.previousCardUids
+        );
+      }
     }
   }
 
