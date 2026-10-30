@@ -207,13 +207,6 @@ export async function GET(
         .select('urlAlias socialLinks')
         .lean() as { urlAlias?: string; socialLinks?: Array<{ platform: string; url: string }> } | null;
 
-      if (alias?.urlAlias) {
-        return NextResponse.redirect(
-          new URL(`/profile/${alias.urlAlias}`, request.url),
-          307
-        );
-      }
-
       const profileCount = Math.max(
         standee.maxProfiles ?? 0,
         standee.fixedProfiles?.length ?? 0,
@@ -222,9 +215,18 @@ export async function GET(
 
       // Multi-profile standees render a platform picker instead of a single
       // redirect: the panel QR faces every visitor, who chooses a destination.
+      // This must take precedence over a shared profile alias, otherwise a
+      // standee owner who also has a profile never reaches the standee panel.
       if (profileCount >= 2) {
         return NextResponse.redirect(
           new URL(`/panel/${routeKey}`, request.url),
+          307
+        );
+      }
+
+      if (alias?.urlAlias) {
+        return NextResponse.redirect(
+          new URL(`/profile/${alias.urlAlias}`, request.url),
           307
         );
       }

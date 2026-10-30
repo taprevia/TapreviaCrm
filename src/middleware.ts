@@ -9,6 +9,7 @@ const publicCardRoutes = [
   '/t/',
   '/qr/',
   '/r/', // permanent dynamic route — must never be blocked by auth
+  '/panel/', // public standee platform picker
   '/media/',
   '/api/public/',
 ];

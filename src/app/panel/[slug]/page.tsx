@@ -33,7 +33,10 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function PanelPage({ params }: Params) {
   await connectDB();
   const standee = (await Standee.findOne({
-    $expr: { $eq: [{ $toLower: '$routeSlug' }, params.slug.toLowerCase()] },
+    $or: [
+      { $expr: { $eq: [{ $toLower: '$routeSlug' }, params.slug.toLowerCase()] } },
+      { uid: params.slug.toLowerCase() },
+    ],
   }).lean()) as StandeeDoc | null;
   if (!standee) notFound();
 
