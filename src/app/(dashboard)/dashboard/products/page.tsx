@@ -407,7 +407,7 @@ export default function MyProductsPage() {
                   <a
                     href={destination.href}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="group mt-4 flex items-center gap-2 rounded-lg border border-line-subtle px-3.5 py-2.5 hover:border-accent-600/40 transition-colors"
                   >
                     <ExternalLink className="h-4 w-4 shrink-0 text-accent-400" aria-hidden="true" />

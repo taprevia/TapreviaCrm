@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Globe } from 'lucide-react';
 import type { ISocialLink } from './types';
+import { safeExternalUrl } from '@/lib/safe-url';
 
 /* ------------------------------------------------------------------ */
 /* Brand glyphs — inline SVG, currentColor only                        */
@@ -180,9 +181,11 @@ export function BrandIcon({
 
 function SocialLinkItem({ link }: { link: ISocialLink }) {
   const label = link.label?.trim() || link.platform;
+  const href = safeExternalUrl(link.url);
+  if (!href) return null;
   return (
     <a
-      href={link.url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       aria-label={label}

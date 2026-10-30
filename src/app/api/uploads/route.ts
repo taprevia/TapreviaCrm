@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { connectDB } from '@/lib/db';
 import { requireApiEntitlement } from '@/lib/auth/capability-guard';
-import { fail, ok, parsePagination } from '@/lib/api';
+import { fail, ok, parsePagination, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { mediaCategorySchema, uploadMetaSchema } from '@/lib/validation/media';
 import { objectIdSchema } from '@/lib/validation/common';
@@ -45,11 +45,8 @@ export async function POST(request: NextRequest) {
     if (authStatus === 403) return fail(403, 'FORBIDDEN', 'Your products do not include profile editing');
 
     const limit = await check(`upload:${user._id}`, 30, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many uploads');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many uploads');
+    if (limited) return limited;
 
     // ── Parse multipart body & metadata ──
     let form: FormData;

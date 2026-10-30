@@ -6,8 +6,9 @@
  * collection (one doc per key+window) with a TTL index for automatic purging.
  * The `check()` contract is unchanged so call sites only add an `await`.
  *
- * Failure mode: fail-open. If the store is unreachable the request is allowed
- * through — availability is preferred over blocking legit traffic.
+ * Fail closed when MongoDB is unavailable. Rate-limited handlers already
+ * depend on MongoDB, so allowing requests through would bypass the security
+ * control without preserving useful service availability.
  */
 
 import { createHash } from 'crypto';
@@ -18,6 +19,13 @@ export interface RateLimitResult {
   success: boolean;
   remaining: number;
   retryAfterSec: number;
+  /** True when the limiter store itself is unreachable (not a client limit). */
+  unavailable?: boolean;
+}
+
+/** Store failure: deny briefly and signal 503-worthy unavailability. */
+function storeUnavailable(): RateLimitResult {
+  return { success: false, remaining: 0, retryAfterSec: 5, unavailable: true };
 }
 
 function compactKey(key: string): string {
@@ -47,7 +55,7 @@ export async function check(
   try {
     await connectDB();
   } catch {
-    return { success: true, remaining: Math.max(0, limit - 1), retryAfterSec: 0 };
+    return storeUnavailable();
   }
 
   try {
@@ -75,7 +83,7 @@ export async function check(
       retryAfterSec: 0,
     };
   } catch (error) {
-    console.error('rate-limit store failure (fail-open):', error);
-    return { success: true, remaining: Math.max(0, limit - 1), retryAfterSec: 0 };
+    console.error('rate-limit store failure (fail-closed):', error);
+    return storeUnavailable();
   }
 }

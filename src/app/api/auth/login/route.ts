@@ -4,7 +4,7 @@ import { connectDB } from '@/lib/db';
 import User from '@/models/User';
 import { generateToken, setAuthCookie } from '@/lib/auth';
 import { check } from '@/lib/rate-limit';
-import { fail } from '@/lib/api';
+import { fail, rateLimitFailure } from '@/lib/api';
 import { loginSchema } from '@/lib/validation/auth';
 
 const LOGIN_LIMIT = 10;
@@ -16,11 +16,8 @@ export async function POST(request: NextRequest) {
   try {
     const ip = clientIp(request);
     const limit = await check(`login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many login attempts, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many login attempts, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = loginSchema.safeParse(body);

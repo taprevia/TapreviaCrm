@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import mongoose from 'mongoose';
 import { connectDB } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { ok, fail } from '@/lib/api';
+import { ok, fail, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import Card from '@/models/Card';
 
@@ -32,11 +32,8 @@ export async function GET(request: NextRequest) {
     if (!user) return fail(401, 'UNAUTHORIZED', 'Unauthorized');
 
     const limit = await check(`alias:${user._id}`, 60, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests');
+    if (limited) return limited;
 
     const sp = new URL(request.url).searchParams;
     const alias = (sp.get('alias') ?? '').trim().toLowerCase();

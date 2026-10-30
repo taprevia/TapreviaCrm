@@ -8,6 +8,7 @@ import { logPublicCardAction } from '@/lib/analytics';
 import { PublicVcardRenderer } from '@/components/public/template-registry';
 import { canUseFeature } from '@/lib/services/feature-access';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
 
 /**
@@ -134,7 +135,7 @@ export async function PublicCardPage({ card }: { card: ICard }) {
   return (
     <div className="vcard-root min-h-screen" style={themeVars}>
       <PublicVcardRenderer
-        vcard={card}
+        vcard={toPublicRenderCardDto(card) as unknown as ICard}
         products={products}
         newsletterDelaySeconds={settings?.general?.newsletterModalDelaySeconds ?? 8}
         newsletterEnabled={newsletterEnabled}

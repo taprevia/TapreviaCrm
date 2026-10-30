@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 import '@/models';
+import { resolveBackupDbName } from '@/lib/db-target';
 
 const LOG_PREFIX = '[db]';
 const LOCAL_FALLBACK_URI = 'mongodb://localhost:27017/nfc-crm';
-const BACKUP_DB_NAME = 'taprevia_backup';
 
 interface MongooseCache {
   conn: typeof mongoose | null;
@@ -80,6 +80,14 @@ function resolvePrimaryDbName(): string {
 const MONGODB_URI = resolvePrimaryUri();
 const MONGODB_BACKUP_URI = resolveBackupUri();
 const PRIMARY_DB_NAME = resolvePrimaryDbName();
+const IS_PRODUCTION_TARGET =
+  envValue('VERCEL_ENV') === 'production' ||
+  (!envValue('VERCEL_ENV') && process.env.NODE_ENV === 'production');
+const BACKUP_DB_NAME = resolveBackupDbName(
+  PRIMARY_DB_NAME,
+  envValue('MONGODB_BACKUP_DB'),
+  IS_PRODUCTION_TARGET
+);
 
 const BASE_OPTIONS = {
   bufferCommands: false,
@@ -140,7 +148,8 @@ export async function connectDB() {
 }
 
 /**
- * Dedicated connection to the backup database (`taprevia_backup`). Uses its own
+ * Dedicated connection to the environment's backup database (production:
+ * `taprevia_backup`; development: `<primary>_backup`). Uses its own
  * `mongoose.createConnection` so it never interferes with the primary/default
  * connection, and is cached across serverless invocations.
  */

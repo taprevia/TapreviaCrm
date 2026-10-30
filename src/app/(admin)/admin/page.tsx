@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   CalendarDays,
   Download,
@@ -80,51 +81,6 @@ function fmtBytes(bytes: number): string {
   return `${(kb / (1024 * 1024)).toFixed(2)} GB`;
 }
 
-/** Compact relative timestamp ('5m ago', '2h ago', …) — same cadence as the dashboard. */
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const diff = Date.now() - then;
-  if (diff < 60_000) return 'just now';
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(diff / 86_400_000);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  return new Date(iso).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-// ─── Pill styles ─────────────────────────────────────────────────────────────
-
-const INQUIRY_PILL_CLASS: Record<string, string> = {
-  new: 'bg-accent-600/15 text-accent-400',
-  contacted: 'bg-warn/15 text-warn',
-  won: 'bg-ok/15 text-ok',
-  lost: 'bg-bad/15 text-bad',
-};
-
-const APPOINTMENT_PILL_CLASS: Record<string, string> = {
-  pending: 'bg-warn/15 text-warn',
-  confirmed: 'bg-accent-600/15 text-accent-400',
-  completed: 'bg-ok/15 text-ok',
-  cancelled: 'bg-bad/15 text-bad',
-};
-
-// ─── Appointment date block (UTC slice — dates are stored at UTC midnight) ───
-
-const MONTHS_SHORT_UTC = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function utcDateParts(isoDate: string): { day: string; month: string } | null {
-  if (isoDate.length < 10) return null;
-  const day = isoDate.slice(8, 10);
-  const month = MONTHS_SHORT_UTC[Number.parseInt(isoDate.slice(5, 7), 10) - 1];
-  if (!month || !day) return null;
-  return { day: String(Number.parseInt(day, 10)), month: month.toUpperCase() };
-}
-
 export default function AdminOverviewPage() {
   /** Card is light by default in the ui kit — these overrides re-skin it for the dark admin shell. */
   const CARD_DARK = 'bg-surface border-transparent ring-1 ring-line-subtle';
@@ -181,6 +137,7 @@ export default function AdminOverviewPage() {
           label: 'Users',
           value: totals.users.toLocaleString(),
           hint: `${totals.admins.toLocaleString()} admin · ${totals.customers.toLocaleString()} customer`,
+          href: '/admin/users',
         },
         {
           icon: Nfc,
@@ -205,6 +162,7 @@ export default function AdminOverviewPage() {
           label: 'Products',
           value: totals.products.toLocaleString(),
           hint: `${totals.activeProducts.toLocaleString()} active`,
+          href: '/admin/products',
         },
         {
           icon: ShoppingBag,
@@ -276,155 +234,24 @@ export default function AdminOverviewPage() {
               </div>
             </Card>
           ))}
-        {!loading && statTiles.map((tile) => (
-          <StatCard key={tile.label} icon={tile.icon} label={tile.label} value={tile.value} hint={tile.hint} />
-        ))}
+        {!loading && statTiles.map((tile) => {
+          const card = (
+            <StatCard icon={tile.icon} label={tile.label} value={tile.value} hint={tile.hint} />
+          );
+          return tile.href ? (
+            <Link
+              key={tile.label}
+              href={tile.href}
+              className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+            >
+              {card}
+            </Link>
+          ) : (
+            <div key={tile.label}>{card}</div>
+          );
+        })}
       </div>
 
-      {/* Two-column sections */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Recent inquiries — admins have no inquiry page of their own, so no view-all */}
-        <Card className={cn('p-6', CARD_DARK)}>
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-ink">Recent inquiries</h2>
-          </div>
-
-          {loading && (
-            <div role="status" aria-label="Loading recent inquiries" className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="animate-pulse space-y-1.5 rounded-xl p-3 ring-1 ring-line-subtle">
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-28 rounded-md bg-field" />
-                    <div className="ml-auto h-3 w-12 rounded bg-field" />
-                  </div>
-                  <div className="h-3 w-44 rounded bg-field" />
-                  <div className="h-3 w-full max-w-xs rounded bg-field" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && !error && data && data.recent.inquiries.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
-              <div className="rounded-full bg-field p-3">
-                <Inbox className="h-6 w-6 text-ink-faint" aria-hidden="true" />
-              </div>
-              <p className="mt-3 text-sm font-medium text-ink">No inquiries yet</p>
-              <p className="mt-0.5 text-xs text-ink-mute">Customer cards will capture inquiries here.</p>
-            </div>
-          )}
-
-          {!loading && data && data.recent.inquiries.length > 0 && (
-            <ul role="list" className="space-y-2">
-              {data.recent.inquiries.map((inquiry) => {
-                const pillClass = INQUIRY_PILL_CLASS[inquiry.status] ?? 'bg-field text-ink-faint';
-                return (
-                  <li
-                    key={inquiry._id}
-                    className="flex items-start justify-between gap-4 rounded-xl p-3 ring-1 ring-line-subtle transition-colors hover:bg-surface-2"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="truncate text-sm font-semibold text-ink">{inquiry.name}</h3>
-                        <span className="ml-auto shrink-0 pl-2 text-xs text-ink-faint">
-                          {relativeTime(inquiry.createdAt)}
-                        </span>
-                      </div>
-                      <p className="truncate text-xs text-ink-mute">{inquiry.email || 'No email'}</p>
-                      <p className="line-clamp-1 text-sm text-ink-mute">{inquiry.message}</p>
-                      <div className="flex items-center gap-2 pt-0.5">
-                        <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize', pillClass)}>
-                          {inquiry.status}
-                        </span>
-                        {inquiry.card.urlAlias && (
-                          <a
-                            href={`/profile/${inquiry.card.urlAlias}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block max-w-fit truncate font-mono text-xs text-accent-400 hover:underline"
-                          >
-                            /profile/{inquiry.card.urlAlias}
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-
-        {/* Upcoming appointments */}
-        <Card className={cn('p-6', CARD_DARK)}>
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-ink">Upcoming appointments</h2>
-          </div>
-
-          {loading && (
-            <div role="status" aria-label="Loading upcoming appointments" className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex animate-pulse items-center gap-3">
-                  <div className="h-12 w-10 shrink-0 rounded-lg bg-field" />
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="h-4 w-28 rounded-md bg-field" />
-                    <div className="h-4 w-16 rounded-full bg-field" />
-                  </div>
-                  <div className="h-5 w-20 shrink-0 rounded-full bg-field" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && !error && data && data.recent.appointments.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
-              <div className="rounded-full bg-field p-3">
-                <CalendarDays className="h-6 w-6 text-ink-faint" aria-hidden="true" />
-              </div>
-              <p className="mt-3 text-sm font-medium text-ink">Nothing booked</p>
-              <p className="mt-0.5 text-xs text-ink-mute">Upcoming bookings will appear here.</p>
-            </div>
-          )}
-
-          {!loading && data && data.recent.appointments.length > 0 && (
-            <ul role="list" className="space-y-3">
-              {data.recent.appointments.map((appt) => {
-                const parts = utcDateParts(appt.date);
-                const pillClass = APPOINTMENT_PILL_CLASS[appt.status] ?? 'bg-field text-ink-faint';
-                return (
-                  <li key={appt._id} className="flex items-center gap-3">
-                    {/* Date block — day + short month derived from the UTC slice only */}
-                    <div className="w-10 shrink-0 rounded-lg bg-field px-1 py-1.5 text-center ring-1 ring-line-subtle" aria-hidden="true">
-                      <span className="block text-lg font-semibold leading-none tabular-nums text-ink">
-                        {parts?.day ?? '–'}
-                      </span>
-                      <span className="mt-0.5 block text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-                        {parts?.month ?? ''}
-                      </span>
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <h3 className="truncate text-sm font-semibold text-ink">{appt.visitorName}</h3>
-                      <span className="inline-flex items-center rounded-full bg-accent-600/15 px-2 py-0.5 text-[10px] font-medium tabular-nums text-accent-400">
-                        {appt.slot}
-                      </span>
-                    </div>
-
-                    <span
-                      className={cn(
-                        'shrink-0 self-start rounded-full px-2.5 py-0.5 text-xs font-medium capitalize',
-                        pillClass
-                      )}
-                    >
-                      {appt.status}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-      </div>
     </div>
   );
 }

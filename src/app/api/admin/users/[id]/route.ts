@@ -179,7 +179,7 @@ export async function PUT(
       // If suspending, also suspend their card
       if (status === 'suspended') {
         await Card.updateMany(
-          { assignedUserId: user._id },
+          { $or: [{ assignedUserId: user._id }, { userId: user._id }] },
           { status: 'suspended' }
         );
       }

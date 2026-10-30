@@ -4,6 +4,8 @@ import { connectDB } from '@/lib/db';
 import Card from '@/models/Card';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { clientIpFromHeaders } from '@/lib/request-ip';
+import { check } from '@/lib/rate-limit';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,13 +27,18 @@ async function recordShimTap(
   if (!isActiveCard) return;
   try {
     const hdrs = headers();
+    const ip = clientIpFromHeaders(hdrs);
+    const ipLimit = await check(`track:${ip}`, 120, 60_000);
+    if (!ipLimit.success) return;
+    const cardLimit = await check(`track-tap-card:${String(cardId)}`, 600, 60_000);
+    if (!cardLimit.success) return;
     await Promise.all([
       Card.updateOne({ _id: cardId }, { $inc: { 'stats.taps': 1 } }),
       AnalyticsLog.create({
         cardId,
         action: 'tap',
         metadata: `card:${key}`,
-        ip: clientIpFromHeaders(hdrs),
+        ip,
         userAgent: hdrs.get('user-agent') ?? '',
       }),
     ]);
@@ -45,10 +52,9 @@ export default async function LegacyCardPage({ params }: Params) {
   await connectDB();
   const slug = params.slug.toLowerCase();
 
-  const direct = await Card.findOne({
-    isActive: true,
-    $or: [{ urlAlias: slug }, { slug }],
-  })
+  const direct = await Card.findOne(
+    withPublicCardVisibility({ $or: [{ urlAlias: slug }, { slug }] })
+  )
     .select('urlAlias slug status')
     .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
   if (direct) {
@@ -56,7 +62,9 @@ export default async function LegacyCardPage({ params }: Params) {
     redirect(`/profile/${direct.urlAlias || direct.slug}`);
   }
 
-  const card = await Card.findOne({ cardUid: slug.toUpperCase(), isActive: true })
+  const card = await Card.findOne(
+    withPublicCardVisibility({ cardUid: slug.toUpperCase() })
+  )
     .select('urlAlias slug status')
     .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
   if (card) {

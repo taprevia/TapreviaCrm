@@ -86,7 +86,7 @@ export const standeeSlotConfigSchema = z.object({
 
 export const updateProductConfigSchema = z.object({
   // For social cards
-  destinationUrl: z.string().max(2048).optional(),
+  destinationUrl: optionalSafeUrl.optional(),
 
   // Public display name shown on standee panel/QR picker pages.
   displayName: z.string().max(120).optional(),
@@ -97,18 +97,18 @@ export const updateProductConfigSchema = z.object({
   // For Instagram cards
   instagram: z.object({
     username: z.string().min(1).max(100).optional(),
-    profileUrl: z.string().max(2048).optional(),
-    reelsUrl: z.string().max(2048).optional(),
-    postsUrl: z.string().max(2048).optional(),
-    dmUrl: z.string().max(2048).optional(),
-    shopUrl: z.string().max(2048).optional(),
+    profileUrl: optionalSafeUrl.optional(),
+    reelsUrl: optionalSafeUrl.optional(),
+    postsUrl: optionalSafeUrl.optional(),
+    dmUrl: optionalSafeUrl.optional(),
+    shopUrl: optionalSafeUrl.optional(),
   }).optional(),
 
   // For Google Review cards
   googleReview: z.object({
-    googleReviewUrl: z.string().max(2048).optional(),
+    googleReviewUrl: optionalSafeUrl.optional(),
     businessName: z.string().max(200).optional(),
-    mapsUrl: z.string().max(2048).optional(),
+    mapsUrl: optionalSafeUrl.optional(),
   }).optional(),
 
   // For WhatsApp cards
@@ -119,15 +119,15 @@ export const updateProductConfigSchema = z.object({
 
   // For LinkedIn cards
   linkedin: z.object({
-    profileUrl: z.string().max(2048).optional(),
-    resumeUrl: z.string().max(2048).optional(),
+    profileUrl: optionalSafeUrl.optional(),
+    resumeUrl: optionalSafeUrl.optional(),
   }).optional(),
 
   // For Facebook cards
   facebook: z.object({
-    profileUrl: z.string().max(2048).optional(),
-    pageUrl: z.string().max(2048).optional(),
-    messengerUrl: z.string().max(2048).optional(),
+    profileUrl: optionalSafeUrl.optional(),
+    pageUrl: optionalSafeUrl.optional(),
+    messengerUrl: optionalSafeUrl.optional(),
   }).optional(),
 });
 

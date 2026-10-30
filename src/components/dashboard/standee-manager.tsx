@@ -312,7 +312,7 @@ export default function StandeeManager() {
                     <a
                       href={publicPanelUrl}
                       target="_blank"
-                      rel="noreferrer"
+                       rel="noopener noreferrer"
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-field px-3 text-xs font-medium text-accent-400 transition-colors hover:bg-white/5"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
@@ -447,7 +447,7 @@ onClick={() => copy(publicPanelUrl, inst.id)}
                         <a
                           href={slot.destinationUrl}
                           target="_blank"
-                          rel="noreferrer"
+                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 text-xs text-accent-400 hover:text-accent-300"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />

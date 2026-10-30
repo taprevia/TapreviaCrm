@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard, Users, Eye, Package, QrCode, Tag, Pencil, KeyRound } from 'lucide-react';
+import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard, Users, Eye, Package, QrCode, Tag, Pencil, KeyRound, ChevronDown } from 'lucide-react';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { getFixedStandeeProfiles } from '@/config/products';
 import { isPasswordCompliant, PASSWORD_POLICY_MESSAGE } from '@/lib/auth/password-policy';
@@ -29,6 +30,7 @@ interface User {
   card?: {
     _id?: string;
     slug: string;
+    templateKey?: string;
     status: string;
     stats?: { taps?: number };
   };
@@ -57,6 +59,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', urlSlug: '' });
@@ -441,127 +444,190 @@ export default function AdminUsersPage() {
                   </td>
                 </tr>
               ) : (
-                users.map((user) => (
-                  <tr key={user._id} className="hover:bg-white/5 transition-colors cursor-pointer" onClick={() => router.push(`/admin/users/${user._id}`)}>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-600/15 text-sm font-semibold text-accent-400 ring-1 ring-accent-500/25">
-                          {(user.name || '?').charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-medium text-ink">{user.name || 'Unnamed customer'}</p>
-                          <p className="text-sm text-ink-mute">{user.email || '—'}</p>
-                          {user.customerId && (
-                            <p className="font-mono text-[11px] text-ink-faint pt-0.5">
-                              {user.customerId}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-ink-mute">
-                      {user.profile?.companyInfo?.companyName || <span className="text-ink-faint">-</span>}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      {(() => {
-                        const userCards = user.cards?.length ? user.cards : user.card ? [user.card] : [];
-                        return userCards.length ? (
-                          <div className="flex flex-col items-start gap-1">
-                            {userCards.map((c) => (
-                              <span key={c._id || c.slug} className="font-mono text-sm text-accent-400 bg-accent-600/15 px-2 py-0.5 rounded">
-                                /c/{c.slug || '—'}
-                              </span>
-                            ))}
+                users.map((user) => {
+                  const userCards = user.cards?.length ? user.cards : user.card ? [user.card] : [];
+                  const expanded = expandedUserId === user._id;
+                  const countLabel =
+                    userCards.length === 0
+                      ? 'No cards'
+                      : userCards.length === 1
+                        ? '1 Card'
+                        : `${userCards.length} Cards`;
+                  return (
+                    <Fragment key={user._id}>
+                      <tr
+                        className="h-[72px] hover:bg-white/5 transition-colors cursor-pointer"
+                        onClick={() => router.push(`/admin/users/${user._id}`)}
+                      >
+                        <td className="px-5 py-2 align-middle">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-600/15 text-sm font-semibold text-accent-400 ring-1 ring-accent-500/25">
+                              {(user.name || '?').charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <Link
+                                href={`/admin/users/${user._id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                title={user.name || 'Unnamed customer'}
+                                className="block max-w-[210px] truncate font-medium text-ink hover:text-accent-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 rounded"
+                              >
+                                {user.name || 'Unnamed customer'}
+                              </Link>
+                              <p className="block max-w-[210px] truncate text-sm text-ink-mute" title={user.email || undefined}>
+                                {user.email || '—'}
+                              </p>
+                              {user.customerId && (
+                                <p className="block max-w-[210px] truncate font-mono text-[10px] text-ink-faint" title={user.customerId}>
+                                  {user.customerId}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        ) : (
-                          <span className="text-sm text-ink-faint italic">No card</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <Badge
-                          variant={user.role === 'admin' ? 'warning' : 'default'}
-                          className={user.role === 'admin'
-                            ? 'bg-warn/15 text-warn ring-line-subtle'
-                            : 'ring-line-subtle'}
-                        >
-                          {user.role}
-                        </Badge>
-                        <Badge
-                          variant={user.status === 'active' ? 'success' : 'danger'}
-                          className={user.status === 'active'
-                            ? 'bg-ok/15 text-ok ring-line-subtle'
-                            : 'bg-bad/15 text-bad ring-line-subtle'}
-                        >
-                          {user.status}
-                        </Badge>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-sm font-semibold text-ink tabular-nums">
-                      {(() => {
-                        const userCards = user.cards?.length ? user.cards : user.card ? [user.card] : [];
-                        return userCards.reduce((sum, c) => sum + (c.stats?.taps ?? 0), 0);
-                      })()}
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-ink-mute">
-                      {new Date(user.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => router.push(`/admin/users/${user._id}`)}
-                          title="View details"
-                          className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
-                        >
-                          <Eye className="h-3.5 w-3.5 text-accent-400" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditModal(user)}
-                          title="Edit credentials"
-                          className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
-                        >
-                          <Pencil className="h-3.5 w-3.5 text-ink-mute" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openResetModal(user)}
-                          title="Reset password"
-                          className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
-                        >
-                          <KeyRound className="h-3.5 w-3.5 text-ink-mute" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleStatusToggle(user)}
-                          title={user.status === 'active' ? 'Suspend' : 'Activate'}
-                          className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
-                        >
-                          {user.status === 'active' ? (
-                            <ShieldOff className="h-3.5 w-3.5 text-warn" />
+                        </td>
+                        <td className="px-5 py-2 align-middle text-sm text-ink-mute">
+                          {user.profile?.companyInfo?.companyName ? (
+                            <span className="block max-w-[140px] truncate" title={user.profile.companyInfo.companyName}>
+                              {user.profile.companyInfo.companyName}
+                            </span>
                           ) : (
-                            <ShieldCheck className="h-3.5 w-3.5 text-ok" />
+                            <span className="text-ink-faint">-</span>
                           )}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDelete(user)}
-                          title="Delete user"
-                          className="border-line-strong bg-transparent hover:bg-bad/10 hover:border-bad/40 focus:ring-accent-500"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-bad" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </td>
+                        <td className="px-5 py-2 align-middle">
+                          {userCards.length === 0 ? (
+                            <span className="text-sm italic text-ink-faint">No cards</span>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-expanded={expanded}
+                              aria-controls={`cards-${user._id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedUserId(expanded ? null : user._id);
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-md bg-accent-600/15 px-2 py-1 text-xs font-medium text-accent-400 ring-1 ring-accent-500/25 transition-colors hover:bg-accent-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+                            >
+                              <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
+                              {countLabel}
+                              <ChevronDown
+                                className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                                aria-hidden="true"
+                              />
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-5 py-2 align-middle">
+                          <div className="flex items-center gap-1.5 whitespace-nowrap">
+                            <Badge
+                              variant={user.role === 'admin' ? 'warning' : 'default'}
+                              className={user.role === 'admin'
+                                ? 'bg-warn/15 text-warn ring-line-subtle'
+                                : 'ring-line-subtle'}
+                            >
+                              {user.role}
+                            </Badge>
+                            <Badge
+                              variant={user.status === 'active' ? 'success' : 'danger'}
+                              className={user.status === 'active'
+                                ? 'bg-ok/15 text-ok ring-line-subtle'
+                                : 'bg-bad/15 text-bad ring-line-subtle'}
+                            >
+                              {user.status}
+                            </Badge>
+                          </div>
+                        </td>
+                        <td className="px-5 py-2 align-middle text-sm font-semibold text-ink tabular-nums">
+                          {userCards.reduce((sum, c) => sum + (c.stats?.taps ?? 0), 0)}
+                        </td>
+                        <td className="px-5 py-2 align-middle text-sm text-ink-mute whitespace-nowrap">
+                          {new Date(user.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-5 py-2 align-middle">
+                          <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => router.push(`/admin/users/${user._id}`)}
+                              title="View details"
+                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                            >
+                              <Eye className="h-3.5 w-3.5 text-accent-400" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEditModal(user)}
+                              title="Edit credentials"
+                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-ink-mute" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openResetModal(user)}
+                              title="Reset password"
+                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                            >
+                              <KeyRound className="h-3.5 w-3.5 text-ink-mute" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleStatusToggle(user)}
+                              title={user.status === 'active' ? 'Suspend' : 'Activate'}
+                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                            >
+                              {user.status === 'active' ? (
+                                <ShieldOff className="h-3.5 w-3.5 text-warn" />
+                              ) : (
+                                <ShieldCheck className="h-3.5 w-3.5 text-ok" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDelete(user)}
+                              title="Delete user"
+                              className="border-line-strong bg-transparent hover:bg-bad/10 hover:border-bad/40 focus:ring-accent-500"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-bad" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr id={`cards-${user._id}`} className="animate-fade-in bg-white/5">
+                          <td colSpan={7} className="px-5 pb-4 pt-1" onClick={(e) => e.stopPropagation()}>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {userCards.map((c) => (
+                                <a
+                                  key={c._id || c.slug}
+                                  href={`/c/${c.slug}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-line-subtle bg-surface px-3 py-2 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-medium text-ink" title={c.templateKey || 'Card'}>
+                                      {c.templateKey || 'Card'}
+                                    </span>
+                                    <span className="block truncate font-mono text-xs text-accent-400" title={`/c/${c.slug}`}>
+                                      /c/{c.slug}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 rounded-full bg-field px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-mute">
+                                    {c.status}
+                                  </span>
+                                </a>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>

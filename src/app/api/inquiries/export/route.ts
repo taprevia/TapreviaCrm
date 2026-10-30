@@ -102,10 +102,13 @@ export async function GET(request: NextRequest) {
       ];
     });
 
-    const csv = Papa.unparse({
-      fields: ['Name', 'Email', 'Phone', 'Message', 'Source', 'Status', 'Card', 'Date'],
-      data: csvData,
-    });
+    const csv = Papa.unparse(
+      {
+        fields: ['Name', 'Email', 'Phone', 'Message', 'Source', 'Status', 'Card', 'Date'],
+        data: csvData,
+      },
+      { escapeFormulae: true }
+    );
 
     return new NextResponse(csv, {
       headers: {

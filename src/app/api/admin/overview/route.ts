@@ -6,8 +6,10 @@ import User from '@/models/User';
 import Card from '@/models/Card';
 import Inquiry from '@/models/Inquiry';
 import Appointment from '@/models/Appointment';
-import Product from '@/models/Product';
 import ProductEnquiry from '@/models/ProductEnquiry';
+import CatalogProduct from '@/models/CatalogProduct';
+import { ALL_PRODUCT_IDS } from '@/config/products';
+import { countCatalogProducts } from '@/lib/admin-product-counts';
 
 export const dynamic = 'force-dynamic';
 import NewsletterSubscriber from '@/models/NewsletterSubscriber';
@@ -71,10 +73,9 @@ export async function GET(request: NextRequest) {
       newInquiries,
       appointmentsTotal,
       upcomingAppointments,
-      productsTotal,
-      activeProducts,
       productEnquiriesTotal,
       newProductEnquiries,
+      catalogRecords,
       newsletterSubscribers,
       mediaAgg,
       recentInquiryDocs,
@@ -92,10 +93,9 @@ export async function GET(request: NextRequest) {
       Inquiry.countDocuments({ status: 'new' }),
       Appointment.countDocuments({}),
       Appointment.countDocuments(upcomingFilter),
-      Product.countDocuments({}),
-      Product.countDocuments({ active: true }),
       ProductEnquiry.countDocuments({}),
       ProductEnquiry.countDocuments({ status: 'new' }),
+      CatalogProduct.find().select('slug active').lean<{ slug: string; active?: boolean }[]>(),
       NewsletterSubscriber.countDocuments({}),
       Media.aggregate<{ files: number; bytes: number }>([
         { $group: { _id: null, files: { $sum: 1 }, bytes: { $sum: '$bytes' } } },
@@ -116,6 +116,13 @@ export async function GET(request: NextRequest) {
 
     const cardsByStatus = new Map(
       cardStatusGroups.map((g) => [g._id ?? '', g.count])
+    );
+
+    // Product totals follow the Admin Products listing (src/config/products.ts
+    // merged with catalog records), not the legacy Product collection.
+    const { products: productsTotal, activeProducts } = countCatalogProducts(
+      ALL_PRODUCT_IDS,
+      catalogRecords ?? []
     );
 
     return ok({

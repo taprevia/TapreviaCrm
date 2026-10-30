@@ -25,8 +25,10 @@ const AnalyticsLogSchema = new Schema(
       required: true,
     },
     metadata: { type: String, default: '' },
-    ip: { type: String, default: '' },
-    userAgent: { type: String, default: '' },
+    // Retain field compatibility, but do not persist visitor identifiers in
+    // new analytics records. Existing rows are neither read nor rewritten.
+    ip: { type: String, default: '', set: () => '' },
+    userAgent: { type: String, default: '', set: () => '' },
     timestamp: { type: Date, default: Date.now },
   },
   { timestamps: true }

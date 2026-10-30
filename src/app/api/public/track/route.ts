@@ -5,7 +5,8 @@ import Card from '@/models/Card';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { z } from 'zod';
 import { check } from '@/lib/rate-limit';
-import { ok } from '@/lib/api';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
+import { ok, rateLimitFailure } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,8 @@ export async function POST(request: NextRequest) {
   try {
     const ip = clientIp(request);
     const limit = await check(`track:${ip}`, 120, 60_000);
-    if (!limit.success) return ok({ skipped: true });
+    const limited = rateLimitFailure(limit, 'Too many tracking requests');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = trackSchema.safeParse(body);
@@ -49,13 +51,17 @@ export async function POST(request: NextRequest) {
 
     const resolveCardId = async (): Promise<string | null> => {
       if (alias) {
-        const doc = await Card.findOne({ urlAlias: alias.toLowerCase(), isActive: true })
+        const doc = await Card.findOne(
+          withPublicCardVisibility({ urlAlias: alias.toLowerCase() })
+        )
           .select('_id')
           .lean<{ _id: unknown } | null>();
         return doc ? String(doc._id) : null;
       }
       if (cardUid) {
-        const card = await Card.findOne({ cardUid: cardUid.toUpperCase() })
+        const card = await Card.findOne(
+          withPublicCardVisibility({ cardUid: cardUid.toUpperCase() })
+        )
           .select('_id')
           .lean<{ _id: unknown } | null>();
         return card ? String(card._id) : null;
@@ -65,6 +71,14 @@ export async function POST(request: NextRequest) {
 
     const cardId = await resolveCardId();
     if (!cardId) return ok({ skipped: true });
+
+    // Aggregate cap per card prevents distributed IP rotation from generating
+    // unbounded tap counter and analytics writes.
+    if (parsed.data.action === 'tap') {
+      const cardLimit = await check(`track-tap-card:${cardId}`, 600, 60_000);
+      const limited = rateLimitFailure(cardLimit, 'Card tracking is temporarily busy');
+      if (limited) return limited;
+    }
 
     if (parsed.data.action === 'tap') {
       await Card.updateOne({ _id: cardId }, { $inc: { 'stats.taps': 1 } });

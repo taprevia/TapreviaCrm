@@ -6,7 +6,7 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import TenantSettings from '@/models/TenantSettings';
 import { buildVcf, vcfFilename, vcfFilenameStar } from '@/lib/vcf';
 import { check } from '@/lib/rate-limit';
-import { fail } from '@/lib/api';
+import { fail, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias, isPublicProfileCard } from '@/lib/services/card-access';
 import { toPublicCardDto } from '@/lib/dto/card.dto';
 
@@ -38,17 +38,15 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const ip = clientIp(request);
     const limit = await check(`vcf:${ip}`, 20, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests');
+    if (limited) return limited;
 
     await connectDB();
     const card = await getPublicCardByAlias(params.alias);
     // social/review cards are redirect-only products — never expose a downloadable
     // vCard (business contact data) for them.
     if (!isPublicProfileCard(card)) return fail(404, 'NOT_FOUND', 'Card not found');
+    if (card.config?.displayAddToContact === false) return fail(404, 'NOT_FOUND', 'Card not found');
 
     const settings = (await TenantSettings.findOne({ userId: card.userId }).lean()) as {
       general?: { askDetailsBeforeDownload?: boolean };

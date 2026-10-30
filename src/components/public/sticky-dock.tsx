@@ -236,7 +236,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
           </button>
 
           {/* Add to Contact — ink pill */}
-          <button
+          {vcard.config?.displayAddToContact !== false && <button
             type="button"
             ref={addToContactRef}
             onClick={handleAddToContact}
@@ -247,7 +247,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
               <UserPlus size={20} aria-hidden="true" />
             </span>
             <span className={`${labelClass} max-w-full truncate`}>Add to Contact</span>
-          </button>
+          </button>}
         </div>
       </nav>
 

@@ -365,7 +365,8 @@ section('Degenerate input');
   report('empty card N has 5 components', (empty.find((l) => l.startsWith('N;')) ?? '').split(':')[1].split(';').length === 5);
 
   const noAlias = buildVcf(baseCard({ urlAlias: '' }), BASE, NOW);
-  report('cardUid wins the UID chain', noAlias.includes('UID:CARD-UID-0001'));
+  report('public UID uses alias rather than NFC serial', noAlias.includes('UID:') && !noAlias.includes('CARD-UID-0001'));
+  report('alternate contacts are not exported', !noAlias.includes('a.lovelace@example.com') && !noAlias.includes('+442071234567'));
   report(
     'missing cardUid + alias falls back to card _id',
     buildVcf(baseCard({ urlAlias: '', cardUid: '' }), BASE, NOW).includes(

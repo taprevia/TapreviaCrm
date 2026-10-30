@@ -7,7 +7,7 @@ import { getPublicCardByAlias } from '@/lib/services/card-access';
 import { computeSlots, normalizeSlot, utcMidnight } from '@/lib/services/slots';
 import { check } from '@/lib/rate-limit';
 import { emailField } from '@/lib/validation/common';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 
 type Params = { params: { alias: string } };
 
@@ -28,11 +28,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     const ip = clientIp(request);
     const limit = await check(`appt:${ip}`, 10, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = createPublicAppointmentSchema.safeParse(body);
@@ -80,7 +77,23 @@ export async function POST(request: NextRequest, { params }: Params) {
         slot,
         status: 'pending',
       });
-      return ok({ appointment }, 201);
+      // Preserve the envelope while withholding internal owner/card bindings.
+      return ok(
+        {
+          appointment: {
+            _id: appointment._id,
+            visitorName: appointment.visitorName,
+            visitorEmail: appointment.visitorEmail,
+            visitorPhone: appointment.visitorPhone,
+            service: appointment.service,
+            note: appointment.note,
+            date: appointment.date,
+            slot: appointment.slot,
+            status: appointment.status,
+          },
+        },
+        201
+      );
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
         return fail(409, 'CONFLICT', 'That slot was just taken');

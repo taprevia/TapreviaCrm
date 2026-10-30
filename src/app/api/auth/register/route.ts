@@ -5,7 +5,7 @@ import User from '@/models/User';
 import Profile from '@/models/Profile';
 import { generateToken, setAuthCookie } from '@/lib/auth';
 import { check } from '@/lib/rate-limit';
-import { fail } from '@/lib/api';
+import { fail, rateLimitFailure } from '@/lib/api';
 import { registerSchema } from '@/lib/validation/auth';
 import { ensureUserBizSlug } from '@/lib/services/human-url';
 
@@ -18,11 +18,8 @@ export async function POST(request: NextRequest) {
   try {
     const ip = clientIp(request);
     const limit = await check(`register:${ip}`, REGISTER_LIMIT, REGISTER_WINDOW_MS);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many registration attempts, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many registration attempts, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = registerSchema.safeParse(body);

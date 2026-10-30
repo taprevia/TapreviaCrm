@@ -1037,10 +1037,10 @@ export function PanthiEventTemplate({
           </section>
 
           <div className="pep2-actions">
-            <button type="button" className="pep2-btn pep2-btn--sm pep2-btn--soft" onClick={downloadVCard}>
+            {vcard.config?.displayAddToContact !== false && <button type="button" className="pep2-btn pep2-btn--sm pep2-btn--soft" onClick={downloadVCard}>
               <Icon name="user-plus" size={14} />
               Add to Contacts
-            </button>
+            </button>}
             {WA_NUMBER ? (
             <button
               type="button"
@@ -1428,14 +1428,14 @@ export function PanthiEventTemplate({
             WhatsApp
           </a>
           ) : null}
-          <button
+          {vcard.config?.displayAddToContact !== false && <button
             type="button"
             className="pep2-btn pep2-btn--soft pep2-bar-icon"
             onClick={downloadVCard}
             aria-label="Download contact card (.vcf)"
           >
             <Icon name="user-plus" size={18} />
-          </button>
+          </button>}
         </div>
       </nav>
 

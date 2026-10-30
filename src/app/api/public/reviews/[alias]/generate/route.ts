@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
 import { z } from 'zod';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { generateReviewSuggestion } from '@/lib/services/review-generate';
 import { reviewPreferredLengthSchema } from '@/lib/validation/card';
@@ -40,11 +40,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     const userAgent = request.headers.get('user-agent') ?? '';
 
     const limit = await check(`review-generate:${ip}`, GENERATE_LIMIT, GENERATE_WINDOW_MS);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests — try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests — try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = generateBodySchema.safeParse(body);

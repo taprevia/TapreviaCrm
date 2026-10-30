@@ -29,6 +29,8 @@ interface StandeeEntry {
   createdAt: string;
 }
 
+const PUBLIC_BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, '');
+
 export default function AdminStandeeQrPage() {
   const [standees, setStandees] = useState<StandeeEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,22 +58,25 @@ export default function AdminStandeeQrPage() {
   // Canonical standees have a routeSlug → permanent /r/ panel + slot routes.
   // Legacy standees (no routeSlug) stay on /qr/{qrId}.
   const standeeQrUrl = (s: StandeeEntry, kind: 'panel' | 'social', index = 0) => {
+    if (!PUBLIC_BASE_URL) return '';
     if (s.routeSlug) {
       return kind === 'panel'
-        ? `${window.location.origin}/r/${s.routeSlug}`
-        : `${window.location.origin}/r/${s.routeSlug}/${index + 1}`;
+        ? `${PUBLIC_BASE_URL}/r/${s.routeSlug}`
+        : `${PUBLIC_BASE_URL}/r/${s.routeSlug}/${index + 1}`;
     }
     return kind === 'panel'
-      ? `${window.location.origin}/qr/${s.panelQr.qrId}`
-      : `${window.location.origin}/qr/${s.socialQrs[index].qrId}`;
+      ? `${PUBLIC_BASE_URL}/qr/${s.panelQr.qrId}`
+      : `${PUBLIC_BASE_URL}/qr/${s.socialQrs[index].qrId}`;
   };
 
   const handleDownload = async (s: StandeeEntry, kind: 'panel' | 'social', index = 0) => {
+    const url = standeeQrUrl(s, kind, index);
+    if (!url) return;
     try {
       const key = kind === 'panel' ? s.panelQr.qrId : s.socialQrs[index].qrId;
       const label = kind === 'panel' ? 'panel' : s.socialQrs[index].platform;
       const canvas = document.createElement('canvas');
-      await QRCodeLib.toCanvas(canvas, standeeQrUrl(s, kind, index), { width: 512, margin: 2 });
+      await QRCodeLib.toCanvas(canvas, url, { width: 512, margin: 2 });
       const link = document.createElement('a');
       link.href = canvas.toDataURL('image/png');
       link.download = `standee-${label}-${key}.png`;
@@ -122,6 +127,12 @@ export default function AdminStandeeQrPage() {
           Dynamic QRs generated per customer standee — destinations update when customers edit their social links
         </p>
       </div>
+
+      {!PUBLIC_BASE_URL && (
+        <p className="rounded-lg bg-bad/10 px-3 py-2 text-xs text-bad ring-1 ring-bad/20">
+          Public base URL is not configured. Standee QR downloads are disabled.
+        </p>
+      )}
 
       <Card className="p-4 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="relative">

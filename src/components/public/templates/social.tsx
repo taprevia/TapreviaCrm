@@ -135,14 +135,14 @@ export function SocialTemplate({
             <span className="text-xs font-semibold text-slate-200 mt-1">Email</span>
           </a>
         )}
-        <button
+        {vcard.config?.displayAddToContact !== false && <button
           type="button"
           onClick={downloadVCard}
           className="flex flex-col items-center justify-center p-3 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/5 backdrop-blur-md transition-all active:scale-95 cursor-pointer"
         >
           <FaUserPlus className="text-purple-400 text-lg" aria-hidden="true" />
           <span className="text-xs font-semibold text-slate-200 mt-1">Save</span>
-        </button>
+        </button>}
       </div>
 
       {/* Dynamic Links */}

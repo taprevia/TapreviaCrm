@@ -6,7 +6,7 @@ import NewsletterSubscriber from '@/models/NewsletterSubscriber';
 import { optionalEmailField } from '@/lib/validation/common';
 import { z } from 'zod';
 import { check } from '@/lib/rate-limit';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
 
 type Params = { params: { alias: string } };
@@ -19,11 +19,8 @@ const subscribeSchema = z.object({
 export async function POST(request: NextRequest, { params }: Params) {
   try {
     const limit = await check(`newsletter:${clientIp(request)}`, 10, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = subscribeSchema.safeParse(body);

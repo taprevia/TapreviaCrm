@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { connectDB } from '@/lib/db';
 import User from '@/models/User';
 import { check } from '@/lib/rate-limit';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { forgotPasswordSchema } from '@/lib/validation/auth';
 import { mintResetToken } from '@/lib/password-reset';
 import { sendPasswordResetEmail } from '@/lib/mail';
@@ -19,11 +19,8 @@ export async function POST(request: NextRequest) {
   try {
     const ip = clientIp(request);
     const ipLimit = await check(`forgot:${ip}`, FORGOT_IP_LIMIT, FORGOT_WINDOW_MS);
-    if (!ipLimit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests, please try again shortly');
-      res.headers.set('Retry-After', String(ipLimit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(ipLimit, 'Too many requests, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = forgotPasswordSchema.safeParse(body);

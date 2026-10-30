@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { RateLimitResult } from '@/lib/rate-limit';
 
 /** Stable machine-readable error codes for API responses. */
 export type ErrorCode =
@@ -35,6 +36,26 @@ export function fail(
   const body: ApiErrorBody =
     details !== undefined ? { error, code, details } : { error, code };
   return NextResponse.json(body, { status });
+}
+
+/**
+ * Map a failed rate-limit check to the correct status: 429 for a genuine
+ * client limit, 503 when the limiter store is unavailable. Returns null when
+ * the request is allowed so call sites can stay one line shorter.
+ */
+export function rateLimitFailure(
+  limit: Pick<RateLimitResult, 'success' | 'retryAfterSec' | 'unavailable'>,
+  message: string
+): NextResponse<ApiErrorBody> | null {
+  if (limit.success) return null;
+  if (limit.unavailable) {
+    const res = fail(503, 'UNAVAILABLE', 'Service temporarily unavailable, please try again shortly');
+    res.headers.set('Retry-After', String(Math.max(1, limit.retryAfterSec)));
+    return res;
+  }
+  const res = fail(429, 'RATE_LIMITED', message);
+  res.headers.set('Retry-After', String(limit.retryAfterSec));
+  return res;
 }
 
 /** Uniform success response. */

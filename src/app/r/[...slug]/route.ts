@@ -6,6 +6,9 @@ import Standee from '@/models/Standee';
 import Profile from '@/models/Profile';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { check } from '@/lib/rate-limit';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
+import { resolveCardDestination } from '@/lib/services/redirect-target';
 
 /**
  * GET /r/[slug] — Unified dynamic route resolver.
@@ -52,6 +55,13 @@ async function incrementTapCount(cardId: unknown): Promise<void> {
   }
 }
 
+async function allowCardTapWrite(cardId: unknown, request: NextRequest): Promise<boolean> {
+  const ipLimit = await check(`track:${clientIp(request)}`, 120, 60_000);
+  if (!ipLimit.success) return false;
+  const cardLimit = await check(`track-tap-card:${String(cardId)}`, 600, 60_000);
+  return cardLimit.success;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string[] } }
@@ -68,15 +78,17 @@ export async function GET(
     // ── 1. Card by routeSlug / uid ────────────────────────────────────────
     // Dual-track lookup: legacy `routeSlug` and the new timestamp `uid` are
     // matched in parallel so both identifier generations resolve identically.
-    const card = (await Card.findOne({
-      isActive: true,
-      $or: [{ routeSlug: routeKey }, { uid: routeKey }],
-    })
-      .select('urlAlias slug kind redirectUrl reviewAssistant instagramConfig whatsappConfig linkedinConfig facebookConfig userId')
+    const card = (await Card.findOne(
+      withPublicCardVisibility({
+        $or: [{ routeSlug: routeKey }, { uid: routeKey }],
+      })
+    )
+      .select('urlAlias slug routeSlug publicSlug kind redirectUrl reviewAssistant instagramConfig whatsappConfig linkedinConfig facebookConfig userId')
       .lean()) as {
       _id: unknown;
       urlAlias: string;
       slug: string;
+      publicSlug?: string;
       kind: string;
       redirectUrl: string;
       userId: unknown;
@@ -84,47 +96,29 @@ export async function GET(
 
     if (card) {
       // Log analytics and increment tap count.
-      await Promise.all([
-        logRouteEvent(card._id, routeKey, slotParam, request),
-        incrementTapCount(card._id),
-      ]);
-
-      // Social card → redirect to configured destination.
-      if (card.kind === 'social') {
-        const dest = card.redirectUrl?.trim();
-        if (isSafeExternalUrl(dest)) {
-          return NextResponse.redirect(dest, 302);
-        }
-        // Fallback to profile page if destination invalid.
-        if (card.urlAlias) {
-          return NextResponse.redirect(
-            new URL(`/profile/${card.urlAlias}`, request.url),
-            302
-          );
-        }
-        return new Response('Destination not configured', { status: 404 });
+      if (await allowCardTapWrite(card._id, request)) {
+        await Promise.all([
+          logRouteEvent(card._id, routeKey, slotParam, request),
+          incrementTapCount(card._id),
+        ]);
       }
 
-      // Review card → redirect to review page.
-      if (card.kind === 'review') {
-        if (card.urlAlias) {
-          return NextResponse.redirect(
-            new URL(`/review/${card.urlAlias}`, request.url),
-            302
-          );
+      // Centralized, product-aware destination resolution. Never substitutes a
+      // page that would 404 (e.g. a review human URL with the assistant off).
+      const destination = resolveCardDestination(card);
+      if (destination) {
+        const target = new URL(destination, request.url);
+        const loopsBack =
+          target.origin === request.nextUrl.origin &&
+          target.pathname === request.nextUrl.pathname;
+        if (!loopsBack) {
+          return NextResponse.redirect(target, 307);
         }
-        return new Response('Review page not configured', { status: 404 });
       }
 
-      // Profile card (default) → redirect to public profile.
-      if (card.urlAlias) {
-        return NextResponse.redirect(
-          new URL(`/profile/${card.urlAlias}?src=qr`, request.url),
-          302
-        );
-      }
-
-      return new Response('Profile not configured', { status: 404 });
+      // No valid product-specific destination — fail closed. Never redirect
+      // to an unrelated profile/human URL to hide missing configuration.
+      return new Response('Destination not configured', { status: 404 });
     }
 
     // ── 2. Standee by routeSlug / uid ────────────────────────────────────
@@ -177,7 +171,7 @@ export async function GET(
             } catch {
               // Fail-open.
             }
-            return NextResponse.redirect(url, 302);
+            return NextResponse.redirect(url, 307);
           }
 
           // Fallback to profile page if link not configured.
@@ -185,7 +179,7 @@ export async function GET(
           if (alias) {
             return NextResponse.redirect(
               new URL(`/profile/${alias}`, request.url),
-              302
+              307
             );
           }
           return new Response('Destination not configured', { status: 404 });
@@ -216,7 +210,7 @@ export async function GET(
       if (alias?.urlAlias) {
         return NextResponse.redirect(
           new URL(`/profile/${alias.urlAlias}`, request.url),
-          302
+          307
         );
       }
 
@@ -231,7 +225,7 @@ export async function GET(
       if (profileCount >= 2) {
         return NextResponse.redirect(
           new URL(`/panel/${routeKey}`, request.url),
-          302
+          307
         );
       }
 
@@ -252,7 +246,7 @@ export async function GET(
           direct ||
           alias?.socialLinks?.find((link) => link.platform === qr.platform)?.url;
         if (url && isSafeExternalUrl(url)) {
-          return NextResponse.redirect(url, 302);
+          return NextResponse.redirect(url, 307);
         }
       }
 
@@ -260,14 +254,15 @@ export async function GET(
     }
 
     // ── 3. Legacy fallback: cardUid, slug, or urlAlias ──────────────────
-    const legacyCard = (await Card.findOne({
-      isActive: true,
-      $or: [
-        { cardUid: routeKey.toUpperCase() },
-        { slug: routeKey },
-        { urlAlias: routeKey },
-      ],
-    })
+    const legacyCard = (await Card.findOne(
+      withPublicCardVisibility({
+        $or: [
+          { cardUid: routeKey.toUpperCase() },
+          { slug: routeKey },
+          { urlAlias: routeKey },
+        ],
+      })
+    )
       .select('_id urlAlias slug kind redirectUrl cardUid')
       .lean()) as {
       _id: unknown;
@@ -280,14 +275,16 @@ export async function GET(
 
     if (legacyCard) {
       // Legacy-resolved taps count the same as routeSlug taps.
-      await Promise.all([
-        logRouteEvent(legacyCard._id, routeKey, null, request),
-        incrementTapCount(legacyCard._id),
-      ]);
+      if (await allowCardTapWrite(legacyCard._id, request)) {
+        await Promise.all([
+          logRouteEvent(legacyCard._id, routeKey, null, request),
+          incrementTapCount(legacyCard._id),
+        ]);
+      }
       if (legacyCard.urlAlias) {
         return NextResponse.redirect(
           new URL(`/profile/${legacyCard.urlAlias}?src=qr`, request.url),
-          302
+          307
         );
       }
     }

@@ -5,7 +5,7 @@ import Inquiry from '@/models/Inquiry';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { publicInquirySchema } from '@/lib/validation/inquiry';
 import { check } from '@/lib/rate-limit';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
 
 export const dynamic = 'force-dynamic';
@@ -19,11 +19,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     const ip = clientIp(request);
     const limit = await check(`inquiry:${ip}`, 30, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = publicInquirySchema.safeParse(body);

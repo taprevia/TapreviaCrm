@@ -3,6 +3,8 @@ import { clientIp } from '@/lib/request-ip';
 import { connectDB } from '@/lib/db';
 import Card from '@/models/Card';
 import AnalyticsLog from '@/models/AnalyticsLog';
+import { check } from '@/lib/rate-limit';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
 
 type Params = { params: { uid: string } };
 
@@ -18,6 +20,11 @@ async function recordTap(
   request: NextRequest
 ): Promise<void> {
   try {
+    const ipLimit = await check(`track:${clientIp(request)}`, 120, 60_000);
+    if (!ipLimit.success) return;
+    const cardLimit = await check(`track-tap-card:${String(cardId)}`, 600, 60_000);
+    if (!cardLimit.success) return;
+
     await Promise.all([
       Card.updateOne({ _id: cardId }, { $inc: { 'stats.taps': 1 } }),
       AnalyticsLog.create({
@@ -56,14 +63,11 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // Try routeSlug first (new permanent identifier), then the mirrored
     // timestamp `uid`, then fall back to the physical cardUid.
-    const card = await Card.findOne({
-      isActive: true,
-      $or: [
-        { routeSlug: raw.toLowerCase() },
-        { uid: raw.toLowerCase() },
-        { cardUid: raw.toUpperCase() },
-      ],
-    }).lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
+    const card = await Card.findOne(
+      withPublicCardVisibility({
+        $or: [{ routeSlug: raw.toLowerCase() }, { uid: raw.toLowerCase() }, { cardUid: raw.toUpperCase() }],
+      })
+    ).lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
 
     if (!card || !(card.urlAlias || card.slug)) {
       return Response.redirect(new URL('/', request.nextUrl.origin).toString(), 302);
@@ -71,9 +75,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const target = card.urlAlias || card.slug;
 
-    // Tap accounting is intentionally gated on the card lifecycle status:
-    // active cards count, suspended/unassigned cards still resolve but do not
-    // inflate analytics. The write completes before the redirect below.
+    // Public resolution is lifecycle-gated above; retain the active-only tap
+    // accounting for legacy documents without an explicit status.
     if (card.status === 'active') {
       await recordTap(card._id, raw, request);
     }

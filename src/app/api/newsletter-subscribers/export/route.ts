@@ -67,10 +67,13 @@ export async function GET(request: NextRequest) {
       doc.createdAt instanceof Date ? doc.createdAt.toISOString() : '',
     ]);
 
-    const csv = Papa.unparse({
-      fields: ['Email', 'Card Name', 'Subscribed At'],
-      data: csvData,
-    });
+    const csv = Papa.unparse(
+      {
+        fields: ['Email', 'Card Name', 'Subscribed At'],
+        data: csvData,
+      },
+      { escapeFormulae: true }
+    );
 
     return new NextResponse(csv, {
       headers: {

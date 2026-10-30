@@ -1,9 +1,50 @@
-import { Types } from 'mongoose';
+import { Types, type FilterQuery } from 'mongoose';
 import Card from '@/models/Card';
 import User from '@/models/User';
 import type { AuthUser } from '@/lib/auth';
 import { canUseFeature } from '@/lib/services/feature-access';
 import type { CardKind, FeatureKey } from '@/types';
+
+/**
+ * Public visibility for cards resolved by NFC/QR/profile URLs.
+ *
+ * Suspended and ownerless inventory cards stay private. Legacy owner-bound
+ * cards that were created before lifecycle status was enforced (or that were
+ * assigned without a status update) keep resolving, preserving live URLs.
+ * Missing `status` is treated as a legacy active record.
+ */
+export const PUBLIC_CARD_VISIBILITY: FilterQuery<unknown> = {
+  $or: [
+    { status: 'active' },
+    { status: 'unassigned', userId: { $ne: null } },
+    { status: { $exists: false }, userId: { $ne: null } },
+  ],
+};
+
+/** Merge the public-visibility clause into a card query without losing $or. */
+export function withPublicCardVisibility<T = unknown>(
+  filter: FilterQuery<T>
+): FilterQuery<T> {
+  const existing = Array.isArray(filter.$and) ? filter.$and : [];
+  return {
+    ...filter,
+    isActive: true,
+    $and: [...existing, PUBLIC_CARD_VISIBILITY],
+  };
+}
+
+/** Pure mirror of the query clause, used by regression tests. */
+export function isPubliclyResolvable(card: {
+  isActive?: boolean | null;
+  status?: string | null;
+  userId?: unknown;
+}): boolean {
+  if (card.isActive === false) return false;
+  if (card.status === 'suspended') return false;
+  if (card.status === 'unassigned') return card.userId != null;
+  if (card.status === undefined || card.status === null) return card.userId != null;
+  return true;
+}
 
 export type OwnedCardResult =
   | { status: 'not_found' }
@@ -65,10 +106,21 @@ export async function getPublicCardByAlias(alias: string) {
   const key = alias.toLowerCase();
   // urlAlias is the canonical public handle; slug still resolves after a
   // card is bound so assigned cards never 404 while aliases are assigned.
-  return Card.findOne({
-    isActive: true,
-    $or: [{ urlAlias: key }, { slug: key }],
-  });
+  const card = await Card.findOne(
+    withPublicCardVisibility({
+      $or: [{ urlAlias: key }, { slug: key }],
+    })
+  );
+  if (!card) return null;
+
+  // Suspension must revoke a public URL immediately, including legacy cards
+  // whose card status was not updated by the admin action. Missing owners and
+  // legacy users without an explicit status remain compatible.
+  const ownerIds = [card.userId, card.assignedUserId].filter(Boolean);
+  if (ownerIds.length > 0 && (await User.exists({ _id: { $in: ownerIds }, status: 'suspended' }))) {
+    return null;
+  }
+  return card;
 }
 
 /**
@@ -83,22 +135,24 @@ async function pickCanonicalPublicCard(userId: unknown) {
   const owned = { $or: [{ userId }, { assignedUserId: userId }] };
   const withAlias = { $exists: true, $nin: ['', null] } as const;
 
-  const profileWithAlias = await Card.findOne({
-    ...owned,
-    isActive: true,
-    kind: 'profile',
-    urlAlias: withAlias,
-  }).sort({ createdAt: 1 });
+  const profileWithAlias = await Card.findOne(
+    withPublicCardVisibility({
+      ...owned,
+      kind: 'profile',
+      urlAlias: withAlias,
+    })
+  ).sort({ createdAt: 1 });
   if (profileWithAlias) return profileWithAlias;
 
-  const anyWithAlias = await Card.findOne({
-    ...owned,
-    isActive: true,
-    urlAlias: withAlias,
-  }).sort({ createdAt: 1 });
+  const anyWithAlias = await Card.findOne(
+    withPublicCardVisibility({
+      ...owned,
+      urlAlias: withAlias,
+    })
+  ).sort({ createdAt: 1 });
   if (anyWithAlias) return anyWithAlias;
 
-  return Card.findOne({ ...owned, isActive: true }).sort({ createdAt: 1 });
+  return Card.findOne(withPublicCardVisibility({ ...owned })).sort({ createdAt: 1 });
 }
 
 /**

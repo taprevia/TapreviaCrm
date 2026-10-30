@@ -7,7 +7,7 @@ import ProductEnquiry from '@/models/ProductEnquiry';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { objectIdSchema } from '@/lib/validation/common';
 import { check } from '@/lib/rate-limit';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
 import { buildWhatsAppEnquiryUrl } from '@/lib/services/whatsapp';
 
@@ -28,11 +28,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     const ip = clientIp(request);
     const limit = await check(`penq:${ip}`, 15, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests, please try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = publicProductEnquirySchema.safeParse(body);

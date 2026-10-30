@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
 import { connectDB } from '@/lib/db';
 import { requireAdminStrict } from '@/lib/auth';
-import { fail } from '@/lib/api';
+import { fail, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import User from '@/models/User';
 import Profile from '@/models/Profile';
@@ -30,11 +30,8 @@ export async function GET(request: NextRequest) {
 
     const ip = clientIp(request);
     const limit = await check(`admin-export:${admin.user._id}`, EXPORT_LIMIT, EXPORT_WINDOW_MS);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many exports, please try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many exports, please try again shortly');
+    if (limited) return limited;
 
     const { type = 'users' } = Object.fromEntries(new URL(request.url).searchParams);
 
@@ -88,7 +85,7 @@ export async function GET(request: NextRequest) {
       }));
     }
 
-    const csv = Papa.unparse(csvData);
+    const csv = Papa.unparse(csvData, { escapeFormulae: true });
 
     await AdminAuditLog.create({
       adminId: admin.user._id,

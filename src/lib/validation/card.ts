@@ -186,8 +186,16 @@ export const updateCardSchema = z
     businessHours: z.array(businessHourSchema).max(7).optional(),
     socialLinks: z.array(socialLinkSchema).max(50).optional(),
     banner: bannerPartialSchema.optional(),
-    privacyPolicyHtml: z.string().max(20000).optional(),
-    termsHtml: z.string().max(20000).optional(),
+    privacyPolicyHtml: z
+      .string()
+      .max(20000)
+      .optional()
+      .transform((v) => (v === undefined ? undefined : sanitizeHtml(v))),
+    termsHtml: z
+      .string()
+      .max(20000)
+      .optional()
+      .transform((v) => (v === undefined ? undefined : sanitizeHtml(v))),
     config: configPartialSchema.optional(),
     sections: sectionsPartialSchema.optional(),
     reviewAssistant: reviewAssistantPartialSchema.optional(),

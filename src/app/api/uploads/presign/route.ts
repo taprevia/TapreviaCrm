@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { connectDB } from '@/lib/db';
 import { requireApiEntitlement } from '@/lib/auth/capability-guard';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { uploadMetaSchema } from '@/lib/validation/media';
 import Card from '@/models/Card';
@@ -41,11 +41,8 @@ export async function POST(request: NextRequest) {
     if (authStatus === 403) return fail(403, 'FORBIDDEN', 'Your products do not include profile editing');
 
     const limit = await check(`upload:${user._id}`, 30, 60_000);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many uploads');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many uploads');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = presignBodySchema.safeParse(body);

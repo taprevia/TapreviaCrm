@@ -11,7 +11,7 @@
 export interface VcfCardSource {
   _id?: unknown;
   name?: string;
-  cardUid?: string;
+  slug?: string;
   urlAlias?: string;
   occupation?: string;
   profileImageUrl?: string;
@@ -134,7 +134,8 @@ export function buildVcf(
     'BEGIN:VCARD',
     'VERSION:3.0',
     'PRODID:-//Taprevia//CRM//vCard 3.0//EN',
-    `UID:${esc(card.cardUid || card.urlAlias || String(card._id ?? ''))}`,
+    // Public contacts use the stable alias, never the physical NFC UID.
+    `UID:${esc(card.urlAlias || card.slug || String(card._id ?? ''))}`,
     `N;CHARSET=UTF-8:${esc(b.lastName || '')};${esc(b.firstName || '')};;;`,
     `FN;CHARSET=UTF-8:${esc(displayName)}`,
   ];
@@ -144,9 +145,7 @@ export function buildVcf(
   if (card.occupation) lines.push(`ROLE;CHARSET=UTF-8:${esc(card.occupation)}`);
 
   if (b.phone) lines.push(`TEL;TYPE=CELL,VOICE:${esc(b.phone)}`);
-  if (b.alternatePhone) lines.push(`TEL;TYPE=WORK,VOICE:${esc(b.alternatePhone)}`);
   if (b.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(b.email)}`);
-  if (b.alternateEmail) lines.push(`EMAIL;TYPE=WORK:${esc(b.alternateEmail)}`);
 
   if (location.address) {
     lines.push(

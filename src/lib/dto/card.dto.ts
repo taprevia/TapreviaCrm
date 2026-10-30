@@ -48,8 +48,6 @@ export interface CardRenderConfigDto {
 }
 
 export interface PublicCardDto {
-  id?: string;
-  cardUid?: string;
   slug?: string;
   routeSlug?: string;
   publicSlug?: string;
@@ -200,6 +198,21 @@ function pruneUndefined<T extends Record<string, unknown>>(input: T): T {
   return input;
 }
 
+function pickObject(value: unknown, keys: string[]): Record<string, unknown> | undefined {
+  const source = obj(value);
+  if (!source) return undefined;
+  return pruneUndefined(
+    Object.fromEntries(keys.map((key) => [key, source[key]])) as Record<string, unknown>
+  );
+}
+
+function pickRows(value: unknown, keys: string[]): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    .map((row) => pickObject(row, keys) ?? {});
+}
+
 /**
  * Map a stored Card document to the public-safe shape served by anonymous
  * JSON endpoints.
@@ -244,8 +257,6 @@ export function toPublicCardDto(cardDoc: unknown): PublicCardDto {
   const bio = str(card.bio) || str(card.description) || str(card.summary) || '';
 
   const dto: PublicCardDto = {
-    id: toObjectIdString(card._id),
-    cardUid: str(card.cardUid),
     slug: str(card.slug),
     routeSlug: str(card.routeSlug),
     publicSlug: str(card.publicSlug),
@@ -263,8 +274,18 @@ export function toPublicCardDto(cardDoc: unknown): PublicCardDto {
     coverStyle: str(card.coverStyle),
     socialLinks: pickSocialLinks(card.socialLinks),
     products: pickProducts(card.products),
-    themeConfig: obj(card.themeConfig) as CardThemeConfigDto | undefined,
-    theme: obj(card.theme) as ThemeDto | undefined,
+    themeConfig: pickObject(card.themeConfig, ['accentColor', 'bgColor']) as
+      | CardThemeConfigDto
+      | undefined,
+    theme: pickObject(card.theme, [
+      'primaryColor',
+      'accentColor',
+      'bgColor',
+      'textColor',
+      'fontFamily',
+      'borderRadius',
+      'template',
+    ]) as ThemeDto | undefined,
     templateKey: str(card.templateKey),
     kind: str(card.kind),
     basic: basic
@@ -285,15 +306,55 @@ export function toPublicCardDto(cardDoc: unknown): PublicCardDto {
     email: str(card.email) ?? str(basic?.email),
     phone: str(card.phone) ?? str(basic?.phone),
     website: str(card.website),
-    location: obj(card.location) as PublicCardDto['location'],
-    businessHours: card.businessHours as PublicCardDto['businessHours'],
-    sections: card.sections as Record<string, boolean> | undefined,
-    config: obj(card.config) as CardRenderConfigDto | undefined,
-    gallery: card.gallery as PublicCardDto['gallery'],
-    galleryImages: card.galleryImages as PublicCardDto['galleryImages'],
-    services: card.services as PublicCardDto['services'],
+    location: (() => {
+      const location = obj(card.location);
+      return location
+        ? { address: str(location.address), mapsUrl: str(location.mapsUrl) }
+        : undefined;
+    })(),
+    businessHours: pickRows(card.businessHours, ['day', 'enabled', 'from', 'to']) as
+      | PublicCardDto['businessHours']
+      | undefined,
+    sections: pickObject(card.sections, [
+      'header',
+      'contact',
+      'businessHours',
+      'map',
+      'banner',
+      'newsletterPopup',
+    ]) as Record<string, boolean> | undefined,
+    config: pickObject(card.config, [
+      'displayLocalization',
+      'displayDownloadQrIcon',
+      'displayQrSection',
+      'displayAddToContact',
+      'hideStickyBar',
+      'displayWhatsAppShare',
+      'qrDownloadSize',
+    ]) as CardRenderConfigDto | undefined,
+    gallery: pickRows(card.gallery, ['imageUrl', 'caption']) as PublicCardDto['gallery'],
+    galleryImages: pickRows(card.galleryImages, ['imageUrl', 'caption']) as
+      PublicCardDto['galleryImages'],
+    services: pickRows(card.services, ['title', 'description']) as PublicCardDto['services'],
     urlAlias: str(card.urlAlias),
   };
 
   return pruneUndefined(dto as unknown as Record<string, unknown>) as PublicCardDto;
+}
+
+/** Allowlisted public props that may cross from the server to client RSC. */
+export function toPublicRenderCardDto(cardDoc: unknown): PublicCardDto & {
+  reviewAssistant?: { googleReviewUrl?: string };
+} {
+  const dto = toPublicCardDto(cardDoc);
+  const source = (cardDoc as MaybeMongooseDoc).toObject
+    ? (cardDoc as MaybeMongooseDoc).toObject!({ virtuals: true })
+    : (cardDoc as Record<string, unknown>);
+  const reviewAssistant = obj(obj(source)?.reviewAssistant);
+  return {
+    ...dto,
+    reviewAssistant: reviewAssistant
+      ? { googleReviewUrl: str(reviewAssistant.googleReviewUrl) }
+      : undefined,
+  };
 }

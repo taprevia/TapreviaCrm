@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
 import { z } from 'zod';
 import { connectDB } from '@/lib/db';
-import { fail, ok } from '@/lib/api';
+import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
 import { hasCapability } from '@/lib/services/capability-access';
@@ -46,11 +46,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     const ip = clientIp(request);
 
     const limit = await check(`review-suggestions:${ip}`, SUGGESTIONS_LIMIT, SUGGESTIONS_WINDOW_MS);
-    if (!limit.success) {
-      const res = fail(429, 'RATE_LIMITED', 'Too many requests — try again shortly');
-      res.headers.set('Retry-After', String(limit.retryAfterSec));
-      return res;
-    }
+    const limited = rateLimitFailure(limit, 'Too many requests — try again shortly');
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     const parsed = suggestionsBodySchema.safeParse(body);

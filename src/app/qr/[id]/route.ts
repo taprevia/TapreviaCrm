@@ -5,6 +5,7 @@ import Card from '@/models/Card';
 import Standee from '@/models/Standee';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { clientIp } from '@/lib/request-ip';
 
 /**
@@ -49,10 +50,9 @@ export async function GET(
     const key = id.toLowerCase();
 
     // 0. Card by routeSlug/uid — new unified permanent route (dual-track).
-    const cardBySlug = (await Card.findOne({
-      isActive: true,
-      $or: [{ routeSlug: key }, { uid: key }],
-    })
+    const cardBySlug = (await Card.findOne(
+      withPublicCardVisibility({ $or: [{ routeSlug: key }, { uid: key }] })
+    )
       .select('urlAlias slug kind redirectUrl')
       .lean()) as {
       urlAlias: string;
