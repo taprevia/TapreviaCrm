@@ -88,7 +88,7 @@ async function ensureUser(email: string, password: string): Promise<string> {
 }
 
 async function run() {
-  console.log(`Connecting ${MONGODB_URI} …`);
+  console.log('Connecting to the configured MongoDB target …');
   await mongoose.connect(MONGODB_URI);
 
   // ── Fixture users ────────────────────────────────────────────────────────

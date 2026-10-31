@@ -129,6 +129,10 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       'qr', 'nfc', 'public_profile', 'profile_edit', 'contact_save', 'social_links',
       'catalogue', 'portfolio', 'lead_capture', 'dynamic_link', 'multi_language',
       'tap_analytics', 'dynamic_dashboard',
+      // Approved Phase 4D.4 policy: the Premium NFC Business Card includes the
+      // AI Review Assistant. This is a capability grant, not a Card data
+      // migration; existing assignments inherit it through the catalog slug.
+      'review_ai_suggestions',
     ],
     metadata: {
       materials: ['pvc', 'metal', 'wooden'],

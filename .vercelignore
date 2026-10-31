@@ -1,0 +1,7 @@
+# Never upload local environment files to a Vercel deployment.
+.env
+.env.*
+!.env.example
+
+# Local build output.
+.next

@@ -23,6 +23,7 @@
     "test:vcf": "tsx scripts/test-vcf.ts",
     "test:cards": "tsx scripts/test-card-binding.ts",
     "test:security": "tsx scripts/test-security-boundaries.ts",
+    "test:qr-pdf": "tsx scripts/test-qr-pdf.ts",
     "test:entitlement": "tsx scripts/test-dashboard-entitlement.ts",
     "test:auth": "tsx scripts/test-auth-security.ts",
     "test:password-reset": "tsx scripts/test-password-reset.ts",
@@ -33,7 +34,14 @@
     "test:review-import": "tsx scripts/test-review-import-validation.ts",
     "backfill:identity": "tsx scripts/backfill-customer-identities.ts",
     "e2e:entitlement": "bash scripts/run-e2e-entitlement.sh",
-    "e2e:entitlement:direct": "npx tsx scripts/e2e-dashboard-entitlement.ts"
+    "e2e:entitlement:direct": "npx tsx scripts/e2e-dashboard-entitlement.ts",
+    "test:review-management": "tsx scripts/test-review-management.ts",
+    "test:standee-review": "tsx scripts/test-standee-review.ts",
+    "test:review-analytics": "tsx scripts/test-review-analytics.ts",
+    "test:phase4d9-matrix": "tsx scripts/test-phase4d9-matrix.ts",
+    "test:phase4d9-historical": "tsx scripts/test-phase4d9-historical.ts",
+    "test:phase4d9-fixes": "tsx scripts/test-phase4d9-fixes.ts",
+    "test:phase4d10p1": "tsx scripts/test-phase4d10p1-preview-config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { headers } from 'next/headers';
+import { MessageSquareText } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import Product from '@/models/Product';
 import TenantSettings from '@/models/TenantSettings';
@@ -7,6 +9,9 @@ import User from '@/models/User';
 import { logPublicCardAction } from '@/lib/analytics';
 import { PublicVcardRenderer } from '@/components/public/template-registry';
 import { canUseFeature } from '@/lib/services/feature-access';
+import { getCardReviewEntitlement } from '@/lib/services/review-entitlement';
+import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
+import { CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED } from '@/lib/review-feature-flags';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
@@ -86,6 +91,32 @@ export async function PublicCardPage({ card }: { card: ICard }) {
   const profileAllowed = await canUseFeature(ownerId, 'profile');
   if (!profileAllowed) notFound();
 
+  // Approved Phase 4D.4 Premium entry point: a Premium profile Card that is
+  // product-entitled and has an enabled Review Assistant gets an explicit link
+  // to the existing review page. The public profile URL/NFC/QR destination is
+  // deliberately unchanged.
+  let premiumReviewUrl: string | null = null;
+  const couldHostReview =
+    card.kind === 'profile' &&
+    Boolean(card.urlAlias) &&
+    (card.reviewAssistant?.enabled === true ||
+      (CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED &&
+        (card.reviewSettingsSource === 'central' || card.reviewSettingsSource === 'hybrid')));
+  if (couldHostReview) {
+    const [entitlement, effectiveReview] = await Promise.all([
+      getCardReviewEntitlement(card),
+      resolveEffectiveReviewSettings(card),
+    ]);
+    if (
+      entitlement.entitled &&
+      entitlement.productId === 'PREMIUM_NFC_CARD' &&
+      effectiveReview.enabled &&
+      card.urlAlias
+    ) {
+      premiumReviewUrl = `/review/${encodeURIComponent(card.urlAlias)}`;
+    }
+  }
+
   // Both queries are owner/card scoped. `cardId` and `userId` are guaranteed
   // defined by the guard above, so neither filter can collapse to `{}`.
   if (!card._id) notFound();
@@ -140,6 +171,17 @@ export async function PublicCardPage({ card }: { card: ICard }) {
         newsletterDelaySeconds={settings?.general?.newsletterModalDelaySeconds ?? 8}
         newsletterEnabled={newsletterEnabled}
       />
+      {premiumReviewUrl && (
+        <div className="mx-auto w-full max-w-md px-4 pb-24">
+          <Link
+            href={premiumReviewUrl}
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--v-accent)] px-4 text-sm font-semibold text-[var(--v-on-accent)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2"
+          >
+            <MessageSquareText className="h-4 w-4" aria-hidden="true" />
+            Share your experience
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,10 +5,14 @@ import { connectDB } from '@/lib/db';
 import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
-import { hasCapability } from '@/lib/services/capability-access';
 import { getReviewTemplateSuggestions } from '@/lib/services/review-templates';
+import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
+import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
 import { logPublicCardAction } from '@/lib/analytics';
 import { reviewPreferredLengthSchema } from '@/lib/validation/card';
+import { getOrCreateRotationState } from '@/lib/services/review-rotation';
+import { REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
+import { issueRotationToken } from '@/lib/services/review-rotation-token';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,35 +61,67 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     await connectDB();
     const card = await getPublicCardByAlias(params.alias);
-    if (!card || !card.reviewAssistant?.enabled) {
+    if (!card) {
       return fail(404, 'NOT_FOUND', 'Review assistant is not available');
     }
 
-    // Capability gate: mirror the AI path — neutral 404, never hinting at
-    // entitlement. The existing feature/capability gate stays enforced. The
-    // owner identity uses `userId ?? assignedUserId` so a card bound to a
-    // physical holder still resolves to its entitlement — matching the page.
+    // Product-aware capability + effective settings. While the central public
+    // integration gate is OFF, the effective settings are exactly legacy.
+    const [entitled, effective] = await Promise.all([
+      canUseReviewAssistantForCard(card),
+      resolveEffectiveReviewSettings(card),
+    ]);
+    if (!entitled || !effective.enabled) {
+      return fail(404, 'NOT_FOUND', 'Review assistant is not available');
+    }
+
     const ownerId = (card.userId ?? card.assignedUserId) ?? null;
-    const allowed = await hasCapability(ownerId, 'review_ai_suggestions');
-    if (!allowed) {
+    if (!ownerId) {
       return fail(404, 'NOT_FOUND', 'Review assistant is not available');
     }
 
     const language = parsed.data.language;
     const length = parsed.data.length;
+    const categoryKey = (effective.category ?? '').trim().toLowerCase();
+
+    // Rotation state is read before selection so templates already copied in
+    // the active cycle are excluded from the candidate pool (never merely
+    // filtered after ranking). Strict server-side exclusions are only supplied
+    // while the feature gate is enabled; the disabled contract is unchanged.
+    const rotationState =
+      REVIEW_ROTATION_ACTIVE && categoryKey
+        ? await getOrCreateRotationState(ownerId, categoryKey)
+        : null;
 
     const suggestions = await getReviewTemplateSuggestions({
-      card,
+      card: { name: card.name, reviewAssistant: effective },
       language,
       length,
       topics: parsed.data.topics,
       feedback: parsed.data.feedback,
       excludeTemplateIds: parsed.data.excludeTemplateIds,
+      hardExcludeTemplateIds: rotationState?.usedTemplateIds,
     });
 
     if (suggestions.length === 0) {
       return ok({ mode: 'none', suggestions });
     }
+
+    // Rotation-enabled responses carry a signed cycle reference so a delayed
+    // copy from an older cycle cannot consume a template in a newer cycle.
+    // Disabled by default; shape is unchanged while the gate is off.
+    const responseSuggestions =
+      rotationState && REVIEW_ROTATION_ACTIVE
+        ? suggestions.map((suggestion) => ({
+            ...suggestion,
+            rotationToken: issueRotationToken({
+              businessId: String(ownerId),
+              categoryKey,
+              templateId: suggestion.templateId,
+              cycle: rotationState.cycle,
+            }),
+          }))
+        : suggestions;
 
     // Privacy-conscious: metadata carries tuning/count only — never template
     // or review text. Backward compatible: this action is additive. The init
@@ -96,8 +132,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       'review_suggestions_shown',
       JSON.stringify({
         count: suggestions.length,
-        language: language ?? card.reviewAssistant.languages?.[0] ?? 'English',
-        length: length ?? card.reviewAssistant.preferredLength ?? 'medium',
+        language: language ?? effective.languages[0] ?? 'English',
+        length: length ?? effective.preferredLength ?? 'medium',
         ...(parsed.data.init === true ? { init: true } : {}),
       }),
       request.headers
@@ -107,7 +143,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       console.error('[review-suggestions] analytics write failed:', err);
     });
 
-    return ok({ mode: 'template', suggestions });
+    return ok({ mode: 'template', suggestions: responseSuggestions });
   } catch (error) {
     // Distinguish "we have nothing to suggest" from "we broke". The client
     // treats a non-`template` mode identically either way, so returning a real

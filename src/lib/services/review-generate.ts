@@ -1,12 +1,14 @@
 import { connectDB } from '@/lib/db';
 import { check } from '@/lib/rate-limit';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
-import { hasCapability } from '@/lib/services/capability-access';
 import TenantSettings, { DEFAULT_AI_GENERATION_DAILY_LIMIT } from '@/models/TenantSettings';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { decryptSecret } from '@/lib/crypto';
 import { chatCompletion, type ChatCompletionInput, type ChatCompletionResult } from '@/lib/openai';
-import type { ReviewPreferredLength } from '@/types';
+import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
+import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
+import type { ReviewPreferredLength, ReviewWritingStyle } from '@/types';
+import { selectVariedLength, selectVariedStyle } from '@/lib/services/review-variation';
 
 /**
  * AI review-generation orchestration with tenant cost-control.
@@ -41,6 +43,8 @@ export interface GenerateReviewInput {
   topics: string[];
   language?: string;
   length?: ReviewPreferredLength;
+  /** Deterministic test seam for varied style/length selection. */
+  now?: Date;
   ip: string;
   userAgent: string;
   complet?: CompletionFn;
@@ -67,25 +71,80 @@ export async function generateReviewSuggestion(
   input: GenerateReviewInput
 ): Promise<ReviewGenerateResult> {
   const { alias, feedback, topics, language, length, ip, userAgent } = input;
-  const complet: CompletionFn = input.complet ?? chatCompletion;
 
   await connectDB();
   const card = await getPublicCardByAlias(alias);
-  if (!card || !card.reviewAssistant?.enabled) {
+  if (!card) {
     return { ok: false, code: 'NOT_FOUND', message: 'Review assistant is not available' };
   }
 
-  // Capability gate: AI Review Assistant must be included in the card
-  // owner's purchased products. Neutral 404 — never hints at entitlement.
-  // Owner identity uses `userId ?? assignedUserId` to match the page + template
-  // endpoints (a card bound to a physical holder still resolves its plan).
+  // Product-aware capability + effective settings. Central settings only apply
+  // when the independent public integration gate is ON.
+  const [entitled, effective] = await Promise.all([
+    canUseReviewAssistantForCard(card),
+    resolveEffectiveReviewSettings(card),
+  ]);
+  if (!entitled || !effective.enabled) {
+    return { ok: false, code: 'NOT_FOUND', message: 'Review assistant is not available' };
+  }
+
   const ownerId = (card.userId ?? card.assignedUserId) ?? null;
-  const allowed = await hasCapability(ownerId, 'review_ai_suggestions');
-  if (!allowed) {
+  if (!ownerId) {
     return { ok: false, code: 'NOT_FOUND', message: 'Review assistant is not available' };
   }
 
-  const config = card.reviewAssistant;
+  return generateReviewForHost({
+    ownerId,
+    hostType: 'card',
+    hostId: String(card._id),
+    config: effective,
+    feedback,
+    topics,
+    language,
+    length,
+    now: input.now,
+    ip,
+    userAgent,
+    complet: input.complet,
+  });
+}
+
+export interface GenerateForHostInput {
+  ownerId: unknown;
+  hostType: 'card' | 'standee';
+  hostId: string;
+  config: {
+    languages: string[];
+    writingStyle: ReviewWritingStyle;
+    preferredLength: ReviewPreferredLength;
+    styleMode: 'fixed' | 'varied';
+    lengthMode: 'fixed' | 'varied';
+  };
+  feedback: string;
+  topics: string[];
+  language?: string;
+  length?: ReviewPreferredLength;
+  now?: Date;
+  ip: string;
+  userAgent: string;
+  complet?: CompletionFn;
+}
+
+/**
+ * Shared AI orchestration for every public review host (Card and Standee).
+ * Host resolution and entitlement stay in the caller; this function owns the
+ * tenant kill-switch, cost controls, prompt safety and analytics attribution.
+ */
+export async function generateReviewForHost(
+  input: GenerateForHostInput
+): Promise<ReviewGenerateResult> {
+  const ownerId = input.ownerId;
+  const hostType = input.hostType;
+  const hostId = input.hostId;
+  const config = input.config;
+  const { feedback, topics, language, length, ip, userAgent } = input;
+  const complet: CompletionFn = input.complet ?? chatCompletion;
+  await connectDB();
 
   const settings = await TenantSettings.findOne({ userId: ownerId }).lean<{
     openai?: { enabled?: boolean; apiKeyEnc?: string; model?: string; dailyLimit?: number };
@@ -100,7 +159,7 @@ export async function generateReviewSuggestion(
   }
 
   // Per-alias secondary limit — one printed QR/link cannot burn the tenant budget.
-  const aliasLimit = await check(`review-generate-alias:${card._id}`, REVIEW_GENERATE_ALIAS_LIMIT, REVIEW_GENERATE_ALIAS_WINDOW_MS);
+  const aliasLimit = await check(`review-generate-alias:${hostId}`, REVIEW_GENERATE_ALIAS_LIMIT, REVIEW_GENERATE_ALIAS_WINDOW_MS);
   if (!aliasLimit.success) {
     return {
       ok: false,
@@ -141,7 +200,7 @@ export async function generateReviewSuggestion(
     // UNAVAILABLE message the visitor sees. Log enough to identify the tenant
     // and the cause — never the payload or the plaintext key.
     console.error(
-      `[review-generate] decryptSecret failed for tenant cardId=${String(card._id)} — ` +
+      `[review-generate] decryptSecret failed for tenant cardId=${hostId} — ` +
         'APP_KEY mismatch, rotated JWT_SECRET, or a tampered/truncated payload. ' +
         'Run `npm run check:appkey` to audit. Cause:',
       error instanceof Error ? error.message : error
@@ -154,8 +213,14 @@ export async function generateReviewSuggestion(
   }
 
   const lang = language ?? config.languages?.[0] ?? 'English';
-  const len = length ?? config.preferredLength ?? 'medium';
-  const style = config.writingStyle ?? 'friendly';
+  const generatedAt = input.now ?? new Date();
+  const len = selectVariedLength(
+    length ?? config.preferredLength ?? 'medium',
+    config.lengthMode,
+    generatedAt,
+    Boolean(length)
+  );
+  const style = selectVariedStyle(config.writingStyle, config.styleMode, generatedAt);
 
   const topicsLine =
     topics.length > 0 ? topics.map((t: string) => `- ${t}`).join('\n') : '(none selected)';
@@ -185,17 +250,44 @@ export async function generateReviewSuggestion(
     `"""\n${feedback}\n"""`,
   ].join('\n');
 
-  const result = await complet({
-    apiKey,
-    model: openai.model || 'gpt-4o-mini',
-    system,
-    user: userMsg,
-  });
+  let result: { text: string; usage: { promptTokens: number; completionTokens: number; totalTokens: number } };
+  try {
+    result = await complet({
+      apiKey,
+      model: openai.model || 'gpt-4o-mini',
+      system,
+      user: userMsg,
+    });
+  } catch (error) {
+    // Provider timeout/network/auth/5xx failures must never surface a fabricated
+    // draft. Log enough to diagnose the host without feedback text or secrets.
+    console.error(
+      `[review-generate] provider failed hostType=${hostType} hostId=${hostId}:`,
+      error instanceof Error ? error.message : error
+    );
+    return {
+      ok: false,
+      code: 'UNAVAILABLE',
+      message: 'The AI review-writing service is temporarily unavailable. Please try again.',
+    };
+  }
 
-  // Fire-and-forget, privacy-conscious: metadata carries tuning + token usage
-  // only — never the customer's feedback or the generated review text.
+  const review = result.text?.trim();
+  if (!review) {
+    console.error(`[review-generate] empty provider response hostType=${hostType} hostId=${hostId}`);
+    return {
+      ok: false,
+      code: 'UNAVAILABLE',
+      message: 'The AI review-writing service returned no draft. Please try again.',
+    };
+  }
+
+  // Privacy-conscious: metadata carries tuning + token usage only — never the
+  // customer's feedback or the generated review text. Analytics failure must
+  // not turn a successful draft into an error.
   await AnalyticsLog.create({
-    cardId: card._id,
+    cardId: hostType === 'card' ? hostId : null,
+    standeeId: hostType === 'standee' ? hostId : null,
     action: 'review_generated',
     metadata: JSON.stringify({
       length: len,
@@ -207,7 +299,9 @@ export async function generateReviewSuggestion(
     }),
     ip,
     userAgent,
+  }).catch((error) => {
+    console.error('[review-generate] analytics write failed:', error);
   });
 
-  return { ok: true, review: result.text };
+  return { ok: true, review };
 }

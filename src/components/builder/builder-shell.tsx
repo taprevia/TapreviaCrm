@@ -348,7 +348,7 @@ export function BuilderShell({ id }: BuilderShellProps) {
             <nav
               role="tablist"
               aria-label="Builder sections"
-              className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 self-start lg:sticky lg:top-24 lg:mx-0 lg:w-48 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0"
+              className="-mx-1 flex w-full min-w-0 max-w-full shrink-0 gap-1 self-start overflow-x-auto px-1 pb-1 lg:sticky lg:top-24 lg:mx-0 lg:w-48 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0"
             >
               {tabs.map((tab) => {
                 const isActive = tab.key === activeTab.key;

@@ -7,7 +7,7 @@ import { updateProductConfigSchema } from '@/lib/validation/product-config';
 import { isPubliclyResolvable } from '@/lib/services/card-access';
 import { rateLimitFailure } from '@/lib/api';
 import { buildVcf } from '@/lib/vcf';
-import { resolveBackupDbName } from '@/lib/db-target';
+import { resolveBackupDbName, indexCreationOptions } from '@/lib/db-target';
 import { countCatalogProducts } from '@/lib/admin-product-counts';
 import {
   permanentCardUrl,
@@ -175,5 +175,9 @@ assert.equal(
 assert.equal(resolveCardDestination({ kind: 'review', publicSlug: 'biz/x' }), null);
 assert.equal(resolveCardDestination({ kind: 'profile' }), null);
 assert.equal(resolveCardDestination({ kind: 'future-product', publicSlug: 'biz/x' }), null);
+
+// Production must never create indexes/collections on startup.
+assert.deepEqual(indexCreationOptions(true), { autoIndex: false, autoCreate: false });
+assert.deepEqual(indexCreationOptions(false), { autoIndex: true, autoCreate: true });
 
 console.log('Security boundary tests passed.');

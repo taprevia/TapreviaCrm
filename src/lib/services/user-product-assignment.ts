@@ -124,6 +124,25 @@ export async function assignUserProduct({
 
       const assigned = provisioned.card;
 
+      // Phase 4D.8 activation safety: the same physical Card must not create a
+      // second active product assignment for the same customer. A card sold as
+      // multiple units is represented by the assignment quantity, not duplicate
+      // records. Removed assignments may be re-added intentionally.
+      const existingAssignment = await UserProduct.findOne({
+        userId: user._id,
+        cardId: assigned._id,
+        status: 'active',
+      })
+        .select('_id')
+        .lean<{ _id: unknown } | null>();
+      if (existingAssignment) {
+        return {
+          ok: false,
+          status: 409,
+          error: 'This card is already assigned to this customer',
+        };
+      }
+
       try {
         // Generate routeSlug if not set (permanent dynamic route identifier).
         if (!assigned.routeSlug) {
@@ -148,6 +167,28 @@ export async function assignUserProduct({
           assignedBy,
           material,
         });
+
+        // Phase 4D.9 concurrency reconciliation: the pre-insert guard above is
+        // a read-then-write check, so two simultaneous requests can both pass
+        // it before either record exists. Re-read after insert and keep only
+        // the oldest active record. The losing request deletes only the record
+        // it just created; historical records are never touched.
+        const competingAssignment = await UserProduct.findOne({
+          userId: user._id,
+          cardId: assigned._id,
+          status: 'active',
+          _id: { $lt: userProduct._id },
+        })
+          .select('_id')
+          .lean<{ _id: unknown } | null>();
+        if (competingAssignment) {
+          await UserProduct.deleteOne({ _id: userProduct._id });
+          return {
+            ok: false,
+            status: 409,
+            error: 'This card is already assigned to this customer',
+          };
+        }
 
         // Best-effort human-readable URL allocation ("{business}/{product}[-N]").
         // Idempotent and backfillable — a URL allocation failure must never

@@ -29,6 +29,34 @@ const StandeeZoneSchema = new Schema(
   { _id: false }
 );
 
+const STANDEE_REVIEW_STYLES = ['friendly', 'professional', 'casual', 'simple'] as const;
+const STANDEE_REVIEW_LENGTHS = ['short', 'medium', 'detailed'] as const;
+const STANDEE_REVIEW_MODES = ['fixed', 'varied'] as const;
+
+/**
+ * Optional product-level overrides for the Google Review Standee review host.
+ * Mirrors the Card override contract; every field is optional and missing means
+ * "inherit the selected settings source".
+ */
+const StandeeReviewOverrideSchema = new Schema(
+  {
+    enabled: { type: Boolean },
+    googleReviewUrl: { type: String, trim: true },
+    writingStyle: { type: String, enum: [...STANDEE_REVIEW_STYLES] },
+    preferredLength: { type: String, enum: [...STANDEE_REVIEW_LENGTHS] },
+    styleMode: { type: String, enum: [...STANDEE_REVIEW_MODES] },
+    lengthMode: { type: String, enum: [...STANDEE_REVIEW_MODES] },
+    languages: { type: [String], default: undefined },
+    feedbackTopics: { type: [String], default: undefined },
+    welcomeMessage: { type: String },
+    category: { type: String, trim: true },
+    employees: { type: [String], default: undefined },
+    services: { type: [String], default: undefined },
+    keywords: { type: [String], default: undefined },
+  },
+  { _id: false }
+);
+
 const StandeeSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -61,6 +89,18 @@ const StandeeSchema = new Schema(
     },
     socialQrs: { type: [StandeeSocialQrSchema], default: [] },
     zones: { type: [StandeeZoneSchema], default: [] },
+    // Phase 4D.6 additive review-host configuration. Absent source means the
+    // explicit initial strategy: Central Settings when saved, otherwise
+    // Standee product settings. The Standee's own Google destination is always
+    // preserved unless a hybrid override explicitly replaces it.
+    reviewSettingsSource: {
+      type: String,
+      enum: ['legacy', 'central', 'hybrid'],
+    },
+    reviewSettingsVersion: { type: Number, default: 0, min: 0 },
+    reviewOverrides: { type: StandeeReviewOverrideSchema, default: undefined },
+    reviewSettingsUpdatedAt: { type: Date, default: null },
+    reviewSettingsUpdatedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );

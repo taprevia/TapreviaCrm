@@ -19,9 +19,11 @@ so `next build` **fails hard** if either is missing and `NODE_ENV=production`.
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `MONGODB_URI` | ✅ (build + runtime) | MongoDB Atlas SRV string. Read by `src/lib/env.ts`/`db.ts` at build. |
+| `MONGODB_DB` | ✅ Preview; recommended Production | Explicit database name; overrides the URI path. Preview fails closed when missing. Production defaults to `test`. |
+| `PREVIEW_APPROVED_HOST` / `NEXT_PUBLIC_PREVIEW_APPROVED_HOST` | Preview only | Exact approved Preview hostname for QR/NFC generation. Never set in Production. |
 | `JWT_SECRET` | ✅ (build + runtime) | JWT signing secret, **≥ 24 chars**. Generate fresh: `openssl rand -base64 32`. Never reuse the dev value. |
 | `APP_KEY` | ✅ (runtime) | AES-256-GCM key that decrypts per-tenant secrets (OpenAI API keys). Generate: `openssl rand -base64 32`. Required to *read* any previously encrypted key. |
-| `NEXT_PUBLIC_BASE_URL` | ✅ (runtime) | Public origin baked into QR/NFC permanent URLs. E.g. `https://taprev.in`. **Changing it later breaks printed QR routes.** |
+| `NEXT_PUBLIC_BASE_URL` | ✅ (runtime) | Public origin baked into QR/NFC permanent URLs. E.g. `https://taprevia.com`. **Changing it later breaks printed QR routes.** |
 | `MEDIA_DRIVER` | ✅ (`s3`) | `s3` in production. Unset + prod defaults to `s3` and then requires `S3_BUCKET`. |
 | `S3_BUCKET` / `S3_REGION` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | ✅ (runtime) | Object store credentials (or canonical `AWS_*` spellings). |
 | `S3_ENDPOINT` | ✅ for R2 | `https://<account-id>.r2.cloudflarestorage.com` (forces path-style). |
@@ -38,10 +40,10 @@ clean startup error.
 
 ## 2. Database (MongoDB Atlas)
 
-Indexes are declared in Mongoose schemas and are created automatically the
-first time each model is used (via `autoIndex`). For a large existing
-collection, build the critical ones explicitly with `mongosh` before switching
-traffic:
+Indexes are declared in Mongoose schemas. Development connections may create
+them automatically (`autoIndex`), but **production disables `autoIndex` and
+`autoCreate`**. Build every required index explicitly with `mongosh` in an
+approved maintenance window after preflighting duplicate keys:
 
 ```javascript
 // Unique/permanent-route indexes (build these FIRST — unique builds need an
@@ -59,6 +61,83 @@ db.profiles.createIndex({ "standeeQr.qrId": 1 }, { unique: true, sparse: true })
 db.newslettersubscribers.createIndex({ cardId: 1, email: 1 }, { unique: true });
 db.ratecounters.createIndex({ key: 1, window: 1 }, { unique: true });
 
+// Smart Review Rotation (create BEFORE setting SMART_REVIEW_ROTATION_ENABLED=true;
+// the feature stays disabled by default and is not required for existing review flows):
+db.reviewrotationevents.createIndex(
+  { businessId: 1, categoryKey: 1, templateId: 1, cycle: 1 },
+  { unique: true }
+);
+db.reviewrotationevents.createIndex({ copyId: 1 }, { unique: true });
+db.reviewrotationevents.createIndex({ businessId: 1, categoryKey: 1, copiedAt: -1 });
+db.reviewrotationstates.createIndex({ businessId: 1, categoryKey: 1 }, { unique: true });
+
+// Central Review Management (additive Phase 4D.2):
+db.reviewsettings.createIndex({ businessId: 1 }, { unique: true });
+
+// Review feature gates (both default OFF; rotation requires both):
+//   NEW_REVIEW_COPY_FLOW_ENABLED=true  → two-button customer copy experience
+//   SMART_REVIEW_ROTATION_ENABLED=true → rotation exclusions/tokens/recording
+// Copy flow OFF + rotation ON is intentionally inert (server warning) because
+// no active customer path would record rotation copies. Create the indexes above
+// before enabling rotation. No production activation is authorized by this document.
+//
+// Flag matrix:
+//   copy OFF, rotation OFF → existing UI/API, no tokens, no exclusions
+//   copy ON,  rotation OFF → two-button UI, no tokens, no rotation events
+//   copy OFF, rotation ON  → effective rotation OFF (same as both OFF)
+//   copy ON,  rotation ON  → full Phase 4C copy + rotation flow
+//
+// CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED=false
+//   When OFF (default), public review reads remain strictly legacy even if a
+//   Card is configured as central/hybrid. When ON, the effective-settings
+//   resolver may apply saved ReviewSettings and product overrides.
+//
+// STANDEE_REVIEW_ASSISTANT_ENABLED=false
+//   When OFF (default), every existing Google Review Standee /r/... and /qr/...
+//   destination keeps its current Google/profile/panel behavior exactly.
+//   When ON, eligible Google Review Standees route their EXISTING printed
+//   QR/NFC URLs to /standee-review/{routeSlug}. The Standee's own Google URL is
+//   preserved; central content never replaces it unless a hybrid override
+//   explicitly sets the URL.
+//
+//   The payloads printed by Taprevia are /r/{routeSlug} and
+//   /r/{routeSlug}/{slot} (or legacy /qr/{qrId}), so no reprint is required
+//   for Taprevia-generated Standee QR codes. A QR code that directly encodes
+//   an external Google URL cannot be changed remotely; document a reprint /
+//   opt-in path for those separately.
+//
+//   Production indexes required for attribution + unified analytics:
+//     db.analyticslogs.createIndex({ standeeId: 1, timestamp: -1 });
+//     db.analyticslogs.createIndex({ cardId: 1, action: 1, createdAt: -1 });
+//     db.analyticslogs.createIndex({ standeeId: 1, action: 1, createdAt: -1 });
+//     db.reviewrotationevents.createIndex({ businessId: 1, copiedAt: -1 });
+//   (The review settings/rotation indexes above are already required.)
+//
+// PHASE 4D.5 RELEASE PREREQUISITES (all flags remain OFF by default):
+//   1. Deploy code with all three review flags OFF.
+//   2. Preflight duplicates and create/verify ALL indexes above.
+//   3. Run post-deploy smoke tests with flags OFF.
+//   4. Enable CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED only after approval.
+//   5. Enable copy flow/rotation separately after their own QA.
+//   6. Confirm production CatalogProduct PREMIUM_NFC_CARD uses the canonical
+//      slug `premium-nfc-card`; never infer entitlement from display names.
+//   7. Audit zero-assignment, already-enabled profile Cards before approving
+//      any stricter revocation policy. 4D.5 preserves active legacy access and
+//      blocks NEW lower-tier enablement; it does not revoke existing access.
+//   8. Complete real-device touch/keyboard/screen-reader QA.
+//
+// Duplicate preflight, index verification, monitoring and rollback details:
+// docs/REVIEW_MANAGEMENT.md §18.7.
+//
+// Post-activation smoke (authorized operator):
+//   GET /api/review-management              → 200, saved settings/revision
+//   GET /api/review-management/products     → eligible Card products only
+//   GET /api/review-management/preview      → source/effective settings correct
+//   GET /review/<central-card-alias>        → 200 only when the gate is ON
+//   POST /api/public/reviews/<alias>/suggestions → 200
+//   PATCH settings with a stale revision    → 409, no write
+//   Confirm no 5xx/E11000 spikes and no unexpected fallback-source increase.
+//
 // High-read/scan hot paths:
 db.cards.createIndex({ urlAlias: 1 });
 db.cards.createIndex({ userId: 1 });
@@ -85,8 +164,10 @@ db.passwordresetokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 Collection names are lowercased model names (`newsletterSubscribers` →
 `newslettersubscribers`, `passwordResetToken` → `passwordresetokens`). Confirm
-exact names with `show collections` in your target DB. Keep
-`autoIndex=true` so new index definitions in code still apply on deploy.
+exact names with `show collections` in your target DB. Deployed Production **and
+Preview** run with `autoIndex:false`/`autoCreate:false`; never rely on startup
+to create indexes. Create them explicitly through the approved index procedure.
+Only isolated local development keeps automatic index creation.
 
 ## 3. Object storage (Cloudflare R2 / S3) CORS
 
@@ -185,3 +266,10 @@ Authenticated checks (login as a real account):
 - [ ] Consider adding `src/app/robots.ts` + `sitemap.ts` for the marketing
       site and a custom `not-found.tsx`/`error.tsx` (currently Next defaults).
 - [ ] Schedule the `next@15` migration track (`docs/next15-migration-track.md`).
+## Index changes
+
+Production connections run with `autoIndex: false` and `autoCreate: false`.
+Application startup must never create or alter indexes/collections. Apply index
+changes only through an explicitly approved maintenance window using reviewed
+commands (for example, the statements earlier in this document), after checking
+for duplicate keys. Development may keep automatic index creation for local work.

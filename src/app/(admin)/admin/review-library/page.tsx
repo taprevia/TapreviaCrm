@@ -8,7 +8,7 @@
  * import/export round-trip the full { categories, templates } JSON artifact.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import {
   Download,
   FileUp,
   Loader2,
+  Pencil,
   Plus,
   Save,
   Trash2,
@@ -116,6 +117,9 @@ export default function AdminReviewLibraryPage() {
   const [selectedKey, setSelectedKey] = useState('');
   const [templates, setTemplates] = useState<TemplateView[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState('');
+  const templatesKeyRef = useRef('');
+  const templatesSeqRef = useRef(0);
 
   // Category editor draft (initialised from the selected category).
   const [catForm, setCatForm] = useState<{
@@ -130,10 +134,22 @@ export default function AdminReviewLibraryPage() {
   const [tplModalOpen, setTplModalOpen] = useState(false);
   const [tplForm, setTplForm] = useState<TemplateForm>(EMPTY_TEMPLATE_FORM);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<TemplateView | null>(null);
+  const [tplInitial, setTplInitial] = useState<TemplateForm>(EMPTY_TEMPLATE_FORM);
 
   // Import modal.
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [importPreview, setImportPreview] = useState<{
+    categoriesNew: number;
+    categoriesExisting: number;
+    templatesNew: number;
+    templatesExisting: number;
+    invalid: string[];
+  } | null>(null);
+  const importingRef = useRef(false);
   const [importResult, setImportResult] = useState<{
     imported: { categories: number; templates: number };
     errors?: string[];
@@ -165,22 +181,34 @@ export default function AdminReviewLibraryPage() {
   }, [fetchCategories]);
 
   const fetchTemplates = useCallback(async (key: string) => {
+    const seq = ++templatesSeqRef.current;
     if (!key) {
+      templatesKeyRef.current = '';
       setTemplates([]);
+      setTemplatesLoading(false);
+      setTemplatesError('');
       return;
     }
+    // A different category must never show the previous category's rows.
+    if (templatesKeyRef.current !== key) {
+      templatesKeyRef.current = key;
+      setTemplates([]);
+    }
     setTemplatesLoading(true);
+    setTemplatesError('');
     try {
       const res = await fetch(
         `/api/admin/review-library?categoryKey=${encodeURIComponent(key)}`
       );
       if (!res.ok) throw new Error('Failed to load templates');
       const data: { templates?: TemplateView[] } = await res.json();
+      if (seq !== templatesSeqRef.current) return;
       setTemplates(data.templates ?? []);
     } catch {
-      setTemplates([]);
+      if (seq !== templatesSeqRef.current) return;
+      setTemplatesError('Could not load templates for this category.');
     } finally {
-      setTemplatesLoading(false);
+      if (seq === templatesSeqRef.current) setTemplatesLoading(false);
     }
   }, []);
 
@@ -188,10 +216,57 @@ export default function AdminReviewLibraryPage() {
     void fetchTemplates(selectedKey);
   }, [selectedKey, fetchTemplates]);
 
+  const refreshLibrary = useCallback(async () => {
+    await fetchCategories();
+    if (selectedKey) await fetchTemplates(selectedKey);
+  }, [fetchCategories, fetchTemplates, selectedKey]);
+
   const selectedCategory = useMemo(
     () => categories.find((c) => c.key === selectedKey) ?? null,
     [categories, selectedKey]
   );
+
+  const categoryDirty = useMemo(() => {
+    if (!selectedCategory) {
+      return Boolean(
+        catForm.name.trim() ||
+          catForm.key.trim() ||
+          catForm.languages.trim() ||
+          catForm.scenarios.length > 0
+      );
+    }
+    return (
+      catForm.name.trim() !== selectedCategory.name ||
+      catForm.active !== selectedCategory.active ||
+      catForm.languages
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .join(',') !== (selectedCategory.languages ?? []).join(',') ||
+      JSON.stringify(
+        catForm.scenarios.map((s) => ({ key: s.key.trim(), name: s.name.trim() }))
+      ) !==
+        JSON.stringify(
+          (selectedCategory.scenarios ?? []).map((s) => ({ key: s.key, name: s.name }))
+        )
+    );
+  }, [catForm, selectedCategory]);
+
+  const templateDirty = useMemo(
+    () => JSON.stringify(tplForm) !== JSON.stringify(tplInitial),
+    [tplForm, tplInitial]
+  );
+
+  const confirmDiscardCategory = (action: () => void) => {
+    if (categoryDirty && !window.confirm('Discard unsaved category and scenario changes?')) return;
+    action();
+  };
+
+  const closeTemplateModal = () => {
+    if (templateDirty && !window.confirm('Discard unsaved template changes?')) return;
+    setTplModalOpen(false);
+    setEditingTemplate(null);
+  };
 
   // Sync the category editor draft when the selection changes.
   useEffect(() => {
@@ -214,21 +289,43 @@ export default function AdminReviewLibraryPage() {
       toast({ title: 'Name required', description: 'Give the category a name.', variant: 'warning' });
       return;
     }
+    const scenarioKeys = catForm.scenarios.map((s) => s.key.trim());
+    const scenarioNames = catForm.scenarios.map((s) => s.name.trim().toLowerCase());
+    if (scenarioKeys.some((key) => !key) || scenarioNames.some((value) => !value)) {
+      toast({ title: 'Scenario incomplete', description: 'Every scenario needs a key and a name.', variant: 'warning' });
+      return;
+    }
+    if (new Set(scenarioKeys).size !== scenarioKeys.length) {
+      toast({ title: 'Duplicate scenario key', description: 'Scenario keys must be unique.', variant: 'warning' });
+      return;
+    }
+    if (new Set(scenarioNames).size !== scenarioNames.length) {
+      toast({ title: 'Duplicate scenario name', description: 'Scenario names must be unique.', variant: 'warning' });
+      return;
+    }
+    const languages = catForm.languages
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // New categories default to English; existing categories keep whatever the
+    // admin saved and additional languages remain allowed.
+    if (languages.length === 0) languages.push('English');
     const payload = {
       key: catForm.key.trim() || slugify(name),
       name,
       active: catForm.active,
-      languages: catForm.languages
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      languages,
       scenarios: catForm.scenarios,
     };
     try {
       const res = await fetch('/api/admin/review-library', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'category', payload }),
+        body: JSON.stringify({
+          type: 'category',
+          mode: selectedCategory ? 'update' : 'create',
+          payload,
+        }),
       });
       const data: { error?: string; category?: CategoryView } = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error || 'Failed to save category');
@@ -292,6 +389,16 @@ export default function AdminReviewLibraryPage() {
   };
 
   const removeScenario = (index: number) => {
+    const key = catForm.scenarios[index]?.key;
+    const usedBy = key ? templates.filter((tpl) => tpl.scenario === key).length : 0;
+    if (usedBy > 0) {
+      toast({
+        title: 'Scenario in use',
+        description: `${usedBy} template(s) use this scenario. Reassign or delete them first.`,
+        variant: 'error',
+      });
+      return;
+    }
     setCatForm((prev) => ({
       ...prev,
       scenarios: prev.scenarios.filter((_, i) => i !== index),
@@ -299,11 +406,30 @@ export default function AdminReviewLibraryPage() {
   };
 
   const openCreateTemplate = () => {
-    setTplForm({
+    const next = {
       ...EMPTY_TEMPLATE_FORM,
       scenario: catForm.scenarios[0]?.key ?? '',
       key: `${catForm.key}-tl-${Date.now()}`,
-    });
+    };
+    setEditingTemplate(null);
+    setTplInitial(next);
+    setTplForm(next);
+    setTplModalOpen(true);
+  };
+
+  const openEditTemplate = (tpl: TemplateView) => {
+    const next = {
+      key: tpl.key,
+      scenario: tpl.scenario,
+      language: tpl.language,
+      text: tpl.text,
+      length: tpl.length as ReviewPreferredLength,
+      style: (tpl.style ?? '') as ReviewWritingStyle | '',
+      compatibleKeywords: (tpl.compatibleKeywords ?? []).join(', '),
+    };
+    setEditingTemplate(tpl);
+    setTplInitial(next);
+    setTplForm(next);
     setTplModalOpen(true);
   };
 
@@ -324,6 +450,7 @@ export default function AdminReviewLibraryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'template',
+          mode: editingTemplate ? 'update' : 'create',
           payload: {
             key: tplForm.key.trim(),
             categoryKey: selectedKey,
@@ -333,7 +460,7 @@ export default function AdminReviewLibraryPage() {
             length: tplForm.length,
             style: tplForm.style || undefined,
             compatibleKeywords,
-            active: true,
+            active: editingTemplate ? editingTemplate.active : true,
           },
         }),
       });
@@ -361,6 +488,7 @@ export default function AdminReviewLibraryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'template',
+          mode: 'update',
           payload: {
             key: tpl.key,
             categoryKey: tpl.categoryKey,
@@ -387,18 +515,73 @@ export default function AdminReviewLibraryPage() {
     }
   };
 
-  const runImport = async () => {
-    setImportResult(null);
+  const deleteTemplate = async (tpl: TemplateView) => {
+    if (!window.confirm(`Permanently delete template "${tpl.key}"? It will stop serving immediately. This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/admin/review-library/templates/${encodeURIComponent(tpl.key)}`, {
+        method: 'DELETE',
+      });
+      const data: { error?: string } = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || 'Failed to delete template');
+      setTemplates((prev) => prev.filter((item) => item._id !== tpl._id));
+      await fetchCategories();
+      toast({ title: 'Deleted', description: 'Template removed.', variant: 'success' });
+    } catch (err) {
+      toast({
+        title: 'Could not delete',
+        description: err instanceof Error ? err.message : 'Something went wrong.',
+        variant: 'error',
+      });
+    }
+  };
+
+  const runPreview = async () => {
+    if (importingRef.current) return;
     try {
       const parsed = JSON.parse(importText);
-      const res = await fetch('/api/admin/review-library/import', {
+      const res = await fetch('/api/admin/review-library/import/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(parsed),
       });
       const data: {
         error?: string;
+        preview?: {
+          categoriesNew: number;
+          categoriesExisting: number;
+          templatesNew: number;
+          templatesExisting: number;
+          invalid: string[];
+        };
+      } = await res.json().catch(() => null);
+      if (!res.ok || !data?.preview) throw new Error(data?.error || 'Preview failed');
+      setImportPreview(data.preview);
+    } catch (err) {
+      setImportPreview(null);
+      toast({
+        title: 'Preview failed',
+        description: err instanceof Error ? err.message : 'Invalid JSON payload.',
+        variant: 'error',
+      });
+    }
+  };
+
+  const runImport = async () => {
+    if (importingRef.current || !importPreview) return;
+    importingRef.current = true;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const parsed = JSON.parse(importText);
+      const res = await fetch('/api/admin/review-library/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...parsed, overwrite: overwriteExisting }),
+      });
+      const data: {
+        error?: string;
         imported?: { categories: number; templates: number };
+        skipped?: { categories: number; templates: number };
         errors?: string[];
       } = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error || 'Import failed');
@@ -406,8 +589,16 @@ export default function AdminReviewLibraryPage() {
         imported: data.imported ?? { categories: 0, templates: 0 },
         errors: data.errors,
       });
-      if (data.errors?.length === 0) {
-        await fetchCategories();
+      await fetchCategories();
+      if (selectedKey) await fetchTemplates(selectedKey);
+      setImportPreview(null);
+      if (data.errors?.length) {
+        toast({
+          title: 'Import completed with errors',
+          description: `${data.errors.length} record(s) were rejected.`,
+          variant: 'warning',
+        });
+      } else {
         toast({ title: 'Imported', description: 'Review library updated.', variant: 'success' });
       }
     } catch (err) {
@@ -416,6 +607,9 @@ export default function AdminReviewLibraryPage() {
         description: err instanceof Error ? err.message : 'Invalid JSON payload.',
         variant: 'error',
       });
+    } finally {
+      importingRef.current = false;
+      setImporting(false);
     }
   };
 
@@ -431,8 +625,10 @@ export default function AdminReviewLibraryPage() {
       const a = document.createElement('a');
       a.href = url;
       a.download = 'review-library.json';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
     } catch (err) {
       toast({
         title: 'Export failed',
@@ -458,16 +654,16 @@ export default function AdminReviewLibraryPage() {
             deleting a category permanently removes it (and, by confirmation, its templates).
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void runExport()}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button data-testid="export-json" variant="outline" size="sm" onClick={() => void runExport()}>
             <Download className="h-4 w-4 mr-1.5" />
             Export
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+          <Button data-testid="import-open" variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <FileUp className="h-4 w-4 mr-1.5" />
             Import
           </Button>
-          <Button variant="primary" size="sm" onClick={() => void fetchCategories()} disabled={loading}>
+          <Button data-testid="refresh" variant="primary" size="sm" onClick={() => confirmDiscardCategory(() => void refreshLibrary())} disabled={loading}>
             <Loader2 className={cn('h-4 w-4 mr-1.5', loading && 'animate-spin')} />
             Refresh
           </Button>
@@ -477,7 +673,7 @@ export default function AdminReviewLibraryPage() {
       {pageError && (
         <div className="flex items-center justify-between gap-4 rounded-lg bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
           <p className="text-sm text-red-400">{pageError}</p>
-          <Button variant="outline" size="sm" onClick={() => void fetchCategories()}>
+          <Button variant="outline" size="sm" onClick={() => void refreshLibrary()}>
             Retry
           </Button>
         </div>
@@ -495,7 +691,7 @@ export default function AdminReviewLibraryPage() {
           <aside className="space-y-2">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-ink">Categories</h2>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedKey('')}>
+              <Button data-testid="category-new" variant="ghost" size="sm" onClick={() => confirmDiscardCategory(() => setSelectedKey(''))}>
                 <Plus className="h-4 w-4" />
                 New
               </Button>
@@ -509,7 +705,7 @@ export default function AdminReviewLibraryPage() {
               <button
                 key={cat.key}
                 type="button"
-                onClick={() => setSelectedKey(cat.key)}
+                data-testid={`category-${cat.key}`} onClick={() => confirmDiscardCategory(() => setSelectedKey(cat.key))}
                 className={cn(
                   'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left ring-1 transition-colors',
                   selectedKey === cat.key
@@ -595,6 +791,8 @@ export default function AdminReviewLibraryPage() {
                   <div className="flex items-end pb-1">
                     <label className="flex items-center gap-2 text-sm font-medium text-ink-mute">
                       <Switch
+                        data-testid="category-active"
+                        aria-label="Category active"
                         checked={catForm.active}
                         onChange={(checked) => setCatForm((prev) => ({ ...prev, active: checked }))}
                         size="sm"
@@ -609,7 +807,7 @@ export default function AdminReviewLibraryPage() {
                     <p className="text-sm font-medium text-ink-mute">
                       Scenarios <span className="text-ink-faint">(templates are grouped by scenario)</span>
                     </p>
-                    <Button variant="outline" size="sm" onClick={addScenario}>
+                    <Button data-testid="scenario-add" variant="outline" size="sm" onClick={addScenario}>
                       <Plus className="h-4 w-4 mr-1" />
                       Add
                     </Button>
@@ -621,10 +819,11 @@ export default function AdminReviewLibraryPage() {
                   )}
                   <ul className="space-y-2">
                     {catForm.scenarios.map((scenario, index) => (
-                      <li key={index} className="flex items-center gap-2">
+                      <li key={index} className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Input
                           value={scenario.key}
                           placeholder="key (e.g. service-quality)"
+                          data-testid={`scenario-key-${index}`} aria-label={`Scenario ${index + 1} key`}
                           onChange={(e) =>
                             updateScenario(index, { key: slugify(e.target.value) })
                           }
@@ -633,12 +832,13 @@ export default function AdminReviewLibraryPage() {
                         <Input
                           value={scenario.name}
                           placeholder="Display name (e.g. Service quality)"
+                          data-testid={`scenario-name-${index}`} aria-label={`Scenario ${index + 1} name`}
                           onChange={(e) => updateScenario(index, { name: e.target.value })}
                         />
                         <Button
                           variant="ghost"
                           size="sm"
-                          aria-label="Remove scenario"
+                          data-testid={`scenario-remove-${index}`} aria-label="Remove scenario"
                           onClick={() => removeScenario(index)}
                         >
                           <X className="h-4 w-4" />
@@ -657,7 +857,7 @@ export default function AdminReviewLibraryPage() {
                   ) : (
                     <span />
                   )}
-                  <Button variant="primary" onClick={() => void saveCategory()}>
+                  <Button data-testid="category-save" variant="primary" onClick={() => void saveCategory()}>
                     <Save className="h-4 w-4 mr-1.5" />
                     Save category
                   </Button>
@@ -672,20 +872,33 @@ export default function AdminReviewLibraryPage() {
                   <h2 className="text-base font-semibold text-ink">Templates</h2>
                   <p className="text-xs text-ink-faint mt-0.5">
                     {selectedCategory
-                      ? `${selectedCategory.name} / ${selectedCategory.scenarios.length} scenarios`
+                      ? selectedCategory.scenarios.length > 0
+                        ? `${selectedCategory.name} / ${selectedCategory.scenarios.length} scenarios`
+                        : 'Add at least one scenario before adding templates.'
                       : 'Save the category to add templates to it.'}
                   </p>
                 </div>
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={!selectedCategory}
+                  data-testid="template-add" disabled={!selectedCategory || selectedCategory.scenarios.length === 0}
+                  title={selectedCategory && selectedCategory.scenarios.length === 0 ? 'Add a scenario first' : undefined}
                   onClick={openCreateTemplate}
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
                   Add template
                 </Button>
               </div>
+
+              {templatesError && (
+                <div
+                  role="alert"
+                  aria-live="polite"
+                  className="mx-4 mt-4 rounded-lg bg-bad/10 px-3 py-2 text-xs text-bad ring-1 ring-bad/20"
+                >
+                  {templatesError}
+                </div>
+              )}
 
               {templatesLoading ? (
                 <div className="space-y-3 p-5">
@@ -696,11 +909,15 @@ export default function AdminReviewLibraryPage() {
               ) : templates.length === 0 ? (
                 <div className="p-12 text-center">
                   <BookOpen className="mx-auto mb-3 h-8 w-8 text-ink-faint" aria-hidden="true" />
-                  <p className="text-sm font-medium text-ink">No templates yet</p>
+                  <p className="text-sm font-medium text-ink">
+                    {templatesError ? 'Templates unavailable' : 'No templates yet'}
+                  </p>
                   <p className="mt-1 text-sm text-ink-mute">
-                    {selectedCategory
-                      ? 'Add a template to start serving category suggestions.'
-                      : 'Save a category first.'}
+                    {templatesError
+                      ? 'The category templates could not be loaded. Retry with Refresh.'
+                      : selectedCategory
+                        ? 'Add a template to start serving category suggestions.'
+                        : 'Save a category first.'}
                   </p>
                 </div>
               ) : (
@@ -732,12 +949,31 @@ export default function AdminReviewLibraryPage() {
                         <p className="text-sm leading-relaxed text-ink line-clamp-2">{tpl.text}</p>
                         <p className="mt-0.5 text-xs font-mono text-ink-faint">/{tpl.key}</p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Edit template"
+                          data-testid={`template-edit-${tpl.key}`} aria-label={`Edit ${tpl.key}`}
+                          onClick={() => openEditTemplate(tpl)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Delete template"
+                          data-testid={`template-delete-${tpl.key}`} aria-label={`Delete ${tpl.key}`}
+                          onClick={() => void deleteTemplate(tpl)}
+                          className="text-bad hover:bg-bad/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                         <Switch
                           checked={tpl.active}
                           onChange={(next) => toggleTemplate(tpl, next)}
                           size="sm"
-                          aria-label={`${tpl.active ? 'Deactivate' : 'Activate'} ${tpl.key}`}
+                          data-testid={`template-toggle-${tpl.key}`} aria-label={`${tpl.active ? 'Deactivate' : 'Activate'} ${tpl.key}`}
                         />
                       </div>
                     </li>
@@ -752,11 +988,26 @@ export default function AdminReviewLibraryPage() {
       {/* ── Add template modal ── */}
       <Modal
         isOpen={tplModalOpen}
-        onClose={() => setTplModalOpen(false)}
-        title="Add template"
+        onClose={closeTemplateModal}
+        title={editingTemplate ? 'Edit template' : 'Add template'}
         className="max-w-lg"
       >
         <div className="space-y-4">
+          <div>
+            <label htmlFor="tpl-key" className="mb-1.5 block text-sm font-medium text-ink-mute">
+              Template key
+            </label>
+            <Input
+              id="tpl-key"
+              value={tplForm.key}
+              readOnly={Boolean(editingTemplate)}
+              onChange={(event) => setTplForm((prev) => ({ ...prev, key: event.target.value }))}
+              className="font-mono text-xs"
+            />
+            <p className="mt-1 text-xs text-ink-faint">
+              {editingTemplate ? 'Template identity is locked while editing.' : 'Unique key for this template.'}
+            </p>
+          </div>
           <div>
             <label htmlFor="tpl-text" className="mb-1.5 block text-sm font-medium text-ink-mute">
               Template text
@@ -833,10 +1084,10 @@ export default function AdminReviewLibraryPage() {
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setTplModalOpen(false)}>
+            <Button variant="outline" onClick={closeTemplateModal}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={() => void saveTemplate()} isLoading={savingTemplate}>
+            <Button data-testid="template-save" variant="primary" onClick={() => void saveTemplate()} isLoading={savingTemplate}>
               <Check className="h-4 w-4 mr-1.5" />
               Save template
             </Button>
@@ -848,9 +1099,12 @@ export default function AdminReviewLibraryPage() {
       <Modal
         isOpen={importOpen}
         onClose={() => {
+          if (importing) return;
           setImportOpen(false);
           setImportText('');
           setImportResult(null);
+          setImportPreview(null);
+          setOverwriteExisting(false);
         }}
         title="Import review library"
         className="max-w-lg"
@@ -859,13 +1113,50 @@ export default function AdminReviewLibraryPage() {
           <p className="text-sm text-ink-mute">
             Paste the exported JSON <code className="rounded bg-field px-1 py-0.5 font-mono text-xs">{"{ categories, templates }"}</code>payload. This upserts by key and never deletes existing rows.
           </p>
+          <label htmlFor="rl-import-json" className="mb-1.5 block text-sm font-medium text-ink-mute">
+            JSON payload
+          </label>
           <textarea
+            data-testid="import-json" id="rl-import-json"
             rows={10}
             value={importText}
-            onChange={(e) => setImportText(e.target.value)}
+            onChange={(e) => {
+              setImportText(e.target.value);
+              setImportPreview(null);
+            }}
             placeholder='{ "categories": [], "templates": [] }'
             className="w-full rounded-lg border border-line bg-field px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/25"
           />
+          {importPreview && (
+            <div className="rounded-lg bg-field px-3 py-2 text-xs text-ink-mute ring-1 ring-line-subtle">
+              <p>
+                Categories: {importPreview.categoriesNew} new, {importPreview.categoriesExisting} existing.
+                {' '}Templates: {importPreview.templatesNew} new, {importPreview.templatesExisting} existing.
+              </p>
+              {importPreview.invalid.length > 0 && (
+                <ul className="mt-1 list-disc pl-4 text-warn">
+                  {importPreview.invalid.slice(0, 10).map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <label className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn ring-1 ring-warn/20">
+            <input
+              data-testid="import-overwrite"
+              type="checkbox"
+              checked={overwriteExisting}
+              onChange={(event) => setOverwriteExisting(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Overwrite existing categories/templates with the same keys. Leave unchecked to skip
+              existing records (default).
+            </span>
+          </label>
+
           {importResult && (
             <div className={cn(
               'rounded-lg px-3 py-2 text-xs ring-1',
@@ -882,13 +1173,37 @@ export default function AdminReviewLibraryPage() {
               )}
             </div>
           )}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setImportOpen(false)}>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setImportOpen(false);
+                setImportText('');
+                setImportResult(null);
+                setImportPreview(null);
+                setOverwriteExisting(false);
+              }}
+              disabled={importing}
+            >
               Close
             </Button>
-            <Button variant="primary" onClick={() => void runImport()} disabled={!importText.trim()}>
+            <Button
+              data-testid="import-preview"
+              variant="outline"
+              onClick={() => void runPreview()}
+              disabled={!importText.trim() || importing}
+            >
+              Preview
+            </Button>
+            <Button
+              data-testid="import-submit"
+              variant="primary"
+              onClick={() => void runImport()}
+              disabled={!importText.trim() || !importPreview || importing}
+              isLoading={importing}
+            >
               <FileUp className="h-4 w-4 mr-1.5" />
-              Import
+              {importing ? 'Importing…' : 'Import'}
             </Button>
           </div>
         </div>

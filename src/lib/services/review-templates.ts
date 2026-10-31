@@ -28,6 +28,8 @@
 
 import type { ReviewPreferredLength } from '@/types';
 import type { ReviewWritingStyle } from '@/types';
+import type { ReviewMode } from '@/lib/review-settings-defaults';
+import { selectVariedLength, selectVariedStyle } from '@/lib/services/review-variation';
 
 export const MAX_SUGGESTIONS = 1;
 export const FALLBACK_LANGUAGE = 'English';
@@ -113,6 +115,8 @@ export interface ReviewTemplateInput {
       languages?: string[];
       preferredLength?: ReviewPreferredLength;
       writingStyle?: ReviewWritingStyle;
+      styleMode?: ReviewMode;
+      lengthMode?: ReviewMode;
       employees?: string[];
       services?: string[];
       keywords?: string[];
@@ -131,6 +135,13 @@ export interface ReviewTemplateInput {
    * never acts as authorization.
    */
   excludeTemplateIds?: string[];
+  /**
+   * Server-side hard exclusions (Smart Review Rotation). Unlike the session
+   * preference list these are never refilled: templates already copied in the
+   * active business/category cycle must not be served again. Only supplied by
+   * the suggestions route while the rotation feature gate is enabled.
+   */
+  hardExcludeTemplateIds?: string[];
   /**
    * Dynamic substitution seed for employee/service/keyword rotation. When
    * omitted, a runtime-random offset is used so consecutive serves vary their
@@ -252,6 +263,37 @@ export function styleBucket<T extends { style?: string }>(pool: T[], preferred?:
   return [...exact, ...rest];
 }
 
+export interface ReviewEdibilityValues {
+  businessName: string;
+  employees: string[];
+  services: string[];
+  keywords: string[];
+}
+
+/**
+ * Shared strict-eligibility check for suggestion selection and rotation pool.
+ * Language/length/style/feedback remain preference/ranking behavior; a
+ * business-wide rotation cycle must not be reset by those preferences.
+ */
+export function isTemplateEdibleForBusiness(
+  template: { text: string; compatibleKeywords?: string[] },
+  values: ReviewEdibilityValues
+): boolean {
+  return isEdible(
+    {
+      _id: 'rotation',
+      scenario: '',
+      text: template.text,
+      length: '',
+      language: '',
+      compatibleKeywords: template.compatibleKeywords ?? [],
+      usageCount: 0,
+      lastShownAt: null,
+    },
+    values
+  );
+}
+
 function isEdible(
   t: EdibleCandidate,
   values: { businessName: string; employees: string[]; services: string[]; keywords: string[] }
@@ -353,8 +395,19 @@ export async function getReviewTemplateSuggestions(
   const categoryKey = (cfg.category ?? '').trim();
   if (!categoryKey || cfg.enabled === false) return [];
 
+  // Inactive categories must stop serving suggestions for existing cards.
+  const { default: ReviewCategory } = await import('@/models/ReviewCategory');
+  const activeCategory = await ReviewCategory.exists({ key: categoryKey, active: true });
+  if (!activeCategory) return [];
+
   const language = (input.language ?? '').trim() || (cfg.languages?.[0] ?? '') || FALLBACK_LANGUAGE;
-  const preferredLength = (input.length ?? cfg.preferredLength ?? 'medium') as string;
+  const preferredLength = selectVariedLength(
+    (input.length ?? cfg.preferredLength ?? 'medium') as ReviewPreferredLength,
+    cfg.lengthMode,
+    input.now,
+    Boolean(input.length)
+  ) as string;
+  const writingStyle = selectVariedStyle(cfg.writingStyle, cfg.styleMode, input.now);
   const now = input.now ?? new Date();
 
   const businessName = (input.card?.name ?? '').trim();
@@ -390,7 +443,7 @@ export async function getReviewTemplateSuggestions(
 
   let pool = languageBucket(candidates, language);
   pool = lengthBucket(pool, preferredLength);
-  pool = styleBucket(pool, cfg.writingStyle);
+  pool = styleBucket(pool, writingStyle);
 
   const ranked: RankedCandidate[] = pool
     .filter((t) => isEdible(t, values))
@@ -399,7 +452,7 @@ export async function getReviewTemplateSuggestions(
       score:
         personalizationHits(candidate, values) +
         feedbackScore(candidate, values, input.topics, input.feedback) +
-        styleMatchScore(candidate, cfg.writingStyle),
+        styleMatchScore(candidate, writingStyle),
     }))
     .sort((a, b) => {
       // Rotation first (oldest shown / least used) keeps consecutive serves
@@ -423,10 +476,24 @@ export async function getReviewTemplateSuggestions(
   // here is drawn from `ranked` so every normal rule (language, length, style,
   // edibility, score) still holds. Nothing is persisted; excluded templates
   // remain eligible for future serves.
-  let rankedPool: RankedCandidate[] = ranked;
+  // Server-side rotation exclusions are strict: a template copied in the
+  // active cycle never re-enters this response through the session refill
+  // below. Empty/omitted while the rotation gate is disabled.
+  const hardExcludedIds = new Set(
+    (input.hardExcludeTemplateIds ?? [])
+      .map((id) => (typeof id === 'string' ? id.trim().toLowerCase() : ''))
+      .filter((id) => /^[0-9a-f]{24}$/.test(id))
+  );
+  const allowedRanked =
+    hardExcludedIds.size > 0
+      ? ranked.filter((r) => !hardExcludedIds.has(String(r.candidate._id).toLowerCase()))
+      : ranked;
+  if (allowedRanked.length === 0) return [];
+
+  let rankedPool: RankedCandidate[] = allowedRanked;
   const excludedIds = normalizeExcludeTemplateIds(input.excludeTemplateIds);
   if (excludedIds.size > 0) {
-    rankedPool = ranked.filter((r) => !excludedIds.has(String(r.candidate._id).toLowerCase()));
+    rankedPool = allowedRanked.filter((r) => !excludedIds.has(String(r.candidate._id).toLowerCase()));
     if (rankedPool.length < MAX_SUGGESTIONS) {
       // Deterministic refill: keep the non-excluded favourites, then top up
       // from the excluded candidates in the order the client recorded them
@@ -434,7 +501,7 @@ export async function getReviewTemplateSuggestions(
       // (e.g. different language/length or inedible here) are skipped so the
       // refill can never fabricate or bypass normal eligibility.
       const byId = new Map<string, RankedCandidate>();
-      for (const r of ranked) {
+      for (const r of allowedRanked) {
         byId.set(String(r.candidate._id).toLowerCase(), r);
       }
       const seen = new Set(rankedPool.map((r) => String(r.candidate._id).toLowerCase()));
@@ -558,17 +625,34 @@ export async function syncCategoryLanguages(categoryKeys: string[]): Promise<voi
   if (keys.length === 0) return;
   const { default: ReviewCategory } = await import('@/models/ReviewCategory');
   const { default: ReviewTemplate } = await import('@/models/ReviewTemplate');
-  const rows = (await ReviewTemplate.aggregate([
-    { $match: { categoryKey: { $in: keys }, active: true } },
-    { $group: { _id: '$categoryKey', languages: { $addToSet: '$language' } } },
-  ]).exec()) as Array<{ _id: string; languages: string[] }>;
+  const [rows, categories] = await Promise.all([
+    ReviewTemplate.aggregate([
+      { $match: { categoryKey: { $in: keys }, active: true } },
+      { $group: { _id: '$categoryKey', languages: { $addToSet: '$language' } } },
+    ]).exec() as Promise<Array<{ _id: string; languages: string[] }>>,
+    ReviewCategory.find({ key: { $in: keys } })
+      .select('key languages')
+      .lean()
+      .exec() as unknown as Promise<Array<{ key: string; languages?: string[] }>>,
+  ]);
+  const existingByKey = new Map(
+    categories.map((category) => [
+      category.key,
+      (category.languages ?? []).map((language) => String(language).trim()).filter(Boolean),
+    ])
+  );
 
   const ops: Array<{
     updateOne: { filter: { key: string }; update: { $set: { languages: string[] } }; upsert: false };
   }> = [];
   for (const row of rows) {
+    const templateLanguages = (row.languages ?? [])
+      .map((language) => String(language).trim())
+      .filter((language) => language.length > 0);
+    // Union: never drop an existing category language just because the current
+    // active templates do not mention it (legacy/manual languages are kept).
     const languages = Array.from(
-      new Set((row.languages ?? []).map((l) => String(l).trim()).filter((l) => l.length > 0))
+      new Set([...(existingByKey.get(String(row._id)) ?? []), ...templateLanguages])
     );
     if (languages.length === 0) continue;
     ops.push({ updateOne: { filter: { key: row._id }, update: { $set: { languages } }, upsert: false } });

@@ -7,6 +7,12 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { clientIp } from '@/lib/request-ip';
+import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
+import {
+  isStandeeReviewHostEligible,
+  standeeHasGoogleReviewSlot,
+  standeeReviewPath,
+} from '@/lib/services/review-standee-settings';
 
 /**
  * Dynamic QR resolver.
@@ -75,13 +81,38 @@ export async function GET(
 
     // 1. Social platform QR — resolve destination at scan time.
     const standee = (await Standee.findOne({ 'socialQrs.qrId': id })
-      .select('userId socialQrs')
+      .select('_id userId socialQrs routeSlug uid productKey')
       .lean()) as {
+      _id: unknown;
       userId: unknown;
       socialQrs: Array<{ qrId: string; platform: string; destinationUrl: string }>;
+      routeSlug?: string;
+      uid?: string;
+      productKey?: string;
     } | null;
     if (standee) {
       const socialQr = standee.socialQrs.find((q) => q.qrId === id);
+      if (socialQr) {
+        const reviewRoute = (standee.routeSlug ?? standee.uid ?? '').trim();
+        if (
+          STANDEE_REVIEW_ASSISTANT_ENABLED &&
+          reviewRoute &&
+          (socialQr.platform ?? '').trim().toLowerCase() === 'google_review' &&
+          (await isStandeeReviewHostEligible({
+            _id: standee._id,
+            userId: standee.userId,
+            routeSlug: standee.routeSlug,
+            uid: standee.uid,
+            productKey: standee.productKey,
+            socialQrs: standee.socialQrs,
+          }))
+        ) {
+          return NextResponse.redirect(
+            new URL(standeeReviewPath(reviewRoute), request.url),
+            307
+          );
+        }
+      }
       if (socialQr) {
         // Prefer the slot's own dynamic destination; else fall back to the
         // shared Profile.socialLinks.
@@ -105,10 +136,49 @@ export async function GET(
     const panel = (await Standee.findOne({
       $or: [{ 'panelQr.qrId': id }, { routeSlug: key }, { uid: key }],
     })
-      .select('userId')
-      .lean()) as { userId: unknown } | null;
+      .select('_id userId routeSlug uid socialQrs productKey')
+      .lean()) as {
+      _id: unknown;
+      userId: unknown;
+      routeSlug?: string;
+      uid?: string;
+      socialQrs?: Array<{ platform?: string }>;
+      productKey?: string;
+    } | null;
     if (panel) {
       await recordPanelTap(id, request);
+      const reviewRoute = (panel.routeSlug ?? panel.uid ?? '').trim();
+      if (
+        STANDEE_REVIEW_ASSISTANT_ENABLED &&
+        reviewRoute &&
+        standeeHasGoogleReviewSlot({
+          _id: panel._id,
+          userId: panel.userId,
+          socialQrs: panel.socialQrs ?? [],
+        }) &&
+        (await isStandeeReviewHostEligible({
+          _id: panel._id,
+          userId: panel.userId,
+          routeSlug: panel.routeSlug,
+          uid: panel.uid,
+          productKey: panel.productKey,
+          socialQrs: panel.socialQrs ?? [],
+        }))
+      ) {
+        return NextResponse.redirect(
+          new URL(standeeReviewPath(reviewRoute), request.url),
+          307
+        );
+      }
+      // Canonical standees expose a permanent panel route; legacy printed panel
+      // QRs must reach the standee picker rather than the homepage when the
+      // customer has no profile card.
+      if (panel.routeSlug) {
+        return NextResponse.redirect(
+          new URL(`/panel/${panel.routeSlug}`, request.url),
+          307
+        );
+      }
       return redirectToProfilePage(request, panel.userId);
     }
 

@@ -251,6 +251,13 @@ export interface ICard {
   stats: { taps: number };
   reviewAssistant?: IReviewAssistantConfig;
 
+  // Additive Phase 4D.2 central/hybrid settings linkage (missing = legacy).
+  reviewSettingsSource?: 'legacy' | 'central' | 'hybrid';
+  reviewSettingsVersion?: number;
+  reviewOverrides?: Partial<IReviewAssistantConfig>;
+  reviewSettingsUpdatedAt?: Date | string;
+  reviewSettingsUpdatedBy?: string;
+
   // Product destination configuration (dynamic, mutable)
   instagramConfig?: {
     username: string;

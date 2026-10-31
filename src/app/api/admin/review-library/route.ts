@@ -78,6 +78,9 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null);
     const type = (body as { type?: unknown } | null)?.type;
+    const rawMode = (body as { mode?: unknown } | null)?.mode;
+    const mode =
+      rawMode === 'update' ? 'update' : rawMode === 'create' ? 'create' : 'legacy';
 
     await connectDB();
 
@@ -86,12 +89,61 @@ export async function POST(request: NextRequest) {
       if (!parsed.success) {
         return fail(400, 'VALIDATION_ERROR', 'Invalid category', parsed.error.flatten().fieldErrors);
       }
-      const saved = await ReviewCategory.findOneAndUpdate(
-        { key: parsed.data.key },
-        { $set: normalizeCategoryPayload(parsed.data) },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-      return ok({ category: saved });
+      const payload = normalizeCategoryPayload(parsed.data);
+
+      if (mode === 'legacy') {
+        const saved = await ReviewCategory.findOneAndUpdate(
+          { key: payload.key },
+          { $set: payload },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        return ok({ category: saved });
+      }
+
+      if (mode === 'update') {
+        const existing = await ReviewCategory.findOne({ key: payload.key }).lean();
+        if (!existing) {
+          return fail(404, 'NOT_FOUND', 'Category not found');
+        }
+        const existingKeys = new Set(
+          ((existing as { scenarios?: Array<{ key: string }> }).scenarios ?? []).map((s) => s.key)
+        );
+        const nextKeys = new Set((payload.scenarios ?? []).map((s) => s.key));
+        for (const removedKey of existingKeys) {
+          if (nextKeys.has(removedKey)) continue;
+          const templateCount = await ReviewTemplate.countDocuments({
+            categoryKey: payload.key,
+            scenario: removedKey,
+          });
+          if (templateCount > 0) {
+            return fail(
+              409,
+              'CONFLICT',
+              `Scenario "${removedKey}" is still used by ${templateCount} template(s). Reassign or delete them first.`,
+              { scenario: removedKey, templateCount }
+            );
+          }
+        }
+        const saved = await ReviewCategory.findOneAndUpdate(
+          { key: payload.key },
+          { $set: payload },
+          { new: true, runValidators: true }
+        );
+        return ok({ category: saved });
+      }
+
+      if (await ReviewCategory.exists({ key: payload.key })) {
+        return fail(409, 'CONFLICT', `Category key "${payload.key}" already exists.`);
+      }
+      try {
+        const created = await ReviewCategory.create(payload);
+        return ok({ category: created }, 201);
+      } catch (error) {
+        if ((error as { code?: number }).code === 11000) {
+          return fail(409, 'CONFLICT', `Category key "${payload.key}" already exists.`);
+        }
+        throw error;
+      }
     }
 
     if (type === 'template') {
@@ -115,11 +167,38 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const saved = await ReviewTemplate.findOneAndUpdate(
-        { key: parsed.data.key },
-        { $set: normalizeTemplatePayload(parsed.data) },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+      const templatePayload = normalizeTemplatePayload(parsed.data);
+      if (mode === 'legacy') {
+        const saved = await ReviewTemplate.findOneAndUpdate(
+          { key: templatePayload.key },
+          { $set: templatePayload },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        await syncCategoryLanguages([parsed.data.categoryKey]);
+        return ok({ template: saved });
+      }
+      if (mode === 'update') {
+        const saved = await ReviewTemplate.findOneAndUpdate(
+          { key: templatePayload.key },
+          { $set: templatePayload },
+          { new: true, runValidators: true }
+        );
+        if (!saved) return fail(404, 'NOT_FOUND', 'Template not found');
+        await syncCategoryLanguages([parsed.data.categoryKey]);
+        return ok({ template: saved });
+      }
+      if (await ReviewTemplate.exists({ key: templatePayload.key })) {
+        return fail(409, 'CONFLICT', `Template key "${templatePayload.key}" already exists.`);
+      }
+      let saved;
+      try {
+        saved = await ReviewTemplate.create(templatePayload);
+      } catch (error) {
+        if ((error as { code?: number }).code === 11000) {
+          return fail(409, 'CONFLICT', `Template key "${templatePayload.key}" already exists.`);
+        }
+        throw error;
+      }
       // Keep the category's `languages` in sync with its active templates —
       // best-effort inside the helper.
       await syncCategoryLanguages([parsed.data.categoryKey]);

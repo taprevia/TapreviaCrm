@@ -17,6 +17,7 @@ import { fail, ok } from '@/lib/api';
 import { getOwnedCard, canEditCardExperience } from '@/lib/services/card-access';
 import { availableTemplatesForUser } from '@/lib/services/template-access';
 import { canUseFeature, featureMax } from '@/lib/services/feature-access';
+import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
 
 type Params = { params: { id: string } };
 
@@ -219,8 +220,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     }
     if (data.reviewAssistant) {
-      if (!(await canUseFeature(ownerId, 'review'))) {
-        return fail(403, 'FORBIDDEN', 'The AI Review Assistant is not included in your current products');
+      // Product-aware check: a Premium account must not unlock a lower-tier Card.
+      if (!(await canUseReviewAssistantForCard(card))) {
+        return fail(403, 'FORBIDDEN', 'The AI Review Assistant is not included for this product');
       }
     }
 

@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid JSON payload');
     }
 
+    const overwrite = (body as { overwrite?: unknown } | null)?.overwrite === true;
     const parsed = reviewLibraryImportSchema.safeParse(body);
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid import payload', parsed.error.flatten().fieldErrors);
@@ -93,11 +94,24 @@ export async function POST(request: NextRequest) {
 
     // 1. Upsert categories in a single bulkWrite (ordered:false keeps going on errors).
     let categoriesImported = 0;
+    let categoriesSkipped = 0;
     const categoryKeys = parsed.data.categories.map((c) => c.key);
-    if (categoryKeys.length > 0) {
+    const existingCategoryKeys = new Set(
+      (
+        (await ReviewCategory.find({ key: { $in: categoryKeys } })
+          .select('key')
+          .lean()
+          .exec()) as unknown as Array<{ key: string }>
+      ).map((category) => category.key)
+    );
+    const categoriesToWrite = parsed.data.categories.filter(
+      (category) => overwrite || !existingCategoryKeys.has(category.key)
+    );
+    categoriesSkipped = parsed.data.categories.length - categoriesToWrite.length;
+    if (categoriesToWrite.length > 0) {
       try {
         await ReviewCategory.bulkWrite(
-          parsed.data.categories.map((category) => ({
+          categoriesToWrite.map((category) => ({
             updateOne: {
               filter: { key: category.key },
               update: {
@@ -109,12 +123,12 @@ export async function POST(request: NextRequest) {
           })),
           { ordered: false }
         );
-        categoriesImported = parsed.data.categories.length;
+        categoriesImported = categoriesToWrite.length;
       } catch (error) {
         const { messages, fatal } = extractBulkWriteErrors(error, categoryKeys, 'category');
         if (fatal) return fail(500, 'INTERNAL_ERROR', `Category bulk write failed: ${fatal}`);
         errors.push(...messages);
-        categoriesImported = parsed.data.categories.length - messages.length;
+        categoriesImported = categoriesToWrite.length - messages.length;
       }
     }
 
@@ -153,7 +167,11 @@ export async function POST(request: NextRequest) {
             filter: { key: template.key },
             update: {
               $set: { ...normalizeTemplatePayload(template), updatedAt: new Date() },
-              $setOnInsert: { createdAt: new Date(), usageCount: 0, lastShownAt: null },
+              $setOnInsert: {
+                createdAt: new Date(),
+                usageCount: template.usageCount ?? 0,
+                lastShownAt: template.lastShownAt ? new Date(template.lastShownAt) : null,
+              },
             },
             upsert: true,
           },
@@ -161,11 +179,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    let templatesImported = templateOps.length;
-    if (templateOps.length > 0) {
+    const existingTemplateKeys = new Set(
+      (
+        (await ReviewTemplate.find({ key: { $in: templateOps.map((t) => t.key) } })
+          .select('key')
+          .lean()
+          .exec()) as unknown as Array<{ key: string }>
+      ).map((template) => template.key)
+    );
+    const templatesToWrite = templateOps.filter(
+      (template) => overwrite || !existingTemplateKeys.has(template.key)
+    );
+    const templatesSkipped = templateOps.length - templatesToWrite.length;
+    let templatesImported = templatesToWrite.length;
+    if (templatesToWrite.length > 0) {
       try {
         await ReviewTemplate.bulkWrite(
-          templateOps.map((t) => t.op),
+          templatesToWrite.map((t) => t.op),
           { ordered: false }
         );
       } catch (error) {
@@ -187,6 +217,7 @@ export async function POST(request: NextRequest) {
 
     return ok({
       imported: { categories: categoriesImported, templates: templatesImported },
+      skipped: { categories: categoriesSkipped, templates: templatesSkipped },
       errors,
     });
   } catch (error) {

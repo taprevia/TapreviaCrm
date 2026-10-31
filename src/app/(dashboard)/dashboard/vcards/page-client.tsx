@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CreditCard, ExternalLink, Eye, QrCode, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { useToast } from '@/components/ui/toast';
 import QRCode from 'qrcode';
 import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { resolveCardDisplayName } from '@/lib/card-display';
+import { downloadQrPdf } from '@/lib/qr-pdf';
+import { canonicalPublicBase } from '@/lib/public-base';
 
 interface Vcard {
   _id: string;
@@ -89,15 +91,21 @@ export default function VcardsPage() {
   // QR modal state
   const [qrTarget, setQrTarget] = useState<Vcard | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [qrDownloading, setQrDownloading] = useState(false);
+  const qrDownloadingRef = useRef(false);
 
   // Origin is unavailable on the server; resolve it after mount so the
   // initial render is identical during SSR and hydration.
   const [origin, setOrigin] = useState('');
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(canonicalPublicBase());
   }, []);
 
   const openQr = async (vcard: Vcard) => {
+    if (!origin) {
+      toast({ title: 'QR unavailable', description: 'A canonical public URL is not configured.', variant: 'error' });
+      return;
+    }
     setQrTarget(vcard);
     setQrDataUrl('');
     try {
@@ -109,12 +117,23 @@ export default function VcardsPage() {
     }
   };
 
-  const downloadQr = () => {
-    if (!qrTarget || !qrDataUrl) return;
-    const a = document.createElement('a');
-    a.href = qrDataUrl;
-    a.download = `${qrTarget.urlAlias}-qr.png`;
-    a.click();
+  const downloadQr = async () => {
+    if (!qrTarget || !qrDataUrl || !origin || qrDownloadingRef.current) return;
+    qrDownloadingRef.current = true;
+    setQrDownloading(true);
+    try {
+      const url = resolveCardPublicUrl(qrTarget, window.location.origin);
+      await downloadQrPdf(
+        [{ title: resolveCardDisplayName(qrTarget), url }],
+        `${qrTarget.urlAlias}-qr.pdf`
+      );
+    } catch (error) {
+      console.error('QR PDF generation failed:', error);
+      toast({ title: 'QR PDF failed', description: 'Please try again.', variant: 'error' });
+    } finally {
+      qrDownloadingRef.current = false;
+      setQrDownloading(false);
+    }
   };
 
   const fetchVcards = useCallback(
@@ -386,8 +405,8 @@ export default function VcardsPage() {
           <Button type="button" variant="ghost" onClick={() => setQrTarget(null)}>
             Close
           </Button>
-          <Button onClick={downloadQr} disabled={!qrDataUrl}>
-            Download PNG
+          <Button onClick={downloadQr} disabled={!qrDataUrl || qrDownloading}>
+            {qrDownloading ? 'Generating…' : 'Download PDF'}
           </Button>
         </div>
       </Modal>

@@ -32,6 +32,7 @@ import {
   EXPERIENCE_RULES,
   resolveExperience,
 } from '@/lib/feature-keys';
+import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
 
 export type ResolvedFeatures = Record<FeatureKey, IFeatureConfig>;
 
@@ -53,7 +54,7 @@ function storedSocialMax(raw: unknown): number | undefined {
 
 /** Fixed grants for one catalog product, plus its social-links limit override. */
 function productGrants(
-  product: { kind?: string; features?: unknown }
+  product: { slug?: string; kind?: string; features?: unknown }
 ): Partial<Record<FeatureKey, IFeatureConfig>> {
   const experience = resolveExperience(product?.kind);
   if (!experience) return {};
@@ -64,6 +65,20 @@ function productGrants(
     const explicit = storedSocialMax(product.features);
     grants.social = { enabled: true, max: explicit ?? DEFAULT_SOCIAL_LINKS_MAX };
   }
+
+  // Capability-driven review grant: Premium NFC Card is a profile experience
+  // that now carries `review_ai_suggestions` in the stable product catalog.
+  // The grant is derived from the immutable catalog slug, so existing and new
+  // assignments unlock together without a database backfill.
+  const slug = (product.slug ?? '').trim().toLowerCase();
+  const productId = slug.toUpperCase().replace(/-/g, '_');
+  if (isProductId(productId)) {
+    const caps = getProductCapabilities(productId as ProductId);
+    if (caps.includes('review_ai_suggestions')) {
+      grants.review = { enabled: true };
+    }
+  }
+
   return grants;
 }
 
@@ -109,8 +124,8 @@ export async function resolveFeatureAccess(userId: string | unknown): Promise<Re
     const catalog = (await CatalogProduct.find({
       _id: { $in: activeAssignments.map((p) => p.catalogProductId) },
     })
-      .select('kind features')
-      .lean()) as unknown as Array<{ kind?: string; features?: unknown }>;
+      .select('slug kind features')
+      .lean()) as unknown as Array<{ slug?: string; kind?: string; features?: unknown }>;
 
     for (const product of catalog) {
       merge(base, productGrants(product));

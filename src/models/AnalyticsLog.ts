@@ -3,6 +3,9 @@ import mongoose, { Schema } from 'mongoose';
 const AnalyticsLogSchema = new Schema(
   {
     cardId: { type: Schema.Types.ObjectId, ref: 'Card', default: null },
+    // Additive Phase 4D.6 attribution for Standee review events. Existing Card
+    // analytics rows keep cardId and leave this unset.
+    standeeId: { type: Schema.Types.ObjectId, ref: 'Standee' },
     action: {
       type: String,
       enum: [
@@ -35,6 +38,11 @@ const AnalyticsLogSchema = new Schema(
 );
 
 AnalyticsLogSchema.index({ cardId: 1, timestamp: -1 });
+AnalyticsLogSchema.index({ standeeId: 1, timestamp: -1 });
+// Phase 4D.7 unified review analytics (created via the approved production
+// index procedure; no startup index creation in production).
+AnalyticsLogSchema.index({ cardId: 1, action: 1, createdAt: -1 });
+AnalyticsLogSchema.index({ standeeId: 1, action: 1, createdAt: -1 });
 // Fastest-growing collection (every tap/track writes a row). Retention guard
 // keeps the shared M0 tier (512MB) predictable on serverless hosting — 180
 // days of rows, auto-purged by Mongo's TTL sweeper.

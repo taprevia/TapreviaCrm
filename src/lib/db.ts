@@ -1,6 +1,12 @@
 import mongoose from 'mongoose';
 import '@/models';
-import { resolveBackupDbName } from '@/lib/db-target';
+import {
+  resolveBackupDbName,
+  resolvePrimaryDatabaseName,
+  indexCreationOptions,
+  isDeployedRuntime,
+  requireMongoUriValue,
+} from '@/lib/db-target';
 
 const LOG_PREFIX = '[db]';
 const LOCAL_FALLBACK_URI = 'mongodb://localhost:27017/nfc-crm';
@@ -33,11 +39,8 @@ function envValue(name: string): string | undefined {
  * fallback is only allowed outside production.
  */
 function resolvePrimaryUri(): string {
-  const uri = envValue('MONGODB_URI');
-  if (uri) return uri;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('MONGODB_URI is required in production');
-  }
+  const resolved = requireMongoUriValue(envValue('MONGODB_URI'), process.env.NODE_ENV);
+  if (resolved) return resolved;
   console.warn(`${LOG_PREFIX} MONGODB_URI not set — using local dev URI`);
   return LOCAL_FALLBACK_URI;
 }
@@ -56,33 +59,26 @@ function resolveBackupUri(): string {
   return LOCAL_FALLBACK_URI;
 }
 
-/**
- * Primary database name.
- *   - `MONGODB_DB` wins when explicitly set.
- *   - main/production      -> `test`
- *   - preview/development  -> `taprevia_V2`
- *
- * `VERCEL_ENV` distinguishes production from preview deployments (both run
- * with `NODE_ENV=production` on Vercel); locally we fall back to `NODE_ENV`.
- */
-function resolvePrimaryDbName(): string {
-  const explicit = envValue('MONGODB_DB');
-  if (explicit) return explicit;
-
-  const vercelEnv = envValue('VERCEL_ENV');
-  const isPreviewOrDev = vercelEnv
-    ? vercelEnv !== 'production'
-    : process.env.NODE_ENV !== 'production';
-
-  return isPreviewOrDev ? 'taprevia_V2' : 'test';
-}
+// `VERCEL_ENV` distinguishes production from preview deployments (both run
+// with `NODE_ENV=production` on Vercel); locally we fall back to NODE_ENV.
+const VERCEL_ENV = envValue('VERCEL_ENV');
 
 const MONGODB_URI = resolvePrimaryUri();
 const MONGODB_BACKUP_URI = resolveBackupUri();
-const PRIMARY_DB_NAME = resolvePrimaryDbName();
+// Preview/other deployed non-production environments require an explicit
+// MONGODB_DB; see resolvePrimaryDatabaseName(). Production behavior is unchanged.
+const PRIMARY_DB_NAME = resolvePrimaryDatabaseName({
+  explicit: envValue('MONGODB_DB'),
+  vercelEnv: VERCEL_ENV,
+  nodeEnv: process.env.NODE_ENV,
+});
 const IS_PRODUCTION_TARGET =
-  envValue('VERCEL_ENV') === 'production' ||
-  (!envValue('VERCEL_ENV') && process.env.NODE_ENV === 'production');
+  VERCEL_ENV === 'production' ||
+  (!VERCEL_ENV && process.env.NODE_ENV === 'production');
+const DEPLOYED_RUNTIME = isDeployedRuntime({
+  vercelEnv: VERCEL_ENV,
+  nodeEnv: process.env.NODE_ENV,
+});
 const BACKUP_DB_NAME = resolveBackupDbName(
   PRIMARY_DB_NAME,
   envValue('MONGODB_BACKUP_DB'),
@@ -95,6 +91,10 @@ const BASE_OPTIONS = {
   serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 30000,
   connectTimeoutMS: 10000,
+  // Any deployed runtime (Production or Preview) must never create/alter
+  // indexes or collections at startup. Apply index changes only through the
+  // approved maintenance procedure. Local development/tests keep autoIndex.
+  ...indexCreationOptions(DEPLOYED_RUNTIME),
 } as const;
 
 const cached: MongooseCache = global.mongoose || { conn: null, promise: null };

@@ -339,23 +339,28 @@ export function ReviewAssistantTab() {
 
   /* ── QR access for /review/[alias] ── */
   const [qrDataUrl, setQrDataUrl] = useState('');
-  // Product feature gate: AI Review Assistant must be included in products.
+  // Product-aware gate: account capability is not enough. A lower-tier Card
+  // must stay locked even when the same account owns a Premium product.
   const [reviewAllowed, setReviewAllowed] = useState<boolean | null>(null);
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/my/features');
+        const res = await fetch(`/api/cards/${draft._id}/review-entitlement`);
         if (res.ok) {
           const data = await res.json();
-          setReviewAllowed(data?.features?.review?.enabled === true);
+          if (!cancelled) setReviewAllowed(data?.entitled === true);
           return;
         }
       } catch (error) {
-        console.error('Failed to fetch review feature:', error);
+        console.error('Failed to fetch card review entitlement:', error);
       }
-      setReviewAllowed(true);
+      if (!cancelled) setReviewAllowed(false);
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [draft._id]);
 
   useEffect(() => {
     if (!enabled || !alias) {
@@ -375,6 +380,15 @@ export function ReviewAssistantTab() {
   }, [enabled, alias]);
 
   const reviewUrl = enabled && alias ? `/review/${alias}` : null;
+
+  if (reviewAllowed === null) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-lg bg-surface px-4 py-8 text-sm text-ink-mute ring-1 ring-line-subtle" role="status">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Checking Review Assistant access…
+      </div>
+    );
+  }
 
   if (reviewAllowed === false) {
     return (

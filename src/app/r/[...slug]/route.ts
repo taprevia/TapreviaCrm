@@ -9,6 +9,12 @@ import { isSafeExternalUrl } from '@/lib/safe-url';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { resolveCardDestination } from '@/lib/services/redirect-target';
+import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
+import {
+  isStandeeReviewHostEligible,
+  standeeHasGoogleReviewSlot,
+  standeeReviewPath,
+} from '@/lib/services/review-standee-settings';
 
 /**
  * GET /r/[slug] — Unified dynamic route resolver.
@@ -131,22 +137,58 @@ export async function GET(
         { uid: routeKey },
       ],
     })
-      .select('userId panelQr socialQrs maxProfiles fixedProfiles')
+      .select('_id userId panelQr socialQrs maxProfiles fixedProfiles routeSlug uid productKey')
       .lean()) as {
+      _id: unknown;
       userId: unknown;
       panelQr: { qrId: string; qrColor: string };
       socialQrs: Array<{ qrId: string; platform: string; qrColor: string; label: string; destinationUrl: string }>;
       maxProfiles: number;
       fixedProfiles: string[];
+      routeSlug?: string;
+      uid?: string;
+      productKey?: string;
     } | null;
 
     if (standee) {
+      const reviewRoute = (standee.routeSlug ?? standee.uid ?? '').trim();
+      const reviewEligible =
+        STANDEE_REVIEW_ASSISTANT_ENABLED && Boolean(reviewRoute)
+          ? await isStandeeReviewHostEligible({
+              _id: standee._id,
+              userId: standee.userId,
+              routeSlug: standee.routeSlug,
+              uid: standee.uid,
+              productKey: standee.productKey,
+              socialQrs: standee.socialQrs,
+            })
+          : false;
+
       // Multi-profile standee with slot parameter.
       if (slotParam) {
         const maxProfiles = standee.maxProfiles || standee.socialQrs?.length || 0;
         const slotIndex = parseInt(slotParam, 10) - 1; // 1-indexed to 0-indexed
         if (Number.isFinite(slotIndex) && slotIndex >= 0 && slotIndex < maxProfiles) {
           const socialQr = standee.socialQrs?.[slotIndex];
+          if (
+            reviewEligible &&
+            (socialQr?.platform ?? '').trim().toLowerCase() === 'google_review'
+          ) {
+            try {
+              await AnalyticsLog.create({
+                action: 'tap',
+                metadata: `route:${routeKey}/slot:${slotParam}/platform:google_review/standee-review`,
+                ip: clientIp(request),
+                userAgent: request.headers.get('user-agent') ?? '',
+              });
+            } catch {
+              // Fail-open.
+            }
+            return NextResponse.redirect(
+              new URL(standeeReviewPath(reviewRoute), request.url),
+              307
+            );
+          }
           const profile = await Profile.findOne({ userId: standee.userId })
             .select('socialLinks urlAlias')
             .lean();
@@ -201,6 +243,20 @@ export async function GET(
         });
       } catch {
         // Fail-open.
+      }
+
+      if (
+        reviewEligible &&
+        standeeHasGoogleReviewSlot({
+          _id: standee._id,
+          userId: standee.userId,
+          socialQrs: standee.socialQrs,
+        })
+      ) {
+        return NextResponse.redirect(
+          new URL(standeeReviewPath(reviewRoute), request.url),
+          307
+        );
       }
 
       const alias = await Profile.findOne({ userId: standee.userId })

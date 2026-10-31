@@ -2,10 +2,13 @@ import type { Metadata } from 'next';
 import { cache } from 'react';
 import { connectDB } from '@/lib/db';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
-import { hasCapability } from '@/lib/services/capability-access';
 import { getInitials, vcardDisplayName } from '@/components/public/hero';
 import { ReviewAssistantFlow } from '@/components/review/review-assistant';
+import { COPY_FLOW_ACTIVE, REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
 import { getReviewLanguageOptions } from '@/lib/services/review-templates';
+import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
+import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
+import type { ResolvedReviewSettings } from '@/lib/services/review-settings-resolver';
 import type { ICard, IReviewAssistantConfig } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -42,7 +45,7 @@ async function resolveReviewLanguages(config: IReviewAssistantConfig): Promise<s
 
 interface OwnerAccess {
   card: ICard;
-  config: IReviewAssistantConfig;
+  config: ResolvedReviewSettings;
   languages: string[];
 }
 
@@ -76,20 +79,20 @@ const resolveOwnerAccess = cache(async (alias: string): Promise<OwnerAccess | nu
   const card = (await getPublicCardByAlias(alias)) as unknown as ICard | null;
   if (!card) return null;
 
-  const config = card.reviewAssistant as IReviewAssistantConfig | undefined;
-  if (!config?.enabled) return null;
-
   const ownerId = (card.userId ?? card.assignedUserId) ?? null;
   if (!ownerId) return null;
 
-  // Parallel: the capability sweep and the language lookup are independent
-  // round-trips, so serialising them doubled the page's DB wall-clock.
-  const [allowed, languages] = await Promise.all([
-    hasCapability(ownerId, 'review_ai_suggestions'),
-    resolveReviewLanguages(config),
+  // Product-aware entitlement and effective settings are independent reads.
+  // The public integration gate is handled inside the effective-settings
+  // resolver: while OFF, this is exactly the legacy configuration.
+  const [entitled, effective] = await Promise.all([
+    canUseReviewAssistantForCard(card),
+    resolveEffectiveReviewSettings(card),
   ]);
+  if (!entitled || !effective.enabled) return null;
 
-  return allowed ? { card, config, languages } : null;
+  const languages = await resolveReviewLanguages(effective);
+  return { card, config: effective, languages };
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -160,6 +163,8 @@ export default async function ReviewPage({ params }: Params) {
         businessName={name}
         avatarUrl={avatarUrl}
         initials={getInitials(card)}
+        copyFlowEnabled={COPY_FLOW_ACTIVE}
+        rotationEnabled={REVIEW_ROTATION_ACTIVE}
         config={{
           googleReviewUrl: config.googleReviewUrl ?? '',
           welcomeMessage: config.welcomeMessage ?? '',
@@ -167,6 +172,8 @@ export default async function ReviewPage({ params }: Params) {
           preferredLength: config.preferredLength,
           languages,
           feedbackTopics: config.feedbackTopics ?? [],
+          styleMode: config.styleMode,
+          lengthMode: config.lengthMode,
         }}
       />
     </div>

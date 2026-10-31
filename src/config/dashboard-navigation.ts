@@ -31,6 +31,7 @@ import {
   Star,
   Users,
   MessageCircle,
+  MessageSquareText,
   Library,
 } from 'lucide-react';
 
@@ -68,6 +69,7 @@ export const CUSTOMER_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/linkedin', label: 'LinkedIn', icon: Briefcase, requiredCapability: 'linkedin', anyCapability: ['linkedin'] },
   { href: '/dashboard/instagram', label: 'Instagram', icon: Camera, requiredCapability: 'instagram', anyCapability: ['instagram'] },
   { href: '/dashboard/reviews', label: 'Google Reviews', icon: Star, requiredCapability: 'google_review', anyCapability: ['google_review'] },
+  { href: '/dashboard/review-management', label: 'Review Management', icon: MessageSquareText, requiredCapability: 'review_ai_suggestions' },
   { href: '/dashboard/facebook', label: 'Facebook', icon: Users, requiredCapability: 'facebook', anyCapability: ['facebook'] },
   { href: '/dashboard/whatsapp', label: 'WhatsApp', icon: MessageCircle, requiredCapability: 'whatsapp', anyCapability: ['whatsapp'] },
 

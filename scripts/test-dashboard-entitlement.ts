@@ -274,7 +274,7 @@ function main(): void {
 
   expectNav('LinkedIn-only (acceptance target)', linkedInCaps, ['Dashboard', 'My Products', 'LinkedIn', 'Settings', 'Analytics']);
   expectNav('Instagram-only', instagramCaps, ['Dashboard', 'My Products', 'Instagram', 'Settings', 'Analytics']);
-  expectNav('Google Review-only', googleReviewCaps, ['Dashboard', 'My Products', 'Google Reviews', 'Settings', 'Analytics']);
+  expectNav('Google Review-only', googleReviewCaps, ['Dashboard', 'My Products', 'Google Reviews', 'Review Management', 'Settings', 'Analytics']);
   expectNav('Facebook-only', facebookCaps, ['Dashboard', 'My Products', 'Facebook', 'Settings', 'Analytics']);
   expectNav('WhatsApp-only', whatsappOnlyCaps, ['Dashboard', 'My Products', 'WhatsApp', 'Settings', 'Analytics']);
   expectNav('No capability (universals only)', [], ['Dashboard', 'My Products', 'Settings']);
@@ -308,6 +308,17 @@ function main(): void {
 
   const businessCaps = getProductCapabilities('BUSINESS_NFC_CARD');
   const businessNav = labelOf(filterNavByCapabilities(CUSTOMER_NAV_ITEMS, businessCaps));
+  const premiumCaps = getProductCapabilities('PREMIUM_NFC_CARD');
+  const premiumNav = labelOf(filterNavByCapabilities(CUSTOMER_NAV_ITEMS, premiumCaps));
+  check(
+    'Phase 4D.4: Premium NFC includes Review Management',
+    premiumCaps.includes('review_ai_suggestions') && premiumNav.includes('Review Management')
+  );
+  check(
+    'Phase 4D.4: Business NFC does not inherit Review Management',
+    !businessCaps.includes('review_ai_suggestions') &&
+      !labelOf(filterNavByCapabilities(CUSTOMER_NAV_ITEMS, businessCaps)).includes('Review Management')
+  );
   check(
     'Business card sees Analytics + Subscribers + vCards',
     ['Analytics', 'Subscribers', 'vCards'].every((l) => businessNav.includes(l))

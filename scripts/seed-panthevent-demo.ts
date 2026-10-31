@@ -67,7 +67,7 @@ const DEMO_GALLERY = [
 async function seed() {
   try {
     await mongoose.connect(MONGODB_URI);
-    console.log(`Connected to ${MONGODB_URI}`);
+    console.log('Connected to the configured MongoDB target.');
 
     // ── Owner ─────────────────────────────────────────────────────────────
     let owner = await User.findOne({ email: DEMO_USER_EMAIL });

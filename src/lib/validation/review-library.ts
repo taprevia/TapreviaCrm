@@ -22,19 +22,49 @@ const reviewTagSchema = z.string().trim().min(1).max(60);
 const reviewLanguageSchema = z.string().trim().min(1).max(40);
 
 const reviewScenarioSchema = z.object({
-  key: z.string().trim().min(1).max(60),
-  name: z.string().trim().min(1).max(120),
+  key: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, 'Scenario key is required')
+    .max(60)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, 'Use lowercase letters, digits, hyphens'),
+  name: z.string().trim().min(1, 'Scenario name is required').max(120),
 });
 
 // ─── Upserts ─────────────────────────────────────────────────────────────────
 
-export const reviewCategoryUpsertSchema = z.object({
-  key: reviewCategoryKeySchema,
-  name: z.string().trim().min(1, 'Category name is required').max(120),
-  active: z.boolean().optional(),
-  languages: z.array(reviewLanguageSchema).min(1).max(20).optional(),
-  scenarios: z.array(reviewScenarioSchema).max(50).optional(),
-});
+export const reviewCategoryUpsertSchema = z
+  .object({
+    key: reviewCategoryKeySchema,
+    name: z.string().trim().min(1, 'Category name is required').max(120),
+    active: z.boolean().optional(),
+    languages: z.array(reviewLanguageSchema).min(1).max(20).optional(),
+    scenarios: z.array(reviewScenarioSchema).max(50).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const keys = new Set<string>();
+    const names = new Set<string>();
+    (value.scenarios ?? []).forEach((scenario, index) => {
+      if (keys.has(scenario.key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scenarios', index, 'key'],
+          message: 'Duplicate scenario key',
+        });
+      }
+      keys.add(scenario.key);
+      const name = scenario.name.toLowerCase();
+      if (names.has(name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scenarios', index, 'name'],
+          message: 'Duplicate scenario name',
+        });
+      }
+      names.add(name);
+    });
+  });
 
 export const reviewTemplateUpsertSchema = z
   .object({
@@ -56,6 +86,9 @@ export const reviewTemplateUpsertSchema = z
     style: reviewWritingStyleSchema.optional(),
     compatibleKeywords: z.array(reviewTagSchema).max(12).optional(),
     active: z.boolean().optional(),
+    // Export metadata: optional so legacy payloads remain valid.
+    usageCount: z.number().int().min(0, 'Usage count cannot be negative').optional(),
+    lastShownAt: z.union([z.string().trim().datetime(), z.null()]).optional(),
   })
   .refine(
     (t) => extractPlaceholders(t.text).every((p) => ALLOWED_PLACEHOLDERS.has(p)),

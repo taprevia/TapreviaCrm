@@ -41,6 +41,7 @@ const SocialLinkSchema = new Schema(
 
 const REVIEW_STYLES = ['friendly', 'professional', 'casual', 'simple'] as const;
 const REVIEW_LENGTHS = ['short', 'medium', 'detailed'] as const;
+const REVIEW_MODES = ['fixed', 'varied'] as const;
 
 const ReviewAssistantSchema = new Schema(
   {
@@ -56,6 +57,31 @@ const ReviewAssistantSchema = new Schema(
     employees: { type: [String], default: [] },
     services: { type: [String], default: [] },
     keywords: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+/**
+ * Optional product-level overrides for future central/hybrid review settings.
+ * Every field is intentionally optional and has no default: a missing field
+ * must fall through to central settings or system defaults, never become a
+ * silent `false`/empty override.
+ */
+const ReviewAssistantOverrideSchema = new Schema(
+  {
+    enabled: { type: Boolean },
+    googleReviewUrl: { type: String, trim: true },
+    writingStyle: { type: String, enum: [...REVIEW_STYLES] },
+    preferredLength: { type: String, enum: [...REVIEW_LENGTHS] },
+    styleMode: { type: String, enum: [...REVIEW_MODES] },
+    lengthMode: { type: String, enum: [...REVIEW_MODES] },
+    languages: { type: [String], default: undefined },
+    feedbackTopics: { type: [String], default: undefined },
+    welcomeMessage: { type: String },
+    category: { type: String, trim: true },
+    employees: { type: [String], default: undefined },
+    services: { type: [String], default: undefined },
+    keywords: { type: [String], default: undefined },
   },
   { _id: false }
 );
@@ -216,6 +242,17 @@ const CardSchema = new Schema(
     },
 
     reviewAssistant: { type: ReviewAssistantSchema, default: () => ({}) },
+
+    // Additive Phase 4D.2 fields. Missing source means legacy; no default is
+    // applied so existing cards remain byte-compatible and no migration runs.
+    reviewSettingsSource: {
+      type: String,
+      enum: ['legacy', 'central', 'hybrid'],
+    },
+    reviewSettingsVersion: { type: Number, min: 0 },
+    reviewOverrides: { type: ReviewAssistantOverrideSchema, default: undefined },
+    reviewSettingsUpdatedAt: { type: Date },
+    reviewSettingsUpdatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
 
     // ── Product destination configuration (dynamic, mutable) ──
     instagramConfig: {

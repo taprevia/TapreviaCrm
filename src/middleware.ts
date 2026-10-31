@@ -6,6 +6,7 @@ const publicCardRoutes = [
   '/c/',
   '/profile/',
   '/review/',
+  '/standee-review/',
   '/t/',
   '/qr/',
   '/r/', // permanent dynamic route — must never be blocked by auth

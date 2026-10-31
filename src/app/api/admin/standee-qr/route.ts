@@ -10,6 +10,7 @@ interface PopulatedUser {
   _id: unknown;
   name?: string;
   email?: string;
+  phone?: string;
 }
 
 /** GET /api/admin/standee-qr — all standees across customers (panel + social QRs). */
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     await connectDB();
 
     const standees = await Standee.find()
-      .populate('userId', 'name email')
+      .populate('userId', 'name email phone')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
         userId: owner?._id ?? null,
         userName: owner?.name || 'Unassigned',
         userEmail: owner?.email || '',
+        userPhone: owner?.phone || '',
         panelQr: s.panelQr,
         socialQrs: s.socialQrs,
         createdAt: s.createdAt,

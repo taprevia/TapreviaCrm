@@ -198,7 +198,7 @@ interface MockCardIds {
 /* ─── Tests ───────────────────────────────────────────────────────────────── */
 
 async function run() {
-  console.log(`Connecting to ${MONGODB_URI} …`);
+  console.log('Connecting to the configured MongoDB target …');
   await mongoose.connect(MONGODB_URI);
   const ids = await upsertFixtures();
   console.log('Fixtures ready.');

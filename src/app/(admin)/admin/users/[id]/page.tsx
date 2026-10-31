@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,8 @@ import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { isCardCompatible } from '@/lib/services/product-experience';
 import { Modal } from '@/components/ui/modal';
 import { formatPriceMinor } from '@/lib/format';
+import { downloadQrPdf } from '@/lib/qr-pdf';
+import { canonicalPublicBase } from '@/lib/public-base';
 import {
   permanentCardUrl,
   remainingCardCount,
@@ -154,7 +156,7 @@ function catalogTypeLabel(item: CatalogProductLite): string {
 }
 
 /** Configured public origin — never window.location/preview/localhost. */
-const PUBLIC_BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, '');
+const PUBLIC_BASE_URL = canonicalPublicBase();
 
 interface AnalyticsData {  totalTaps: number;
   tapLogs: number;
@@ -183,6 +185,9 @@ export default function AdminUserDetailPage() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAllCards, setShowAllCards] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState('');
+  const [pdfError, setPdfError] = useState('');
+  const pdfBusyRef = useRef(false);
   const [loadError, setLoadError] = useState('');  const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
   const [copiedQrId, setCopiedQrId] = useState('');
 
@@ -330,31 +335,39 @@ export default function AdminUserDetailPage() {
   };
 
   const handleDownloadQr = async (url: string, label: string, key: string) => {
-    if (!url) return;
+    if (!url || pdfBusyRef.current) return;
+    pdfBusyRef.current = true;
+    setPdfError('');
+    setPdfBusy(key);
     try {
-      const canvas = document.createElement('canvas');
-      await QRCode.toCanvas(canvas, url, { width: 512, margin: 2 });
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = `standee-${label}-${key}.png`;
-      link.click();
+      await downloadQrPdf([{ title: `Standee QR - ${label}`, url }], `standee-${label}-${key}.pdf`);
     } catch (error) {
-      console.error('QR download failed:', error);
+      console.error('QR PDF download failed:', error);
+      setPdfError('Could not generate QR PDF.');
+    } finally {
+      pdfBusyRef.current = false;
+      setPdfBusy('');
     }
   };
 
-  const handleDownloadCardQr = async (c: { routeSlug?: string; slug: string }) => {
+  const handleDownloadCardQr = async (c: { routeSlug?: string; slug: string; templateKey?: string }) => {
     const url = permanentCardUrl(c, PUBLIC_BASE_URL);
-    if (!url) return;
+    if (!url || pdfBusyRef.current) return;
+    pdfBusyRef.current = true;
+    setPdfError('');
+    const template = (c.templateKey && templateNames[c.templateKey]) || c.templateKey;
+    setPdfBusy(`card:${c.slug}`);
     try {
-      const canvas = document.createElement('canvas');
-      await QRCode.toCanvas(canvas, url, { width: 512, margin: 2 });
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/png');
-      link.download = `card-${c.slug}.png`;
-      link.click();
+      await downloadQrPdf(
+        [{ title: template ? `NFC Card - ${template}` : `NFC Card - ${c.slug}`, url }],
+        `card-${c.slug}.pdf`
+      );
     } catch (error) {
-      console.error('Card QR download failed:', error);
+      console.error('Card QR PDF download failed:', error);
+      setPdfError('Could not generate QR PDF.');
+    } finally {
+      pdfBusyRef.current = false;
+      setPdfBusy('');
     }
   };
 
@@ -621,6 +634,10 @@ export default function AdminUserDetailPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {pdfError && (
+        <p className="rounded-lg bg-bad/10 px-3 py-2 text-xs text-bad ring-1 ring-bad/20">{pdfError}</p>
+      )}
+
       <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
@@ -834,8 +851,8 @@ export default function AdminUserDetailPage() {
                       <div className="shrink-0 text-center">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={qrDataUrls[c._id]} alt={`QR code for card ${c.slug}`} className="h-24 w-24 rounded-lg bg-white p-1" />
-                        <button type="button" title="Download PNG" onClick={() => handleDownloadCardQr(c)} className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
-                          <Download className="h-3 w-3" /> PNG
+                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy) || !qrDataUrls[c._id]} onClick={() => handleDownloadCardQr(c)} className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink disabled:opacity-50">
+                          <Download className="h-3 w-3" /> PDF
                         </button>
                       </div>
                     ) : (
@@ -979,7 +996,7 @@ export default function AdminUserDetailPage() {
                       <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'panel'), standee.panelQr!.qrId)} className="text-ink-mute hover:text-ink transition-colors">
                         {copiedQrId === standee.panelQr!.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
-                      <button type="button" title="Download PNG" onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                      <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="text-ink-mute hover:text-ink transition-colors">
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -998,7 +1015,7 @@ export default function AdminUserDetailPage() {
                         <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'social', index), qr.qrId)} className="text-ink-mute hover:text-ink transition-colors">
                           {copiedQrId === qr.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                         </button>
-                        <button type="button" title="Download PNG" onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="text-ink-mute hover:text-ink transition-colors">
                           <Download className="h-3.5 w-3.5" />
                         </button>
                       </div>

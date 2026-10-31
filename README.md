@@ -83,7 +83,7 @@
   ```
 
   **Vercel env** (Project → Settings → Environment Variables):
-  `MONGODB_URI` (Atlas SRV), `JWT_SECRET` (fresh 64-byte value), `APP_KEY` (`openssl rand -base64 32`), `MEDIA_DRIVER=s3`, `S3_BUCKET`, `S3_REGION=auto`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT=https://<acct>.r2.cloudflarestorage.com`, `NEXT_PUBLIC_BASE_URL=https://taprev.in`, `RESEND_API_KEY`, `EMAIL_FROM` (`Taprevia <no-reply@yourdomain.com>` — sender/domain pre-verified in Resend).
+  `MONGODB_URI` (Atlas SRV), `JWT_SECRET` (fresh 64-byte value), `APP_KEY` (`openssl rand -base64 32`), `MEDIA_DRIVER=s3`, `S3_BUCKET`, `S3_REGION=auto`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT=https://<acct>.r2.cloudflarestorage.com`, `NEXT_PUBLIC_BASE_URL=https://taprevia.com`, `RESEND_API_KEY`, `EMAIL_FROM` (`Taprevia <no-reply@yourdomain.com>` — sender/domain pre-verified in Resend).
 
   DB-only scripts (`seed`, `integrity`, `test:cards`, `test:entitlement`, `migrate:*`, `backfill:*`) run against Atlas by just setting `MONGODB_URI`. HTTP suites point at the deployed URL via `SMOKE_BASE_URL`/`BASE_URL`.
 

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
 import { connectDB } from '@/lib/db';
 import Card from '@/models/Card';
+import Standee from '@/models/Standee';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { z } from 'zod';
 import { check } from '@/lib/rate-limit';
@@ -49,14 +50,27 @@ export async function POST(request: NextRequest) {
 
     await connectDB();
 
-    const resolveCardId = async (): Promise<string | null> => {
+    const resolveTarget = async (): Promise<{ cardId: string | null; standeeId: string | null } | null> => {
       if (alias) {
         const doc = await Card.findOne(
           withPublicCardVisibility({ urlAlias: alias.toLowerCase() })
         )
           .select('_id')
           .lean<{ _id: unknown } | null>();
-        return doc ? String(doc._id) : null;
+        if (doc) return { cardId: String(doc._id), standeeId: null };
+
+        // Phase 4D.7: Standee public hosts use the same client tracker with
+        // their opaque routeSlug/uid. Card resolution wins first, preserving
+        // every existing Card analytics contract.
+        const standee = await Standee.findOne({
+          $or: [
+            { $expr: { $eq: [{ $toLower: '$routeSlug' }, alias.toLowerCase()] } },
+            { uid: alias.toLowerCase() },
+          ],
+        })
+          .select('_id')
+          .lean<{ _id: unknown } | null>();
+        return standee ? { cardId: null, standeeId: String(standee._id) } : null;
       }
       if (cardUid) {
         const card = await Card.findOne(
@@ -64,28 +78,29 @@ export async function POST(request: NextRequest) {
         )
           .select('_id')
           .lean<{ _id: unknown } | null>();
-        return card ? String(card._id) : null;
+        return card ? { cardId: String(card._id), standeeId: null } : null;
       }
       return null;
     };
 
-    const cardId = await resolveCardId();
-    if (!cardId) return ok({ skipped: true });
+    const target = await resolveTarget();
+    if (!target) return ok({ skipped: true });
 
     // Aggregate cap per card prevents distributed IP rotation from generating
     // unbounded tap counter and analytics writes.
-    if (parsed.data.action === 'tap') {
-      const cardLimit = await check(`track-tap-card:${cardId}`, 600, 60_000);
+    if (parsed.data.action === 'tap' && target.cardId) {
+      const cardLimit = await check(`track-tap-card:${target.cardId}`, 600, 60_000);
       const limited = rateLimitFailure(cardLimit, 'Card tracking is temporarily busy');
       if (limited) return limited;
     }
 
-    if (parsed.data.action === 'tap') {
-      await Card.updateOne({ _id: cardId }, { $inc: { 'stats.taps': 1 } });
+    if (parsed.data.action === 'tap' && target.cardId) {
+      await Card.updateOne({ _id: target.cardId }, { $inc: { 'stats.taps': 1 } });
     }
 
     await AnalyticsLog.create({
-      cardId,
+      cardId: target.cardId,
+      ...(target.standeeId ? { standeeId: target.standeeId } : {}),
       action: parsed.data.action,
       metadata: parsed.data.metadata ?? '',
       ip,
