@@ -16,8 +16,10 @@ export interface ReviewImportAnalysis {
 }
 
 export async function analyzeReviewImport(
-  input: ReviewLibraryImportInput
+  input: ReviewLibraryImportInput,
+  options: { overwrite?: boolean } = {}
 ): Promise<ReviewImportAnalysis> {
+  const overwrite = options.overwrite === true;
   const categoryKeys = input.categories.map((category) => category.key);
   const templateKeys = input.templates.map((template) => template.key);
   const duplicateCategories = categoryKeys.filter(
@@ -40,7 +42,8 @@ export async function analyzeReviewImport(
 
   const existingCategoryKeys = existingCategories.map((category) => category.key);
   const existingTemplateKeys = existingTemplates.map((template) => template.key);
-  const existingSet = new Set(existingCategoryKeys);
+  const existingCategorySet = new Set(existingCategoryKeys);
+  const existingTemplateSet = new Set(existingTemplateKeys);
 
   const scenarioMap = new Map<string, Set<string>>();
   for (const category of existingCategories) {
@@ -49,7 +52,11 @@ export async function analyzeReviewImport(
       new Set((category.scenarios ?? []).map((scenario) => scenario.key))
     );
   }
+  // A payload category replaces the stored scenarios only when it will actually
+  // be written. With overwrite=false an existing category is skipped, so its
+  // templates must validate against the stored scenario list.
   for (const category of input.categories) {
+    if (!overwrite && existingCategorySet.has(category.key)) continue;
     scenarioMap.set(
       category.key,
       new Set((category.scenarios ?? []).map((scenario) => scenario.key))
@@ -65,6 +72,9 @@ export async function analyzeReviewImport(
   }
 
   for (const template of input.templates) {
+    // Skipped templates never reach MongoDB, so do not reject the whole
+    // payload for a record that will not be written.
+    if (!overwrite && existingTemplateSet.has(template.key)) continue;
     const scenarios = scenarioMap.get(template.categoryKey);
     if (!scenarios) {
       invalid.push(`template:${template.key}: category "${template.categoryKey}" not found`);
@@ -75,9 +85,8 @@ export async function analyzeReviewImport(
     }
   }
 
-  const existingTemplateSet = new Set(existingTemplateKeys);
   return {
-    categoriesNew: categoryKeys.filter((key) => !existingSet.has(key)).length,
+    categoriesNew: categoryKeys.filter((key) => !existingCategorySet.has(key)).length,
     categoriesExisting: existingCategoryKeys.length,
     templatesNew: templateKeys.filter((key) => !existingTemplateSet.has(key)).length,
     templatesExisting: existingTemplateKeys.length,

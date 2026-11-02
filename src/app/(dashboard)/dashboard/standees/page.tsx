@@ -9,7 +9,7 @@ export default async function StandeesDashboardPage() {
       <div>
         <h1 className="text-2xl font-bold text-ink tracking-tight">My Standees</h1>
         <p className="text-ink-mute text-sm mt-0.5">
-          Configure each fixed slot&apos;s destination — change anytime, no reprint needed.
+          Manage each standee’s profile slots and destinations — change anytime, no reprint needed.
         </p>
       </div>
       <StandeeManager />

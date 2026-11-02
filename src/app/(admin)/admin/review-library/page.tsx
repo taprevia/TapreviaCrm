@@ -8,7 +8,7 @@
  * import/export round-trip the full { categories, templates } JSON artifact.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -30,6 +30,13 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  REVIEW_IMPORT_MAX_BYTES,
+  ReviewImportPayloadError,
+  parseReviewLibraryImportText,
+  toReviewLibraryImportBody,
+  type NormalizedReviewLibraryImport,
+} from '@/lib/review-library-import-payload';
 
 type ReviewPreferredLength = 'short' | 'medium' | 'detailed';
 type ReviewWritingStyle = 'friendly' | 'professional' | 'casual' | 'simple';
@@ -78,6 +85,48 @@ const STYLE_OPTIONS = [
   { value: 'casual', label: 'Casual' },
   { value: 'simple', label: 'Simple' },
 ];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function collectErrorMessages(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectErrorMessages(item));
+  }
+  const record = asRecord(value);
+  if (!record) return typeof value === 'string' && value.trim() ? [value.trim()] : [];
+  return Object.entries(record).flatMap(([key, item]) => {
+    if (Array.isArray(item)) {
+      return item
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => `${key}: ${entry}`);
+    }
+    if (typeof item === 'string' && item.trim()) return [`${key}: ${item.trim()}`];
+    return collectErrorMessages(item);
+  });
+}
+
+function formatApiError(body: unknown, fallback: string): string {
+  const record = asRecord(body);
+  const error = typeof record?.error === 'string' && record.error.trim() ? record.error : fallback;
+  const details = collectErrorMessages(record?.details);
+  return details.length > 0 ? `${error}: ${details.slice(0, 4).join('; ')}` : error;
+}
+
+async function readJsonResponse(
+  response: Response
+): Promise<{ body: unknown; validJson: boolean; empty: boolean }> {
+  const text = await response.text();
+  if (!text.trim()) return { body: null, validJson: false, empty: true };
+  try {
+    return { body: JSON.parse(text) as unknown, validJson: true, empty: false };
+  } catch {
+    return { body: null, validJson: false, empty: false };
+  }
+}
 
 const slugify = (value: string) =>
   value
@@ -140,6 +189,8 @@ export default function AdminReviewLibraryPage() {
   // Import modal.
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [importFileName, setImportFileName] = useState('');
+  const [importPayload, setImportPayload] = useState<NormalizedReviewLibraryImport | null>(null);
   const [importing, setImporting] = useState(false);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [importPreview, setImportPreview] = useState<{
@@ -535,27 +586,95 @@ export default function AdminReviewLibraryPage() {
     }
   };
 
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    // Allow selecting the same file again after a correction.
+    input.value = '';
+    if (!file) return;
+
+    if (file.size === 0) {
+      toast({
+        title: 'File is empty',
+        description: 'Select a non-empty exported JSON file.',
+        variant: 'error',
+      });
+      return;
+    }
+    if (file.size > REVIEW_IMPORT_MAX_BYTES) {
+      toast({
+        title: 'File is too large',
+        description: `Import files must be ${Math.round(REVIEW_IMPORT_MAX_BYTES / (1024 * 1024))} MB or smaller.`,
+        variant: 'error',
+      });
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      if (!text.trim()) throw new ReviewImportPayloadError('The selected file is empty.');
+      // Parse exactly once here; Preview/Import reuse the normalized payload.
+      const parsed = parseReviewLibraryImportText(text);
+      setImportText(text);
+      setImportFileName(file.name);
+      setImportPayload(parsed);
+      setImportPreview(null);
+      setImportResult(null);
+      toast({
+        title: 'File loaded',
+        description: `${file.name}: ${parsed.categories.length} categor${parsed.categories.length === 1 ? 'y' : 'ies'} and ${parsed.templates.length} template${parsed.templates.length === 1 ? '' : 's'}.`,
+        variant: 'success',
+      });
+    } catch (err) {
+      setImportText('');
+      setImportFileName('');
+      setImportPayload(null);
+      setImportPreview(null);
+      setImportResult(null);
+      toast({
+        title: 'Could not read file',
+        description: err instanceof Error ? err.message : 'Select a valid JSON file.',
+        variant: 'error',
+      });
+    }
+  };
+
   const runPreview = async () => {
     if (importingRef.current) return;
     try {
-      const parsed = JSON.parse(importText);
+      const payload = importPayload ?? parseReviewLibraryImportText(importText);
+      if (!importPayload) setImportPayload(payload);
+
       const res = await fetch('/api/admin/review-library/import/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed),
+        body: JSON.stringify({
+          ...toReviewLibraryImportBody(payload),
+          overwrite: overwriteExisting,
+        }),
       });
-      const data: {
-        error?: string;
-        preview?: {
-          categoriesNew: number;
-          categoriesExisting: number;
-          templatesNew: number;
-          templatesExisting: number;
-          invalid: string[];
-        };
-      } = await res.json().catch(() => null);
-      if (!res.ok || !data?.preview) throw new Error(data?.error || 'Preview failed');
-      setImportPreview(data.preview);
+      const response = await readJsonResponse(res);
+      if (!response.validJson) {
+        throw new Error(
+          response.empty
+            ? 'Preview failed: the server returned an empty response.'
+            : 'Preview failed: the server returned non-JSON data.'
+        );
+      }
+      const data = asRecord(response.body);
+      const preview = asRecord(data?.preview);
+      if (!res.ok || !preview) throw new Error(formatApiError(response.body, 'Preview failed'));
+
+      const invalid = Array.isArray(preview.invalid)
+        ? preview.invalid.filter((item): item is string => typeof item === 'string')
+        : [];
+      setImportPreview({
+        categoriesNew: Number(preview.categoriesNew) || 0,
+        categoriesExisting: Number(preview.categoriesExisting) || 0,
+        templatesNew: Number(preview.templatesNew) || 0,
+        templatesExisting: Number(preview.templatesExisting) || 0,
+        invalid,
+      });
     } catch (err) {
       setImportPreview(null);
       toast({
@@ -567,35 +686,51 @@ export default function AdminReviewLibraryPage() {
   };
 
   const runImport = async () => {
-    if (importingRef.current || !importPreview) return;
+    if (importingRef.current || !importPreview || importPreview.invalid.length > 0) return;
     importingRef.current = true;
     setImporting(true);
     setImportResult(null);
     try {
-      const parsed = JSON.parse(importText);
+      const payload = importPayload ?? parseReviewLibraryImportText(importText);
+      if (!importPayload) setImportPayload(payload);
+
       const res = await fetch('/api/admin/review-library/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...parsed, overwrite: overwriteExisting }),
+        body: JSON.stringify({
+          ...toReviewLibraryImportBody(payload),
+          overwrite: overwriteExisting,
+        }),
       });
-      const data: {
-        error?: string;
-        imported?: { categories: number; templates: number };
-        skipped?: { categories: number; templates: number };
-        errors?: string[];
-      } = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || 'Import failed');
+      const response = await readJsonResponse(res);
+      if (!response.validJson) {
+        throw new Error(
+          response.empty
+            ? 'Import failed: the server returned an empty response.'
+            : 'Import failed: the server returned non-JSON data.'
+        );
+      }
+      if (!res.ok) throw new Error(formatApiError(response.body, 'Import failed'));
+
+      const data = asRecord(response.body);
+      const imported = asRecord(data?.imported);
+      const errors = Array.isArray(data?.errors)
+        ? data.errors.filter((item): item is string => typeof item === 'string')
+        : [];
       setImportResult({
-        imported: data.imported ?? { categories: 0, templates: 0 },
-        errors: data.errors,
+        imported: {
+          categories: Number(imported?.categories) || 0,
+          templates: Number(imported?.templates) || 0,
+        },
+        errors,
       });
       await fetchCategories();
       if (selectedKey) await fetchTemplates(selectedKey);
       setImportPreview(null);
-      if (data.errors?.length) {
+      if (errors.length > 0) {
         toast({
           title: 'Import completed with errors',
-          description: `${data.errors.length} record(s) were rejected.`,
+          description: `${errors.length} record(s) were rejected.`,
           variant: 'warning',
         });
       } else {
@@ -616,9 +751,21 @@ export default function AdminReviewLibraryPage() {
   const runExport = async () => {
     try {
       const res = await fetch('/api/admin/review-library/export');
-      if (!res.ok) throw new Error('Export failed');
-      const data = await res.json();
-      const blob = new Blob([JSON.stringify(data.categories ? { categories: data.categories, templates: data.templates } : data, null, 2)], {
+      const response = await readJsonResponse(res);
+      if (!res.ok) throw new Error(formatApiError(response.body, 'Export failed'));
+      if (!response.validJson) {
+        throw new Error(
+          response.empty
+            ? 'Export failed: the server returned an empty response.'
+            : 'Export failed: the server returned non-JSON data.'
+        );
+      }
+      const data = asRecord(response.body);
+      const exported = {
+        categories: Array.isArray(data?.categories) ? data.categories : [],
+        templates: Array.isArray(data?.templates) ? data.templates : [],
+      };
+      const blob = new Blob([JSON.stringify(exported, null, 2)], {
         type: 'application/json',
       });
       const url = URL.createObjectURL(blob);
@@ -1102,6 +1249,8 @@ export default function AdminReviewLibraryPage() {
           if (importing) return;
           setImportOpen(false);
           setImportText('');
+          setImportFileName('');
+          setImportPayload(null);
           setImportResult(null);
           setImportPreview(null);
           setOverwriteExisting(false);
@@ -1111,8 +1260,32 @@ export default function AdminReviewLibraryPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-ink-mute">
-            Paste the exported JSON <code className="rounded bg-field px-1 py-0.5 font-mono text-xs">{"{ categories, templates }"}</code>payload. This upserts by key and never deletes existing rows.
+            Select an exported JSON file or paste the{' '}
+            <code className="rounded bg-field px-1 py-0.5 font-mono text-xs">{"{ categories, templates }"}</code>{' '}
+            payload. This upserts by key and never deletes existing rows.
           </p>
+
+          <div className="rounded-lg border border-dashed border-line-strong bg-field/60 px-3 py-3">
+            <label htmlFor="rl-import-file" className="mb-1.5 block text-sm font-medium text-ink">
+              JSON file
+            </label>
+            <input
+              data-testid="import-file"
+              id="rl-import-file"
+              type="file"
+              accept=".json,application/json"
+              onChange={(event) => void handleImportFile(event)}
+              disabled={importing}
+              className="block w-full text-sm text-ink-mute file:mr-3 file:rounded-lg file:border-0 file:bg-accent-600/15 file:px-3 file:py-2 file:text-sm file:font-medium file:text-accent-300 hover:file:bg-accent-600/25 disabled:opacity-50"
+            />
+            <p className="mt-1.5 text-xs text-ink-faint">
+              The complete file is read before parsing. Maximum {Math.round(REVIEW_IMPORT_MAX_BYTES / (1024 * 1024))} MB.
+            </p>
+            {importFileName && (
+              <p className="mt-1.5 font-mono text-xs text-accent-400">Loaded: {importFileName}</p>
+            )}
+          </div>
+
           <label htmlFor="rl-import-json" className="mb-1.5 block text-sm font-medium text-ink-mute">
             JSON payload
           </label>
@@ -1122,6 +1295,8 @@ export default function AdminReviewLibraryPage() {
             value={importText}
             onChange={(e) => {
               setImportText(e.target.value);
+              setImportFileName('');
+              setImportPayload(null);
               setImportPreview(null);
             }}
             placeholder='{ "categories": [], "templates": [] }'
@@ -1134,11 +1309,16 @@ export default function AdminReviewLibraryPage() {
                 {' '}Templates: {importPreview.templatesNew} new, {importPreview.templatesExisting} existing.
               </p>
               {importPreview.invalid.length > 0 && (
-                <ul className="mt-1 list-disc pl-4 text-warn">
-                  {importPreview.invalid.slice(0, 10).map((error) => (
-                    <li key={error}>{error}</li>
-                  ))}
-                </ul>
+                <>
+                  <p className="mt-1 font-medium text-warn">
+                    Fix these issues before importing — nothing has been written.
+                  </p>
+                  <ul className="mt-1 list-disc pl-4 text-warn">
+                    {importPreview.invalid.slice(0, 10).map((error) => (
+                      <li key={error}>{error}</li>
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           )}
@@ -1148,7 +1328,12 @@ export default function AdminReviewLibraryPage() {
               data-testid="import-overwrite"
               type="checkbox"
               checked={overwriteExisting}
-              onChange={(event) => setOverwriteExisting(event.target.checked)}
+              onChange={(event) => {
+                setOverwriteExisting(event.target.checked);
+                // Overwrite changes which records are written, so preview again
+                // before enabling Import.
+                setImportPreview(null);
+              }}
               className="mt-0.5"
             />
             <span>
@@ -1179,6 +1364,8 @@ export default function AdminReviewLibraryPage() {
               onClick={() => {
                 setImportOpen(false);
                 setImportText('');
+                setImportFileName('');
+                setImportPayload(null);
                 setImportResult(null);
                 setImportPreview(null);
                 setOverwriteExisting(false);
@@ -1199,7 +1386,12 @@ export default function AdminReviewLibraryPage() {
               data-testid="import-submit"
               variant="primary"
               onClick={() => void runImport()}
-              disabled={!importText.trim() || !importPreview || importing}
+              disabled={
+                !importText.trim() ||
+                !importPreview ||
+                importPreview.invalid.length > 0 ||
+                importing
+              }
               isLoading={importing}
             >
               <FileUp className="h-4 w-4 mr-1.5" />

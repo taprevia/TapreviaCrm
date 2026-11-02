@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import mongoose, { type ClientSession } from 'mongoose';
 import { connectDB } from '@/lib/db';
 import { requireAdminStrict } from '@/lib/auth';
 import { fail, ok } from '@/lib/api';
@@ -9,58 +10,43 @@ import {
   normalizeCategoryPayload,
   normalizeTemplatePayload,
 } from '@/lib/validation/review-library';
+import { analyzeReviewImport } from '@/lib/services/review-library-import';
 import { syncCategoryLanguages } from '@/lib/services/review-templates';
+import { REVIEW_IMPORT_MAX_BYTES } from '@/lib/review-library-import-payload';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Admin bulk import — upserts a full category + template library from the
  * JSON artifact. Non-destructive (upsert by key only; never deletes existing
- * rows). Per-item failures are aggregated, never partial-write destructive.
+ * rows). The complete payload is validated before any write:
  *
- * Optimized for large payloads: categories and templates are each written in
- * a single `bulkWrite` (one round trip per collection instead of one query
- * per row) with a size guard up front so oversized requests fail fast with a
- * structured 413 rather than a dropped connection.
+ *  1. zod field validation (styles, lengths, placeholders, duplicate scenarios)
+ *  2. duplicate category/template key detection
+ *  3. category/scenario relationship checks with overwrite semantics
+ *  4. Mongoose model validation for every record
+ *
+ * Writes then run in a MongoDB transaction when the deployment supports one
+ * (Atlas / replica set). Standalone MongoDB is prevalidated the same way and
+ * written in ordered bulk operations; a rare database-level write failure can
+ * still leave earlier bulk operations committed there, which is reported.
  */
 
-// ─── Payload size guard ──────────────────────────────────────────────────────
-// Serverless platforms reject request bodies above their own limits before
-// this handler runs; enforcing our own ceiling surfaces a structured error.
-const MAX_IMPORT_BYTES = 8 * 1024 * 1024;
+type CategoryBulkOp = Parameters<typeof ReviewCategory.bulkWrite>[0][number];
+type TemplateBulkOp = Parameters<typeof ReviewTemplate.bulkWrite>[0][number];
 
-interface BulkWriteErrorItem {
-  index?: number;
-  errmsg?: string;
-  err?: { message?: string };
-}
-
-interface BulkWriteErrorLike {
-  writeErrors?: Array<BulkWriteErrorItem>;
-}
-
-/**
- * Map `MongoBulkWriteError.writeErrors` back to the payload keys so failures
- * degrade to per-item errors. Returns `{ messages, fatal }`; `fatal` is set
- * when the whole write failed with no attributable write errors.
- */
-function extractBulkWriteErrors(
-  err: unknown,
-  keys: string[],
-  kind: 'category' | 'template'
-): { messages: string[]; fatal: string | null } {
-  const messages: string[] = [];
-  const writeErrors = (err as BulkWriteErrorLike | null)?.writeErrors;
-  if (Array.isArray(writeErrors)) {
-    for (const we of writeErrors) {
-      const message = we.err?.message ?? we.errmsg ?? 'write failed';
-      const key =
-        typeof we.index === 'number' && we.index >= 0 && we.index < keys.length ? keys[we.index] : '?';
-      messages.push(`${kind}:${key}: ${message}`);
-    }
-    return { messages, fatal: null };
+async function supportsTransactions(): Promise<boolean> {
+  const db = mongoose.connection.db;
+  if (!db) return false;
+  try {
+    const hello = (await db.admin().command({ hello: 1 })) as {
+      setName?: string;
+      msg?: string;
+    };
+    return Boolean(hello.setName || hello.msg === 'isdbgrid');
+  } catch {
+    return false;
   }
-  return { messages, fatal: err instanceof Error ? err.message : 'bulk write failed' };
 }
 
 // POST /api/admin/review-library/import
@@ -71,7 +57,7 @@ export async function POST(request: NextRequest) {
     if (admin.kind === 'forbidden') return fail(403, 'FORBIDDEN', 'Forbidden');
 
     const contentLength = Number(request.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_IMPORT_BYTES) {
+    if (Number.isFinite(contentLength) && contentLength > REVIEW_IMPORT_MAX_BYTES) {
       return fail(413, 'PAYLOAD_TOO_LARGE', 'Import payload too large');
     }
 
@@ -87,138 +73,130 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid import payload', parsed.error.flatten().fieldErrors);
     }
+    if (parsed.data.categories.length === 0 && parsed.data.templates.length === 0) {
+      return fail(400, 'VALIDATION_ERROR', 'No categories or templates to import');
+    }
 
     await connectDB();
 
-    const errors: string[] = [];
-
-    // 1. Upsert categories in a single bulkWrite (ordered:false keeps going on errors).
-    let categoriesImported = 0;
-    let categoriesSkipped = 0;
-    const categoryKeys = parsed.data.categories.map((c) => c.key);
-    const existingCategoryKeys = new Set(
-      (
-        (await ReviewCategory.find({ key: { $in: categoryKeys } })
-          .select('key')
-          .lean()
-          .exec()) as unknown as Array<{ key: string }>
-      ).map((category) => category.key)
-    );
-    const categoriesToWrite = parsed.data.categories.filter(
-      (category) => overwrite || !existingCategoryKeys.has(category.key)
-    );
-    categoriesSkipped = parsed.data.categories.length - categoriesToWrite.length;
-    if (categoriesToWrite.length > 0) {
-      try {
-        await ReviewCategory.bulkWrite(
-          categoriesToWrite.map((category) => ({
-            updateOne: {
-              filter: { key: category.key },
-              update: {
-                $set: { ...normalizeCategoryPayload(category), updatedAt: new Date() },
-                $setOnInsert: { createdAt: new Date() },
-              },
-              upsert: true,
-            },
-          })),
-          { ordered: false }
-        );
-        categoriesImported = categoriesToWrite.length;
-      } catch (error) {
-        const { messages, fatal } = extractBulkWriteErrors(error, categoryKeys, 'category');
-        if (fatal) return fail(500, 'INTERNAL_ERROR', `Category bulk write failed: ${fatal}`);
-        errors.push(...messages);
-        categoriesImported = categoriesToWrite.length - messages.length;
-      }
-    }
-
-    // 2. Validate templates against the merged category set (DB as source of
-    //    truth) — scenario must exist in the category's scenario list.
-    const merged = (await ReviewCategory.find().select('key scenarios').lean().exec()) as unknown as
-      Array<{ key: string; scenarios?: Array<{ key: string }> }>;
-    const scenarioByCategory = new Map<string, Set<string>>();
-    for (const category of merged) {
-      scenarioByCategory.set(
-        category.key,
-        new Set((category.scenarios ?? []).map((s) => s.key))
-      );
-    }
-
-    // 3. Collect valid template ops (key kept parallel to the op array so
-    //    writeError indexes map back to payload keys) and write in one bulkWrite.
-    type TemplateBulkOp = Parameters<typeof ReviewTemplate.bulkWrite>[0][number];
-    const templateOps: Array<{ key: string; op: TemplateBulkOp }> = [];
-    for (const template of parsed.data.templates) {
-      const scenarios = scenarioByCategory.get(template.categoryKey);
-      if (!scenarios) {
-        errors.push(`template:${template.key}: category "${template.categoryKey}" not found`);
-        continue;
-      }
-      if (!scenarios.has(template.scenario)) {
-        errors.push(
-          `template:${template.key}: scenario "${template.scenario}" does not exist in category`
-        );
-        continue;
-      }
-      templateOps.push({
-        key: template.key,
-        op: {
-          updateOne: {
-            filter: { key: template.key },
-            update: {
-              $set: { ...normalizeTemplatePayload(template), updatedAt: new Date() },
-              $setOnInsert: {
-                createdAt: new Date(),
-                usageCount: template.usageCount ?? 0,
-                lastShownAt: template.lastShownAt ? new Date(template.lastShownAt) : null,
-              },
-            },
-            upsert: true,
-          },
-        },
+    // Read-only analysis: duplicates and category/scenario relationships are
+    // evaluated against the same overwrite semantics the writes will use.
+    const analysis = await analyzeReviewImport(parsed.data, { overwrite });
+    if (analysis.invalid.length > 0) {
+      return fail(400, 'VALIDATION_ERROR', 'Import validation failed', {
+        invalid: analysis.invalid,
       });
     }
 
-    const existingTemplateKeys = new Set(
-      (
-        (await ReviewTemplate.find({ key: { $in: templateOps.map((t) => t.key) } })
-          .select('key')
-          .lean()
-          .exec()) as unknown as Array<{ key: string }>
-      ).map((template) => template.key)
+    const existingCategoryKeys = new Set(analysis.existingCategoryKeys);
+    const existingTemplateKeys = new Set(analysis.existingTemplateKeys);
+
+    const categoriesToWrite = parsed.data.categories.filter(
+      (category) => overwrite || !existingCategoryKeys.has(category.key)
     );
-    const templatesToWrite = templateOps.filter(
+    const categoriesSkipped = parsed.data.categories.length - categoriesToWrite.length;
+
+    const writableTemplates = parsed.data.templates.filter(
       (template) => overwrite || !existingTemplateKeys.has(template.key)
     );
-    const templatesSkipped = templateOps.length - templatesToWrite.length;
-    let templatesImported = templatesToWrite.length;
-    if (templatesToWrite.length > 0) {
-      try {
-        await ReviewTemplate.bulkWrite(
-          templatesToWrite.map((t) => t.op),
-          { ordered: false }
-        );
-      } catch (error) {
-        const { messages, fatal } = extractBulkWriteErrors(error, templateOps.map((t) => t.key), 'template');
-        if (fatal) return fail(500, 'INTERNAL_ERROR', `Template bulk write failed: ${fatal}`);
-        errors.push(...messages);
-        templatesImported -= messages.length;
-      }
+    const templatesSkipped = parsed.data.templates.length - writableTemplates.length;
+
+    // Model-level preflight (max scenarios, text length, enum/default rules).
+    // Nothing is written until every record passes.
+    const modelErrors: string[] = [];
+    for (const category of categoriesToWrite) {
+      const error = new ReviewCategory(normalizeCategoryPayload(category)).validateSync();
+      if (error) modelErrors.push(`category:${category.key}: ${error.message}`);
+    }
+    for (const template of writableTemplates) {
+      const error = new ReviewTemplate(normalizeTemplatePayload(template)).validateSync();
+      if (error) modelErrors.push(`template:${template.key}: ${error.message}`);
+    }
+    if (modelErrors.length > 0) {
+      return fail(400, 'VALIDATION_ERROR', 'Import validation failed', {
+        invalid: modelErrors,
+      });
     }
 
-    // 4. Keep category `languages` in sync with the distinct languages now on
-    //    their active templates — best-effort inside the helper.
+    const categoryOps: CategoryBulkOp[] = categoriesToWrite.map((category) => ({
+      updateOne: {
+        filter: { key: category.key },
+        update: {
+          $set: { ...normalizeCategoryPayload(category), updatedAt: new Date() },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        upsert: true,
+      },
+    }));
+
+    const templateOps: TemplateBulkOp[] = writableTemplates.map((template) => ({
+      updateOne: {
+        filter: { key: template.key },
+        update: {
+          $set: { ...normalizeTemplatePayload(template), updatedAt: new Date() },
+          $setOnInsert: {
+            createdAt: new Date(),
+            usageCount: template.usageCount ?? 0,
+            lastShownAt: template.lastShownAt ? new Date(template.lastShownAt) : null,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    const writeAll = async (session?: ClientSession) => {
+      if (categoryOps.length > 0) {
+        await ReviewCategory.bulkWrite(categoryOps, {
+          ordered: true,
+          ...(session ? { session } : {}),
+        });
+      }
+      if (templateOps.length > 0) {
+        await ReviewTemplate.bulkWrite(templateOps, {
+          ordered: true,
+          ...(session ? { session } : {}),
+        });
+      }
+    };
+
+    const transactional = await supportsTransactions();
+    try {
+      if (transactional) {
+        const session = await mongoose.startSession();
+        try {
+          await session.withTransaction(async () => {
+            await writeAll(session);
+          });
+        } finally {
+          await session.endSession();
+        }
+      } else {
+        await writeAll();
+      }
+    } catch (error) {
+      console.error('Admin review-library import write error:', error);
+      return fail(
+        500,
+        'INTERNAL_ERROR',
+        transactional
+          ? 'Import failed; no records were committed.'
+          : 'Import failed during write. This local MongoDB is standalone, so earlier bulk operations may have been committed.'
+      );
+    }
+
+    // Keep category `languages` in sync with the distinct languages now on
+    // their active templates — best-effort inside the helper.
     await syncCategoryLanguages([
       ...new Set([
-        ...parsed.data.categories.map((c) => c.key),
-        ...parsed.data.templates.map((t) => t.categoryKey),
+        ...parsed.data.categories.map((category) => category.key),
+        ...parsed.data.templates.map((template) => template.categoryKey),
       ]),
     ]);
 
     return ok({
-      imported: { categories: categoriesImported, templates: templatesImported },
+      imported: { categories: categoriesToWrite.length, templates: writableTemplates.length },
       skipped: { categories: categoriesSkipped, templates: templatesSkipped },
-      errors,
+      errors: [],
     });
   } catch (error) {
     console.error('Admin review-library import POST error:', error);

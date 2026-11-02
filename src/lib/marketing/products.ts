@@ -1,6 +1,7 @@
 import { Product } from '@/types/marketing';
+import { filterCustomerVisibleProducts } from './product-visibility';
 
-export const PRODUCTS: Product[] = [
+const ALL_PRODUCTS: Product[] = [
   {
     id: 'business-nfc-card',
     name: 'Business NFC Card',
@@ -121,14 +122,14 @@ export const PRODUCTS: Product[] = [
     tagline: 'Turn every customer visit into a fresh Google review.',
     description:
       'A dedicated NFC card engineered to funnel happy customers straight to your Google reviews.',
-    highlights: ['Direct Review Redirection', 'Smart Gatekeeping', 'GMB SEO Boost'],
+    highlights: ['Direct Review Redirection', 'Review Analytics', 'GMB SEO Boost'],
     features: [
       'Direct Review Redirection',
       // 'Negative Feedback Filter (Smart Gatekeeping)',
       // 'Auto-Prompt for Photo Upload',
       'Custom Business Logo Printing',
       'Zero App Download Required',
-      'Review-to-Discount Automation',
+      'Real-Time Review Analytics',
       'Dynamic Link Control',
       'Multi-Language Prompt Support',
       'Pre-written AI Review Suggestions',
@@ -229,7 +230,6 @@ export const PRODUCTS: Product[] = [
       'Precision Laser Engraving',
       'Heavyweight Luxury Feel',
       'Unbreakable & Scratch-Resistant',
-      'Hybrid Metal + PVC Shield Technology',
       'Instant 1-Tap Contact Save (.vcf)',
       'Dynamic Dashboard',
       'Multi-Link Digital Hub',
@@ -311,7 +311,7 @@ export const PRODUCTS: Product[] = [
       'Smart Profile Routing',
       'Digital Catalogue & Portfolio Viewer',
       'Direct Social Media Integration',
-      'Smart Review Filter Gatekeeping',
+      'Direct Google Review Redirection',
       'Review Capture',
       'Unified Tap Analytics',
       'Zero App Download Required',
@@ -337,7 +337,7 @@ export const PRODUCTS: Product[] = [
     tagline: 'Counter-top standee that turns tables & counters into 5-star generators.',
     description:
       'A 3D wooden & metallic standee that collects glowing Google reviews with a single tap.',
-    highlights: ['Dual Tap & Scan', 'Smart Rating Filter', 'GMB Ranking Boost'],
+    highlights: ['Dual Tap & Scan', 'Review Analytics', 'GMB Ranking Boost'],
     features: [
       '3D Wooden & Metallic Look',
       'Dual Tap & Scan (NFC + Large QR)',
@@ -345,7 +345,7 @@ export const PRODUCTS: Product[] = [
       'Waterproof & Scratch-Proof Coating',
       'Custom Brand Logo & Color Theme',
       'Instant Review Redirection (1-Tap)',
-      'Smart Rating Filter (Negative Review Gate)',
+      'Direct Google Review Redirection',
       'Pre-Written AI Review Suggestions',
       'Local SEO Boost (GMB Ranking)',
       'Dynamic Link Control (Zero Reprinting)',
@@ -425,7 +425,7 @@ export const PRODUCTS: Product[] = [
       '1-Tap Review + Follow + Chat',
       'Zero App Download Required',
       'Ergonomic Counter Angle',
-      'Smart Review Filter Gatekeeping',
+      'Direct Google Review Redirection',
       'Pre-Written AI Review Suggestions',
       'Dynamic Dashboard Control',
       'Multi-Language Support',
@@ -462,7 +462,7 @@ export const PRODUCTS: Product[] = [
       'Instant Multi-Action Launcher',
       'Zero App Download Required',
       'Ergonomics & Viewing Angle',
-      'Smart Rating Filter Gatekeeping',
+      'Direct Google Review Redirection',
       'Pre-Written AI Review Suggestions',
       'Dynamic Dashboard Control',
       'Multi-Language Support',
@@ -483,7 +483,7 @@ export const PRODUCTS: Product[] = [
     tagline: 'Wall or counter-mount review plate with acrylic mirror finish.',
     description:
       'A premium acrylic review plate that collects Google reviews everywhere your customers are.',
-    highlights: ['Wall & Counter Mount', 'Acrylic Mirror Finish', 'Smart Rating Filter'],
+    highlights: ['Wall & Counter Mount', 'Acrylic Mirror Finish', 'Direct Review Redirection'],
     features: [
       'Wall & Counter Mountable Design',
       'Premium Acrylic & Mirror Finish',
@@ -492,12 +492,12 @@ export const PRODUCTS: Product[] = [
       'High-Contrast Google Branding & Logo',
       'Instant Review Redirection (1-Tap)',
       'Dual NFC + Large QR Backup',
-      'Smart Rating Filter (Negative Review Gate)',
+      'Direct Google Review Redirection',
       'Pre-Written AI Review Suggestions',
       'Local Google SEO Boost',
       'Real-Time Analytics Dashboard',
       'Dynamic Link Control',
-      'Multi-Location Redirection',
+      'Review Analytics Dashboard',
       'Clear Visual "Tap Here" Indicator',
       'Zero App Installation Needed',
       'Anti-Tamper & Scratch Resistant',
@@ -506,6 +506,9 @@ export const PRODUCTS: Product[] = [
     ],
   },
 ];
+
+/** Customer-facing catalog: PVC-named product definitions are hidden centrally. */
+export const PRODUCTS: Product[] = filterCustomerVisibleProducts(ALL_PRODUCTS);
 
 export const CATEGORIES = [
   { id: 'all', label: 'All' },

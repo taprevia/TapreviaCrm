@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GOOGLE_REVIEW_URL_MESSAGE, isSupportedGoogleReviewUrl } from './google-review-url';
 
 /** Maximum accepted JSON body for Review Management settings writes. */
 export const REVIEW_SETTINGS_MAX_BODY_BYTES = 64 * 1024;
@@ -60,7 +61,10 @@ const urlSchema = z
   .string()
   .trim()
   .max(MAX_URL_LENGTH)
-  .refine(isSafeReviewDestination, 'Google Review URL must be an empty or valid http(s) URL without credentials');
+  .refine(
+    (value) => value === '' || isSupportedGoogleReviewUrl(value),
+    GOOGLE_REVIEW_URL_MESSAGE
+  );
 
 const categorySchema = z
   .string()
@@ -87,6 +91,7 @@ const generalPatchSchema = z
     enabled: z.boolean().optional(),
     googleReviewUrl: urlSchema.optional(),
     welcomeMessage: z.string().trim().max(MAX_WELCOME_LENGTH).optional(),
+    businessName: z.string().trim().max(120).optional(),
   })
   .strict();
 

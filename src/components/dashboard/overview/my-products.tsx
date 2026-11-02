@@ -55,7 +55,6 @@ const CATEGORY_ICON = {
 } as const;
 
 const MATERIAL_LABEL: Record<string, string> = {
-  pvc: 'PVC',
   metal: 'Metal',
   wooden: 'Wooden',
 };

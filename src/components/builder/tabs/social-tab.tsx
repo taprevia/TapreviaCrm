@@ -8,10 +8,8 @@
  * changing the destination never changes what's printed on the card.
  */
 
-import { useEffect, useState } from 'react';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { Badge, Input } from '@/components/ui';
-import { generateQRDataURL } from '@/utils/qr';
 import { useBuilder } from '../context';
 import { cn } from '@/lib/utils';
 
@@ -28,36 +26,6 @@ export function SocialDestinationTab() {
   const trimmed = redirectUrl.trim();
   const invalid = trimmed.length > 0 && !/^https?:\/\//i.test(trimmed);
 
-  const publicSlug = (draft.publicSlug ?? '').trim();
-  const alias = (draft.urlAlias ?? '').trim();
-  const slug = (draft.slug ?? '').trim();
-  // Human-friendly business public URL when allocated; legacy routes otherwise.
-  const publicPath = publicSlug
-    ? `/${publicSlug}`
-    : alias
-      ? `/profile/${alias}`
-      : slug
-        ? `/c/${slug}`
-        : null;
-
-  /* ── QR for the stable public URL ── */
-  const [qrDataUrl, setQrDataUrl] = useState('');
-  useEffect(() => {
-    if (!publicPath) {
-      setQrDataUrl('');
-      return;
-    }
-    let cancelled = false;
-    const url = `${window.location.origin}${publicPath}`;
-    generateQRDataURL({ url, foreground: '#000000', background: '#FFFFFF', width: 512, margin: 2 })
-      .then((generated) => {
-        if (!cancelled) setQrDataUrl(generated);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [publicPath]);
 
   return (
     <div className="space-y-5">
@@ -96,43 +64,21 @@ export function SocialDestinationTab() {
       </div>
 
       <div className="rounded-xl border border-line-subtle bg-bg p-4">
-        <p className="mb-3 text-sm font-medium text-ink-mute">Dynamic card URL (printed on the card)</p>
-        {publicPath ? (
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-lg bg-white p-2">
-              {qrDataUrl && (
-                // eslint-disable-next-line @next/next/no-img-element -- plain QR image
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code for ${publicPath}`}
-                  width={112}
-                  height={112}
-                  decoding="async"
-                  className="h-28 w-28"
-                />
-              )}
-            </div>
-            <div className="min-w-0 space-y-2">
-              <a
-                href={publicPath}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent-600/10 px-3 py-1.5 text-xs font-semibold text-accent-400 ring-1 ring-accent-600/20 transition-colors hover:bg-accent-600/20"
-              >
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                Open card URL ({publicPath})
-              </a>
-              <p className="text-xs leading-relaxed text-ink-faint">
-                This URL is stable and can be printed on the card. Changing the destination above
-                never changes this URL — only where it takes the visitor.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <p className="flex items-center gap-2 text-xs text-ink-faint">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            Set a profile URL to generate the card link and QR.
-          </p>
+        <p className="mb-2 text-sm font-medium text-ink-mute">Public experience</p>
+        <p className="text-xs leading-relaxed text-ink-faint">
+          Visitors are sent directly to your saved destination. The permanent NFC/QR
+          link printed on the physical product is managed by Taprevia admin.
+        </p>
+        {trimmed && !invalid && (
+          <a
+            href={trimmed}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent-400 hover:text-accent-300"
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            Open destination
+          </a>
         )}
       </div>
     </div>

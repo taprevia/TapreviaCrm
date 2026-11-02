@@ -74,6 +74,10 @@ function mergeValues(
         source.general?.welcomeMessage !== undefined
           ? source.general.welcomeMessage
           : base.general.welcomeMessage,
+      businessName:
+        source.general?.businessName !== undefined
+          ? source.general.businessName
+          : base.general.businessName,
     },
     content: {
       category:

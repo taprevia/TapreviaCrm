@@ -187,7 +187,7 @@ export async function createCustomerWithProducts(
         platforms: Array.isArray(input.platforms) ? input.platforms : undefined,
         notes: input.notes,
         assignedBy: args.assignedBy,
-        material: input.material ?? 'pvc',
+        material: input.material,
       });
       if (!result.ok) {
         await compensateCreated(user._id, [...created, result]);

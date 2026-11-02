@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
+import { checkRuntimeConfig, describeRuntimeConfigIssues } from '@/lib/runtime-config';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,6 +9,25 @@ export const dynamic = 'force-dynamic';
 const STARTED_AT = Date.now();
 
 export async function GET() {
+  const config = checkRuntimeConfig();
+  if (!config.ok) {
+    emitReviewEvent({ event: 'review.health.failure', errorCategory: 'config' });
+    return NextResponse.json(
+      {
+        ok: false,
+        status: 'unhealthy',
+        db: 'unknown',
+        config: 'invalid',
+        issues: config.issues.map((issue) => issue.name),
+        detail: describeRuntimeConfigIssues(config),
+        uptime: process.uptime(),
+        startedAt: STARTED_AT,
+        time: Date.now(),
+      },
+      { status: 503 }
+    );
+  }
+
   let db = 'down';
   try {
     const conn = await connectDB();
@@ -16,6 +37,10 @@ export async function GET() {
     }
   } catch {
     db = 'down';
+  }
+
+  if (db !== 'up') {
+    emitReviewEvent({ event: 'review.health.failure', errorCategory: 'health' });
   }
 
   const health =

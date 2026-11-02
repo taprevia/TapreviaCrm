@@ -6,7 +6,8 @@
  * the tabs, all draft/save logic in use-vcard-draft.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -20,6 +21,7 @@ import {
   Palette,
   SearchX,
   Share2,
+  MessageSquareText,
   ShoppingBag,
   Sparkles,
   User,
@@ -27,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Button, EmptyState } from '@/components/ui';
 import { useCardDraft, type UseCardDraftResult } from '@/lib/hooks/use-card-draft';
+import { resolveActiveBuilderTab } from '@/lib/builder-tab-state';
 import { BuilderContext, type BuilderContextValue } from './context';
 import { PreviewPanel, vcardDisplayName } from './preview-panel';
 import { resolveCardDisplayName } from '@/lib/card-display';
@@ -40,8 +43,11 @@ import { HoursTab } from './tabs/hours-tab';
 import { ThemeTab } from './tabs/theme-tab';
 import { ProductsTab } from './tabs/products-tab';
 import { ServicesTab } from './tabs/services-tab';
-import { ReviewAssistantTab } from './tabs/review-assistant-tab';
 import { SocialDestinationTab } from './tabs/social-tab';
+import {
+  PremiumReviewManagementTab,
+  ReviewManagementLinkTab,
+} from './tabs/review-management-link-tab';
 import { cn } from '@/lib/utils';
 
 /* ─── Tab rail config ───────────────────────────────────────────────────────── */
@@ -125,13 +131,6 @@ const TABS: readonly TabDef[] = [
     heading: 'Services',
     description: 'Services list shown on event-focused layouts (e.g. Panthevent).',
   },
-  {
-    key: 'review-assistant',
-    label: 'Review Assistant',
-    icon: Sparkles,
-    heading: 'Review Assistant',
-    description: 'Turn customer feedback into editable Google review drafts.',
-  },
 ];
 
 /* The card's experience is controlled by its allocated product `kind`.
@@ -148,13 +147,33 @@ const SOCIAL_TABS: readonly TabDef[] = [
 
 const REVIEW_TABS: readonly TabDef[] = [
   {
-    key: 'review-assistant',
-    label: 'Review Assistant',
-    icon: Sparkles,
-    heading: 'Review Assistant',
-    description: 'Turn customer feedback into editable Google review drafts.',
+    key: 'basic',
+    label: 'Details',
+    icon: FileText,
+    heading: 'Review card details',
+    description: 'Card identity and public URL. Review content is managed in Review Management.',
+  },
+  {
+    key: 'reviews',
+    label: 'Reviews',
+    icon: MessageSquareText,
+    heading: 'Reviews',
+    description: 'Open the Card-scoped Review Management configuration.',
   },
 ];
+
+/**
+ * Premium/profile cards keep the complete profile tab rail and gain one
+ * additional review entry. The entitlement check is product-aware and comes
+ * from the server; card.kind === 'review' is never used for this tab.
+ */
+const PREMIUM_REVIEW_TAB: TabDef = {
+  key: 'premium-reviews',
+  label: 'Google Reviews',
+  icon: MessageSquareText,
+  heading: 'Google Reviews',
+  description: 'Review Management status, destination and Card-scoped review page.',
+};
 
 /** Public URL shown in the builder header — human business public URL when
  *  allocated, kind-aware legacy route otherwise. */
@@ -162,12 +181,19 @@ function cardPublicPath(draft: {
   publicSlug?: string | null;
   kind?: string;
   urlAlias?: string;
+  redirectUrl?: string | null;
 }): string {
-  const publicSlug = (draft.publicSlug ?? '').trim();
-  if (publicSlug) return `/${publicSlug}`;
+  const kind = (draft.kind ?? 'profile').trim();
   const alias = (draft.urlAlias ?? '').trim();
-  if (!alias) return '/';
-  return draft.kind === 'review' ? `/review/${alias}` : `/profile/${alias}`;
+  const publicSlug = (draft.publicSlug ?? '').trim();
+  // One canonical customer-facing URL per product; never the permanent /r//c.
+  if (kind === 'review') return alias ? `/review/${alias}` : '/';
+  if (kind === 'social') {
+    const redirect = (draft.redirectUrl ?? '').trim();
+    return redirect ? redirect : '/';
+  }
+  if (publicSlug) return `/${publicSlug}`;
+  return alias ? `/profile/${alias}` : '/';
 }
 
 /* ─── Status chip ───────────────────────────────────────────────────────────── */
@@ -203,21 +229,65 @@ interface BuilderShellProps {
 
 export function BuilderShell({ id }: BuilderShellProps) {
   const builder = useCardDraft(id);
-  const [activeKey, setActiveKey] = useState<string>(TABS[0]!.key);
+  const [activeKey, setActiveKey] = useState<string>('');
+  const initialTabApplied = useRef(false);
 
   const kind = builder.draft?.kind ?? 'profile';
+  const [reviewEntitled, setReviewEntitled] = useState(false);
+
+  // The Google Reviews tab is entitlement-gated by the product-aware server
+  // check, not by card.kind. Fail closed on any fetch/error response.
+  useEffect(() => {
+    let cancelled = false;
+    if (kind !== 'profile') {
+      setReviewEntitled(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setReviewEntitled(false);
+    (async () => {
+      try {
+        const res = await fetch(`/api/cards/${encodeURIComponent(id)}/review-entitlement`);
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => null)) as { entitled?: unknown } | null;
+        if (!cancelled) setReviewEntitled(data?.entitled === true);
+      } catch {
+        if (!cancelled) setReviewEntitled(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, kind]);
+
   const tabs = useMemo(() => {
     if (kind === 'social') return SOCIAL_TABS;
     if (kind === 'review') return REVIEW_TABS;
+    if (kind === 'profile' && reviewEntitled) return [...TABS, PREMIUM_REVIEW_TAB];
     return TABS;
-  }, [kind]);
+  }, [kind, reviewEntitled]);
 
-  /* When the card's experience resolves, land on a tab that exists for that kind. */
+  /* Apply a legacy `?tab=` deep link once the product tabs are known. */
   useEffect(() => {
-    setActiveKey((prev) => (tabs.some((tab) => tab.key === prev) ? prev : tabs[0]!.key));
+    // Wait for the real draft/kind so a review product is not resolved against
+    // the temporary profile tab set on first paint.
+    if (!builder.draft || initialTabApplied.current || typeof window === 'undefined') return;
+    initialTabApplied.current = true;
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (!requested) return;
+    const resolved = resolveActiveBuilderTab(tabs, requested);
+    if (resolved) setActiveKey(resolved.key);
+  }, [tabs, builder.draft]);
+
+  /* When the card's experience resolves or changes, keep the selection valid.
+     Resolution happens during render below as well, so an asynchronous product
+     change can never dereference an undefined tab before this effect runs. */
+  useEffect(() => {
+    setActiveKey((prev) => resolveActiveBuilderTab(tabs, prev)?.key ?? '');
   }, [tabs]);
 
-  const activeTab = tabs.find((tab) => tab.key === activeKey) ?? tabs[0]!;
+  const activeTab = resolveActiveBuilderTab(tabs, activeKey);
 
   const contextValue = useMemo<BuilderContextValue | null>(() => {
     if (!builder.draft) return null;
@@ -274,6 +344,16 @@ export function BuilderShell({ id }: BuilderShellProps) {
   }
 
   /* ── Ready ── */
+  if (!activeTab) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="This product has no builder sections"
+        description="The assigned product experience is not configurable yet. Open My Products to review the assignment or contact Taprevia support."
+      />
+    );
+  }
+
   const renderActivePanel = () => {
     switch (activeTab.key) {
       case 'about':
@@ -294,8 +374,10 @@ export function BuilderShell({ id }: BuilderShellProps) {
         return <ProductsTab cardId={id} />;
       case 'services':
         return <ServicesTab />;
-      case 'review-assistant':
-        return <ReviewAssistantTab />;
+      case 'reviews':
+        return <ReviewManagementLinkTab cardId={id} />;
+      case 'premium-reviews':
+        return <PremiumReviewManagementTab cardId={id} />;
       case 'social-destination':
         return <SocialDestinationTab />;
       case 'basic':
@@ -332,7 +414,14 @@ export function BuilderShell({ id }: BuilderShellProps) {
             );
           })()}
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
+          <Link
+            href={`/dashboard/review-management?cardId=${encodeURIComponent(id)}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-transparent px-3 text-xs font-medium text-ink-mute transition-colors hover:border-accent-500/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50"
+          >
+            <MessageSquareText className="h-3.5 w-3.5" aria-hidden="true" />
+            Reviews
+          </Link>
           <SaveStatusChip saveStatus={builder.saveStatus} isDirty={builder.isDirty} />
           <Button size="sm" onClick={builder.save} disabled={!builder.isDirty || builder.saveStatus === 'saving'}>
             Save

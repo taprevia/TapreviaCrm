@@ -19,7 +19,8 @@ import Standee from '@/models/Standee';
 import UserProduct from '@/models/UserProduct';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import ReviewRotationEvent from '@/models/ReviewRotationEvent';
-import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
+import { getProductCapabilities } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { resolveProductTitle } from '@/lib/services/product-title';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -113,11 +114,9 @@ function emptyCounts(): ReviewAnalyticsCounts {
 }
 
 function grantsReview(slug: string | undefined): boolean {
-  const normalized = (slug ?? '').trim().toLowerCase();
-  if (!normalized) return false;
-  const productId = normalized.toUpperCase().replace(/-/g, '_');
-  if (!isProductId(productId)) return false;
-  return getProductCapabilities(productId as ProductId).includes('review_ai_suggestions');
+  const productId = resolveCanonicalProductId(slug);
+  if (!productId) return false;
+  return getProductCapabilities(productId).includes('review_ai_suggestions');
 }
 
 function parseCopySource(metadata: unknown): 'ai' | 'manual' | 'unknown' {

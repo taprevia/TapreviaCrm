@@ -18,7 +18,6 @@ import { getFixedStandeeProfiles } from '@/config/products';
 import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { isCardCompatible } from '@/lib/services/product-experience';
 import { Modal } from '@/components/ui/modal';
-import { formatPriceMinor } from '@/lib/format';
 import { downloadQrPdf } from '@/lib/qr-pdf';
 import { canonicalPublicBase } from '@/lib/public-base';
 import {
@@ -77,9 +76,14 @@ interface CardData {
   cardUid: string;
   slug: string;
   routeSlug?: string;
+  publicSlug?: string;
   urlAlias?: string;
   templateKey?: string;
   status: string;
+  canonicalPublicUrl?: string | null;
+  permanentEntryUrl?: string | null;
+  configurationStatus?: string;
+  routeSource?: string;
   stats?: { taps?: number };
   createdAt: string;
 }
@@ -109,6 +113,9 @@ interface StandeeData {
   routeSlug?: string;
   publicSlug?: string;
   productKey?: string;
+  canonicalPublicUrl?: string | null;
+  permanentEntryUrl?: string | null;
+  configurationStatus?: string;
   maxProfiles?: number;
   fixedProfiles?: string[];
   // Guarded defensively — legacy/malformed docs may lack these subdocs.
@@ -321,6 +328,13 @@ export default function AdminUserDetailPage() {
     return kind === 'panel'
       ? `${PUBLIC_BASE_URL}/qr/${s.panelQr?.qrId ?? ''}`
       : `${PUBLIC_BASE_URL}/qr/${s.socialQrs?.[index]?.qrId ?? ''}`;
+  };
+
+  const absolutePublicUrl = (path: string | null | undefined) => {
+    const value = (path ?? '').trim();
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) return value;
+    return PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${value}` : value;
   };
 
   const handleCopyQr = async (url: string, key: string) => {
@@ -635,13 +649,13 @@ export default function AdminUserDetailPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {pdfError && (
-        <p className="rounded-lg bg-bad/10 px-3 py-2 text-xs text-bad ring-1 ring-bad/20">{pdfError}</p>
+        <p className="rounded-lg bg-bad/10 px-3 py-2 text-xs text-red-300 ring-1 ring-bad/20">{pdfError}</p>
       )}
 
       <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <Button variant="outline" size="sm" onClick={() => router.push('/admin/users')} className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500 shrink-0" title="Back to users">
+            <Button variant="outline" size="sm" onClick={() => router.push('/admin/users')} className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500 shrink-0" title="Back to users">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             {profile?.personalInfo?.avatarUrl ? (
@@ -659,13 +673,13 @@ export default function AdminUserDetailPage() {
                 <Badge variant={user.role === 'admin' ? 'warning' : 'default'} className={user.role === 'admin' ? 'bg-warn/15 text-warn ring-line-subtle' : 'ring-line-subtle'}>
                   {user.role}
                 </Badge>
-                <Badge variant={user.status === 'active' ? 'success' : 'danger'} className={user.status === 'active' ? 'bg-ok/15 text-ok ring-line-subtle' : 'bg-bad/15 text-bad ring-line-subtle'}>
+                <Badge variant={user.status === 'active' ? 'success' : 'danger'} className={user.status === 'active' ? 'bg-ok/15 text-emerald-300 ring-line-subtle' : 'bg-bad/15 text-bad ring-line-subtle'}>
                   {user.status}
                 </Badge>
               </div>
             </div>
           </div>
-          <Button variant="outline" onClick={handleStatusToggle} className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500 shrink-0">
+          <Button variant="outline" onClick={handleStatusToggle} className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500 shrink-0">
             {user.status === 'active' ? (
               <>
                 <ShieldOff className="mr-2 h-4 w-4 text-warn" />
@@ -698,7 +712,7 @@ export default function AdminUserDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Profile Information</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Profile Information</h2>
           <div className="flex items-center gap-3">
             {profile?.personalInfo?.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -715,7 +729,7 @@ export default function AdminUserDetailPage() {
               <p className="truncate text-xs text-ink-mute">{profile?.personalInfo?.jobTitle || 'Job title not available'}</p>
             </div>
           </div>
-          <dl className="mt-4 space-y-2 text-sm">
+          <div className="mt-4 space-y-2 text-sm">
             <div className="flex items-center gap-2 text-ink-mute">
               <Building className="h-4 w-4 shrink-0 text-ink-faint" />
               <span className="truncate" title={profile?.companyInfo?.companyName || undefined}>
@@ -736,11 +750,11 @@ export default function AdminUserDetailPage() {
                 </a>
               </div>
             )}
-          </dl>
+          </div>
         </Card>
 
         <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Account Details</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Account Details</h2>
           <dl className="space-y-2 text-sm">
             <div className="flex items-center justify-between gap-3">
               <dt className="flex items-center gap-2 text-ink-mute"><Mail className="h-4 w-4 text-ink-faint" />Email</dt>
@@ -761,7 +775,7 @@ export default function AdminUserDetailPage() {
             <div className="flex items-center justify-between gap-3">
               <dt className="text-ink-mute">Account status</dt>
               <dd>
-                <Badge variant={user.status === 'active' ? 'success' : 'danger'} className={user.status === 'active' ? 'bg-ok/15 text-ok ring-line-subtle' : 'bg-bad/15 text-bad ring-line-subtle'}>
+                <Badge variant={user.status === 'active' ? 'success' : 'danger'} className={user.status === 'active' ? 'bg-ok/15 text-emerald-300 ring-line-subtle' : 'bg-bad/15 text-bad ring-line-subtle'}>
                   {user.status}
                 </Badge>
               </dd>
@@ -770,30 +784,30 @@ export default function AdminUserDetailPage() {
         </Card>
 
         <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-1">
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-1">
             <TrendingUp className="inline h-4 w-4 mr-1" />
             Analytics
-          </h3>
-          <p className="mb-4 truncate text-xs text-ink-faint" title={cards[0]?.slug ? `/c/${cards[0].slug}` : undefined}>
-            {cards[0]?.slug ? `Newest card: /c/${cards[0].slug}` : 'No NFC card assigned'}
+          </h2>
+          <p className="mb-4 truncate text-xs text-ink-faint" title={cards[0]?.canonicalPublicUrl ?? undefined}>
+            {cards[0]?.canonicalPublicUrl ? `Newest card: ${cards[0].canonicalPublicUrl}` : 'No NFC card assigned'}
           </p>
           {analytics ? (
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg bg-accent-600/15 p-2.5 text-center">
                 <p className="text-xl font-bold text-accent-400">{analytics.totalTaps}</p>
-                <p className="text-[10px] leading-tight text-ink-mute">Taps (newest card)</p>
+                <p className="text-[10px] leading-tight text-ink">Taps (newest card)</p>
               </div>
               <div className="rounded-lg bg-ok/15 p-2.5 text-center">
                 <p className="text-xl font-bold text-ok">{analytics.uniqueVisitors}</p>
-                <p className="text-[10px] leading-tight text-ink-mute">Unique IPs (latest 500)</p>
+                <p className="text-[10px] leading-tight text-ink">Unique IPs (latest 500)</p>
               </div>
               <div className="rounded-lg bg-warn/15 p-2.5 text-center">
                 <p className="text-xl font-bold text-warn">{analytics.linkClicks}</p>
-                <p className="text-[10px] leading-tight text-ink-mute">Link Clicks (newest card)</p>
+                <p className="text-[10px] leading-tight text-ink">Link Clicks (newest card)</p>
               </div>
               <div className="rounded-lg bg-bad/15 p-2.5 text-center">
                 <p className="text-xl font-bold text-bad">{analytics.vcardDownloads}</p>
-                <p className="text-[10px] leading-tight text-ink-mute">Lead Records (legacy)</p>
+                <p className="text-[10px] leading-tight text-ink">Lead Records (legacy)</p>
               </div>
             </div>
           ) : (
@@ -811,7 +825,7 @@ export default function AdminUserDetailPage() {
 
       <Card className="p-5 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">NFC Cards ({cards.length})</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">NFC Cards ({cards.length})</h2>
           <span className="text-[11px] text-ink-faint">Physical cards assigned to this customer</span>
         </div>
         {cards.length ? (
@@ -824,7 +838,7 @@ export default function AdminUserDetailPage() {
                 c.templateKey;
               const record = userProductForCard(c._id);
               return (
-                <div key={c._id} className="rounded-xl border border-line-subtle bg-field/30 p-4">
+                <div key={c._id} className="min-w-0 rounded-xl border border-line-subtle bg-field/30 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-ink" title={templateName || undefined}>
@@ -836,7 +850,7 @@ export default function AdminUserDetailPage() {
                       variant={c.status === 'active' ? 'success' : c.status === 'suspended' ? 'danger' : 'default'}
                       className={
                         c.status === 'active'
-                          ? 'bg-ok/15 text-ok ring-line-subtle'
+                          ? 'bg-ok/15 text-emerald-300 ring-line-subtle'
                           : c.status === 'suspended'
                             ? 'bg-bad/15 text-bad ring-line-subtle'
                             : 'bg-field text-ink-faint ring-line-subtle'
@@ -858,7 +872,13 @@ export default function AdminUserDetailPage() {
                     ) : (
                       <div className="flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-lg border border-dashed border-line-subtle px-2 text-center">
                         <QrCode className="h-5 w-5 text-ink-faint" aria-hidden="true" />
-                        <span className="mt-1 text-[10px] leading-tight text-ink-faint">Permanent QR unavailable</span>
+                        <span className="mt-1 text-[10px] leading-tight text-ink-faint">
+                          {!PUBLIC_BASE_URL
+                            ? 'Public base URL not configured'
+                            : c.routeSlug || c.publicSlug || c.urlAlias || c.slug
+                              ? 'QR unavailable'
+                              : 'No public route'}
+                        </span>
                       </div>
                     )}
                     <dl className="min-w-0 flex-1 space-y-1 text-xs">
@@ -867,20 +887,32 @@ export default function AdminUserDetailPage() {
                         <dd className="truncate font-mono text-ink" title={c.cardUid || undefined}>{c.cardUid || 'Not available'}</dd>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <dt className="text-ink-mute">Slug</dt>
+                        <dt className="text-ink-mute">Public</dt>
                         <dd className="truncate">
-                          {c.slug ? (
-                            <a href={`/c/${c.slug}`} target="_blank" rel="noopener noreferrer" className="font-mono text-accent-400 hover:underline">/c/{c.slug}</a>
+                          {c.canonicalPublicUrl ? (
+                            <a href={c.canonicalPublicUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-accent-400 hover:underline">
+                              {c.canonicalPublicUrl}
+                            </a>
                           ) : (
-                            <span className="text-ink-faint">Not available</span>
+                            <span className="text-ink-faint">Setup required</span>
                           )}
                         </dd>
                       </div>
-                      {c.routeSlug && (
+                      {c.permanentEntryUrl && (
                         <div className="flex items-center justify-between gap-2">
-                          <dt className="text-ink-mute">Route</dt>
-                          <dd className="truncate">
-                            <a href={`/r/${c.routeSlug}`} target="_blank" rel="noopener noreferrer" className="font-mono text-accent-400 hover:underline">/r/{c.routeSlug}</a>
+                          <dt className="text-ink-mute">Permanent</dt>
+                          <dd className="flex min-w-0 items-center gap-1.5">
+                            <a href={c.permanentEntryUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-accent-400 hover:underline">
+                              {c.permanentEntryUrl}
+                            </a>
+                            <button
+                              type="button"
+                              title="Copy permanent URL"
+                              onClick={() => handleCopyQr(absolutePublicUrl(c.permanentEntryUrl), `perm:${c._id}`)}
+                              className="shrink-0 text-ink-mute transition-colors hover:text-ink"
+                            >
+                              {copiedQrId === `perm:${c._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
+                            </button>
                           </dd>
                         </div>
                       )}
@@ -895,12 +927,12 @@ export default function AdminUserDetailPage() {
 
                   <div className="mt-3 flex gap-2">
                     <a
-                      href={c.routeSlug ? `/r/${c.routeSlug}` : c.slug ? `/c/${c.slug}` : '#'}
+                      href={c.canonicalPublicUrl ?? '#'}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={c.slug || c.routeSlug ? 'flex-1' : 'pointer-events-none flex-1 opacity-50'}
+                      className={c.canonicalPublicUrl ? 'flex-1' : 'pointer-events-none flex-1 opacity-50'}
                     >
-                      <Button variant="outline" size="sm" className="w-full border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500">
+                      <Button variant="outline" size="sm" className="w-full border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500">
                         <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                         View Public Profile
                       </Button>
@@ -909,7 +941,7 @@ export default function AdminUserDetailPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                        className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                         onClick={() => openReplaceCard(record)}
                         title="Replace physical card"
                       >
@@ -927,7 +959,7 @@ export default function AdminUserDetailPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setShowAllCards((v) => !v)}
-                  className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                  className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                 >
                   {showAllCards ? 'Show Less' : `View More (${remainingCardCount(cards.length)} remaining)`}
                 </Button>
@@ -944,15 +976,15 @@ export default function AdminUserDetailPage() {
 
       <Card className="p-6 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">
             <QrCode className="inline h-4 w-4 mr-1" />
             Standee QR Codes ({standees.length})
-          </h3>
+          </h2>
           <Button
             variant="outline"
             size="sm"
             onClick={() => openAssignModal(true)}
-            className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+            className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
           >
             <Plus className="mr-1.5 h-3.5 w-3.5 text-accent-400" />
             Add Standee
@@ -960,7 +992,7 @@ export default function AdminUserDetailPage() {
         </div>
 
         {!PUBLIC_BASE_URL && (
-          <p className="mb-4 rounded-lg bg-bad/10 px-3 py-2 text-xs text-bad ring-1 ring-bad/20">
+          <p className="mb-4 rounded-lg bg-bad/10 px-3 py-2 text-xs text-red-300 ring-1 ring-bad/20">
             Public base URL is not configured. Standee QR links cannot be generated.
           </p>
         )}
@@ -988,15 +1020,47 @@ export default function AdminUserDetailPage() {
                   </button>
                 </div>
 
+                {standee.permanentEntryUrl && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-ink-mute uppercase tracking-wide">Permanent</span>
+                    <a href={standee.permanentEntryUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-accent-400 hover:underline">
+                      {standee.permanentEntryUrl}
+                    </a>
+                    <button
+                      type="button"
+                      title="Copy permanent URL"
+                      onClick={() => handleCopyQr(absolutePublicUrl(standee.permanentEntryUrl), `standee-perm:${standee._id}`)}
+                      className="text-ink-mute transition-colors hover:text-ink"
+                    >
+                      {copiedQrId === `standee-perm:${standee._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                )}
+                {standee.canonicalPublicUrl && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-ink-mute uppercase tracking-wide">Public</span>
+                    <a href={standee.canonicalPublicUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-accent-400 hover:underline">
+                      {standee.canonicalPublicUrl}
+                    </a>
+                    <button
+                      type="button"
+                      title="Copy public URL"
+                      onClick={() => handleCopyQr(absolutePublicUrl(standee.canonicalPublicUrl), `pub:${standee._id}`)}
+                      className="text-ink-mute transition-colors hover:text-ink"
+                    >
+                      {copiedQrId === `pub:${standee._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                )}
                 {standee.panelQr ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-ink-mute uppercase tracking-wide mr-1">Panel</span>
                     <div className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
                       <span className="font-mono text-xs text-accent-400">{standee.panelQr.qrId}</span>
-                      <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'panel'), standee.panelQr!.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                      <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'panel'), standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                         {copiedQrId === standee.panelQr!.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
-                      <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                      <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -1012,10 +1076,10 @@ export default function AdminUserDetailPage() {
                       <div key={qr.qrId} className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
                         <span className="text-xs font-medium text-ink">{qr.label || qr.platform}</span>
                         <span className="font-mono text-xs text-ink-faint">{qr.qrId}</span>
-                        <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'social', index), qr.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                        <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'social', index), qr.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                           {copiedQrId === qr.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                         </button>
-                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="text-ink-mute hover:text-ink transition-colors">
+                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                           <Download className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -1030,15 +1094,15 @@ export default function AdminUserDetailPage() {
 
       <Card className="p-6 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">
             <Package className="inline h-4 w-4 mr-1" />
             Assigned Products ({purchasedProducts.filter((p) => p.status === 'active').length} active)
-          </h3>
+          </h2>
           <Button
             variant="outline"
             size="sm"
             onClick={() => openAssignModal()}
-            className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+            className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
           >
             <ShoppingCart className="mr-1.5 h-3.5 w-3.5 text-accent-400" />
             Assign Product
@@ -1062,7 +1126,7 @@ export default function AdminUserDetailPage() {
                 : 'bg-field text-ink-faint ring-line-subtle';
               return (
                 <div key={record._id} className={`rounded-xl border border-line-subtle p-4 ${record.status === 'removed' ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-600/15 ring-1 ring-accent-500/25">
                         <Package className="h-4 w-4 text-accent-400" />
@@ -1070,19 +1134,19 @@ export default function AdminUserDetailPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-ink truncate">{(record.productTitle ?? item?.name) || 'Unknown product'}</p>
                         <p className="text-xs text-ink-mute">
-                          {record.quantity} × {formatPriceMinor(record.unitPriceMinor, item?.currency)}
+                          Qty {record.quantity}
                           {record.cardId && ' · card bound'}
                           {record.standeeId && ' · QR codes generated'}
                           {' · '}{new Date(record.createdAt).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <Badge variant="default" className={categoryClass}>{typeLabel}</Badge>
                       <Badge
                         variant={record.status === 'active' ? 'success' : 'default'}
                         className={record.status === 'active'
-                          ? 'bg-ok/15 text-ok ring-line-subtle'
+                          ? 'bg-ok/15 text-emerald-300 ring-line-subtle'
                           : 'bg-field text-ink-faint ring-line-subtle'}
                       >
                         {record.status === 'active' ? 'Assigned' : 'Removed'}
@@ -1121,7 +1185,7 @@ export default function AdminUserDetailPage() {
 
       {profile?.socialLinks && profile.socialLinks.length > 0 && (
         <Card className="p-6 bg-surface border-transparent ring-1 ring-line-subtle">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Social Links</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Social Links</h2>
           <div className="flex flex-wrap gap-2">
             {profile.socialLinks.map((link, i) => (
               <a
@@ -1142,7 +1206,7 @@ export default function AdminUserDetailPage() {
 
       <Card className="p-6 bg-surface border-transparent ring-1 ring-line-subtle">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">Inquiries — legacy leads ({leads.length})</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider">Inquiries — legacy leads ({leads.length})</h2>
         </div>
         {leads.length === 0 ? (
           <div className="text-center py-8 text-ink-faint">
@@ -1180,7 +1244,7 @@ export default function AdminUserDetailPage() {
 
       {analytics?.recentActivity && analytics.recentActivity.length > 0 && (
         <Card className="p-6 bg-surface border-transparent ring-1 ring-line-subtle">
-          <h3 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Recent Activity — newest card</h3>
+          <h2 className="text-sm font-semibold text-ink-faint uppercase tracking-wider mb-4">Recent Activity — newest card</h2>
           <div className="space-y-2">
             {analytics.recentActivity.slice(0, 10).map((activity, i) => (
               <div key={i} className="flex items-center justify-between rounded-lg bg-field px-4 py-2.5 text-sm">
@@ -1190,7 +1254,7 @@ export default function AdminUserDetailPage() {
                     className={activity.action === 'tap'
                       ? 'bg-field text-ink-faint ring-line-subtle'
                       : activity.action === 'link_click'
-                      ? 'bg-ok/15 text-ok ring-line-subtle'
+                      ? 'bg-ok/15 text-emerald-300 ring-line-subtle'
                       : 'bg-field text-ink-faint ring-line-subtle'}
                   >
                     {activity.action}
@@ -1276,7 +1340,7 @@ export default function AdminUserDetailPage() {
                   onClick={handlePreviewLinkClick}
                   className="block"
                 >
-                  <Button variant="outline" className="w-full border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong">
+                  <Button variant="outline" className="w-full border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong">
                     <Pencil className="mr-2 h-4 w-4" />
                     Edit card
                   </Button>
@@ -1288,7 +1352,7 @@ export default function AdminUserDetailPage() {
                   onClick={handlePreviewLinkClick}
                   className="block"
                 >
-                  <Button variant="outline" className="w-full border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong">
+                  <Button variant="outline" className="w-full border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong">
                     <ExternalLink className="mr-2 h-4 w-4" />
                     View card
                   </Button>
@@ -1339,9 +1403,7 @@ export default function AdminUserDetailPage() {
                 {catalogItems.map((item) => {
                   const name = item.name || 'Unnamed product';
                   const typeLabel = catalogTypeLabel(item);
-                  const optionLabel = Number.isFinite(item.priceMinor)
-                    ? `${name} — ${formatPriceMinor(item.priceMinor, item.currency)} (${typeLabel})`
-                    : `${name} (${typeLabel})`;
+                  const optionLabel = `${name} (${typeLabel})`;
                   return (
                     <option key={item._id} value={item._id}>
                       {optionLabel}

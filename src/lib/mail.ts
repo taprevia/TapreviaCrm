@@ -95,7 +95,7 @@ export function resendTransport(): MailTransport {
         const missing = [apiKey ? '' : 'RESEND_API_KEY', from ? '' : 'EMAIL_FROM']
           .filter(Boolean)
           .join(', ');
-        console.error(`[mail] Missing ${missing} — password reset email to ${mail.to} was NOT sent.`);
+        console.error(`[mail] Missing ${missing} — password reset email was NOT sent.`);
         return { ok: false };
       }
 
@@ -108,13 +108,13 @@ export function resendTransport(): MailTransport {
           text: mail.text,
         });
         if (error) {
-          console.error(`[mail] Resend rejected password reset to ${mail.to}: ${error.name} ${error.message}`);
+          console.error(`[mail] Resend rejected password reset email: ${error.name} ${error.message}`);
           return { ok: false };
         }
         return { ok: true };
       } catch (error) {
         console.error(
-          `[mail] Resend send threw for ${mail.to}:`,
+          '[mail] Resend send threw for password reset email:',
           error instanceof Error ? error.message : String(error)
         );
         return { ok: false };
@@ -131,7 +131,7 @@ export async function sendPasswordResetEmail(
   const message = buildPasswordResetMail(to, resetToken);
 
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[mail:dev] password reset for ${to}: ${resetUrlFor(resetToken)}`);
+    console.log('[mail:dev] password reset email rendered; recipient and reset token redacted.');
     return { ok: true, transport: 'console', message };
   }
 
@@ -140,6 +140,59 @@ export async function sendPasswordResetEmail(
     // depends on the generic response reaching the customer regardless.
     console.error(
       `[mail] Transport send threw for ${message.to}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+    return { ok: false };
+  });
+  return { ok: result.ok, transport: 'resend', message };
+}
+
+/** OTP email template — the code is supplied at send time and never logged. */
+export function buildPasswordResetOtpMail(to: string, otp: string): MailMessage {
+  return {
+    to,
+    subject: 'Taprevia — Password Reset Verification Code',
+    text: [
+      'Hello,',
+      '',
+      'We received a request to reset your Taprevia account password.',
+      '',
+      'Your verification code is:',
+      '',
+      otp,
+      '',
+      'This code expires in 10 minutes.',
+      '',
+      'If you did not request a password reset, you can ignore this email.',
+      '',
+      'For your security, never share this verification code.',
+      '',
+      'Taprevia Technologies',
+    ].join('\n'),
+  };
+}
+
+/**
+ * Send an OTP email through the existing transport. In non-production the
+ * message is suppressed entirely (there is no development OTP log, because an
+ * OTP must never reach logs). Unit/browser tests inject a transport or point
+ * the Resend SDK at a loopback `RESEND_BASE_URL`.
+ */
+export async function sendPasswordResetOtpEmail(
+  to: string,
+  otp: string,
+  transport: MailTransport = resendTransport()
+): Promise<SendMailResult> {
+  const message = buildPasswordResetOtpMail(to, otp);
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('[mail:dev] password-reset OTP email suppressed outside production');
+    return { ok: false, transport: 'console', message };
+  }
+
+  const result = await transport.send(message).catch((error: unknown) => {
+    console.error(
+      '[mail] OTP transport threw for password-reset challenge:',
       error instanceof Error ? error.message : String(error)
     );
     return { ok: false };

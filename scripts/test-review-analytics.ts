@@ -467,6 +467,30 @@ async function main() {
       });
       ok(success.ok, `${alias} generation success failed`);
     }
+    let shortPrompt = '';
+    const shortSuccess = await generateReviewSuggestion({
+      alias: 'grc-4d7', feedback: 'good exp', topics: [], language: 'English', length: 'short', ip: '10.88.1.20', userAgent: 'test',
+      complet: async (input) => {
+        shortPrompt = `${input.system}\n${input.user}`;
+        return { text: 'Good experience.', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } };
+      },
+    });
+    ok(shortSuccess.ok, 'short genuine input was rejected by the AI service');
+    ok(shortPrompt.includes('good exp'), 'short input was not passed to the provider');
+    ok(shortPrompt.includes('English') && /short/i.test(shortPrompt), 'language/length were not passed to the provider');
+    ok(/friendly|professional|casual|simple/i.test(shortPrompt), 'writing style was not passed to the provider');
+
+    let hindiPrompt = '';
+    const hindiSuccess = await generateReviewSuggestion({
+      alias: 'grc-4d7', feedback: 'अच्छा अनुभव', topics: [], language: 'Hindi', length: 'short', ip: '10.88.1.21', userAgent: 'test',
+      complet: async (input) => {
+        hindiPrompt = `${input.system}\n${input.user}`;
+        return { text: 'अच्छा अनुभव।', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } };
+      },
+    });
+    ok(hindiSuccess.ok && hindiSuccess.review === 'अच्छा अनुभव।', 'Hindi generation failed');
+    ok(hindiPrompt.includes('Hindi') && hindiPrompt.includes('अच्छा अनुभव'), 'Hindi language/input missing from provider prompt');
+
     const empty = await generateReviewSuggestion({
       alias: 'grc-4d7', feedback: 'The coffee was good and the staff were very kind.', topics: [], ip: '10.88.1.2', userAgent: 'test',
       complet: async () => ({ text: '   ', usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 } }),
@@ -501,9 +525,9 @@ async function main() {
     });
     ok(!standeeFailed.ok && standeeFailed.code === 'UNAVAILABLE', 'Standee provider failure succeeded');
 
-    const invalidCard = await api('POST', '/api/public/reviews/grc-4d7/generate', { body: { feedback: 'short' } });
+    const invalidCard = await api('POST', '/api/public/reviews/grc-4d7/generate', { body: { feedback: 'a' } });
     ok(invalidCard.status === 400, `Card invalid input ${invalidCard.status}`);
-    const invalidStandee = await api('POST', '/api/public/standee-reviews/standee-4d7/generate', { body: { feedback: 'short' } });
+    const invalidStandee = await api('POST', '/api/public/standee-reviews/standee-4d7/generate', { body: { feedback: 'a' } });
     ok(invalidStandee.status === 400, `Standee invalid input ${invalidStandee.status}`);
   });
 

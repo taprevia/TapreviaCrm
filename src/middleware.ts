@@ -141,6 +141,16 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
   const verified = await verifyTokenEdge(token);
 
   if (!verified) {
+    // API clients expect a machine-readable 401, not an HTML login redirect.
+    if (pathname.startsWith('/api/')) {
+      const response = NextResponse.json(
+        { error: 'Unauthorized', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+      response.cookies.set('token', '', { maxAge: 0, path: '/' });
+      response.headers.set('x-request-id', requestId);
+      return response;
+    }
     // Invalid token - clear cookie and redirect to login
     const response = NextResponse.redirect(new URL('/login', request.url));
     response.cookies.set('token', '', { maxAge: 0, path: '/' });

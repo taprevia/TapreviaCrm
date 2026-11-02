@@ -5,8 +5,10 @@ import { fail, ok } from '@/lib/api';
 import UserProduct from '@/models/UserProduct';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
-import { PRODUCT_CATALOG, type ProductId, isProductId } from '@/config/products';
+import { PRODUCT_CATALOG, type ProductId } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { resolveProductTitle } from '@/lib/services/product-title';
+import { resolveCardPreview, resolveStandeePreview, type ProductPreview } from '@/lib/services/product-preview';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,12 +60,10 @@ export async function GET(request: NextRequest) {
     );
 
     // Enrich each assignment with product instance data.
-    const enriched = assignments.map((assignment: Record<string, unknown>) => {
+    const enriched = await Promise.all(assignments.map(async (assignment: Record<string, unknown>) => {
         const catalog = assignment.catalogProductId as Record<string, unknown> | null;
         const slug = (catalog?.slug as string) ?? '';
-        const productId: ProductId | null = isProductId(slug?.toUpperCase()?.replace(/-/g, '_'))
-          ? (slug.toUpperCase().replace(/-/g, '_') as ProductId)
-          : null;
+        const productId: ProductId | null = resolveCanonicalProductId(slug);
         const productDef = productId ? PRODUCT_CATALOG[productId] : null;
 
         let instance: Record<string, unknown> | null = null;
@@ -89,6 +89,20 @@ export async function GET(request: NextRequest) {
         }
 
         const routeSlug = (instance?.routeSlug as string | undefined) ?? '';
+
+        let preview: ProductPreview;
+        if (instanceType === 'card' && instance) {
+          preview = await resolveCardPreview(instance as never);
+        } else if (instanceType === 'standee' && instance) {
+          preview = await resolveStandeePreview(instance as never);
+        } else {
+          preview = {
+            ok: false,
+            kind: instanceType === 'standee' ? 'standee' : 'card',
+            reason: 'missing-instance',
+            message: 'This product has not been assigned a physical instance yet.',
+          };
+        }
 
         return {
           assignmentId: assignment._id,
@@ -167,8 +181,9 @@ export async function GET(request: NextRequest) {
           quantity: assignment.quantity,
           material: assignment.material,
           createdAt: assignment.createdAt,
+          preview,
         };
-      });
+      }));
 
     return ok({ products: enriched });
   } catch (error) {

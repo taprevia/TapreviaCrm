@@ -6,7 +6,8 @@ import { check } from '@/lib/rate-limit';
 import { connectDB } from '@/lib/db';
 import { readSafeReviewBody } from '@/lib/services/review-public-guard';
 import { resolveStandeeReviewHost } from '@/lib/services/review-standee-settings';
-import { generateReviewForHost } from '@/lib/services/review-generate';
+import { generateLibrarySuggestion, generateReviewForHost, tenantHasAiConfiguration } from '@/lib/services/review-generate';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 import { reviewPreferredLengthSchema } from '@/lib/validation/card';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ const bodySchema = z.object({
   feedback: z
     .string()
     .trim()
-    .min(20, 'Tell us a little more about your experience.')
+    .min(3, 'Add at least 3 characters about your experience.')
     .max(5000, 'Feedback is too long.'),
   topics: z.array(z.string().trim().min(1).max(60)).max(12).optional(),
   language: z.string().trim().min(1).max(40).optional(),
@@ -51,27 +52,45 @@ export async function POST(request: NextRequest, { params }: Params) {
     const host = await resolveStandeeReviewHost(params.slug);
     if (!host) return fail(404, 'NOT_FOUND', 'Review assistant is not available');
 
-    const result = await generateReviewForHost({
-      ownerId: host.ownerId,
-      hostType: 'standee',
-      hostId: host.standeeId,
-      config: host.config,
-      feedback: parsed.data.feedback,
-      topics: parsed.data.topics ?? [],
-      language: parsed.data.language,
-      length: parsed.data.length,
-      ip,
-      userAgent,
-    });
+    const aiConfigured = await tenantHasAiConfiguration(host.ownerId);
+    const result = aiConfigured
+      ? await generateReviewForHost({
+          ownerId: host.ownerId,
+          hostType: 'standee',
+          hostId: host.standeeId,
+          config: {
+            ...host.config,
+            businessName: (host.config.businessName || host.businessName || '').trim(),
+          },
+          feedback: parsed.data.feedback,
+          topics: parsed.data.topics ?? [],
+          language: parsed.data.language,
+          length: parsed.data.length,
+          ip,
+          userAgent,
+        })
+      : await generateLibrarySuggestion({
+          businessName: host.businessName,
+          config: host.config,
+          feedback: parsed.data.feedback,
+          topics: parsed.data.topics ?? [],
+          language: parsed.data.language,
+          length: parsed.data.length,
+          tenantId: host.ownerId,
+          hostType: 'standee',
+        });
 
     if (!result.ok) {
       if (result.code === 'NOT_FOUND') return fail(404, 'NOT_FOUND', result.message);
+      if (result.code === 'NO_MATCHING_REVIEW_TEMPLATE') return fail(404, 'NO_MATCHING_REVIEW_TEMPLATE', result.message);
+      if (result.code === 'AI_NOT_CONFIGURED') return fail(503, 'AI_NOT_CONFIGURED', result.message);
       if (result.code === 'UNAVAILABLE') return fail(503, 'UNAVAILABLE', result.message);
       return fail(429, 'LIMIT_REACHED', result.message);
     }
 
-    return ok({ review: result.review });
+    return ok({ review: result.review, engine: result.engine });
   } catch (error) {
+    emitReviewEvent({ event: 'review.generation.failure', hostType: 'standee', outcome: 'failure', errorCategory: 'internal' });
     console.error('Standee review generate POST error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Could not generate a review draft');
   }

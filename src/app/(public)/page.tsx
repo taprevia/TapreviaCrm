@@ -30,7 +30,6 @@ export default function HomePage() {
     name: 'Taprevia',
     description: 'Premium NFC Digital Business Cards & Standees in India',
     url: 'https://taprevia.com',
-    priceRange: '₹399 - ₹1499',
     areaServed: 'IN',
     hasOfferCatalog: {
       '@type': 'OfferCatalog',
@@ -44,8 +43,6 @@ export default function HomePage() {
           image: `https://taprevia.com${p.image}`,
           offers: {
             '@type': 'Offer',
-            priceCurrency: 'INR',
-            price: p.price,
             availability: 'https://schema.org/InStock',
           },
         },

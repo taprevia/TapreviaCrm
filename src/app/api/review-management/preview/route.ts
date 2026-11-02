@@ -7,10 +7,7 @@ import Standee from '@/models/Standee';
 import { getReviewProductForUser } from '@/lib/services/review-product-eligibility';
 import { getSavedReviewSettings } from '@/lib/services/review-management-settings';
 import { resolveReviewSettings } from '@/lib/services/review-settings-resolver';
-import {
-  resolveStandeeEffectiveReviewSettings,
-  resolveStandeeSettingsSource,
-} from '@/lib/services/review-standee-settings';
+import { resolveStandeeEffectiveReviewSettings } from '@/lib/services/review-standee-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,15 +73,14 @@ export async function GET(request: NextRequest) {
       } | null;
       if (!standee) return fail(404, 'NOT_FOUND', 'Standee not found');
 
-      const source = resolveStandeeSettingsSource(
-        standee.reviewSettingsSource,
-        saved.saved
-      );
+      // Use the product projection's effective source so Central ON does not
+      // preview legacy settings for an eligible product.
+      const source = product.settingsSource;
       const resolved = resolveStandeeEffectiveReviewSettings({
         standee,
         googleReviewUrl: product.standeeGoogleReviewUrl ?? '',
         source,
-        centralSettings,
+        centralSettings: source === 'legacy' ? undefined : centralSettings,
       });
 
       return ok({

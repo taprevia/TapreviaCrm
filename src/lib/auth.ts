@@ -4,7 +4,6 @@ import { connectDB } from './db';
 import User from '@/models/User';
 import { requireJwtSecret } from './env';
 
-const JWT_SECRET = requireJwtSecret();
 const TOKEN_EXPIRY = '7d';
 const COOKIE_NAME = 'token';
 
@@ -21,12 +20,12 @@ export interface AuthUser {
 }
 
 export function generateToken(userId: string, role: string): string {
-  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+  return jwt.sign({ userId, role }, requireJwtSecret(), { expiresIn: TOKEN_EXPIRY });
 }
 
 export function verifyToken(token: string): { userId: string; role: string } | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as { userId: string; role: string };
+    return jwt.verify(token, requireJwtSecret()) as { userId: string; role: string };
   } catch {
     return null;
   }

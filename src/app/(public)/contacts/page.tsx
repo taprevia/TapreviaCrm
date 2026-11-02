@@ -99,7 +99,7 @@ const CARD_DATA: CardData = {
     },
     {
       title: "Customised Standy",
-      desc: "Fully customised standee with your branding — ₹1299",
+      desc: "Fully customised standee with your branding",
       imageUrl:
         "https://taprevia.com/images/product-custom-standy.svg",
     },
@@ -470,7 +470,7 @@ const STYLES = `
 .tv2-name{font-size:20px;line-height:26px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--tv2-fg);}
 .tv2-tagline{margin-top:3px;font-size:13px;line-height:18px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--tv2-primary);}
 .tv2-meta{display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:4px 12px;margin-top:8px;}
-.tv2-meta-item{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:16px;color:var(--tv2-muted-fg);text-decoration:none;overflow-wrap:anywhere;}
+.tv2-meta-item{min-height:24px;display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:16px;color:var(--tv2-muted-fg);text-decoration:none;overflow-wrap:anywhere;}
 .tv2-meta-item:hover{color:var(--tv2-fg);}
 .tv2-bio{margin-top:8px;font-size:13px;line-height:20px;color:var(--tv2-muted-fg);}
 
@@ -483,7 +483,7 @@ const STYLES = `
 .tv2-btn--soft{background:var(--tv2-muted);color:var(--tv2-fg);}
 .tv2-btn--outline{background:#fff;border:1px solid var(--tv2-border);color:var(--tv2-fg);}
 .tv2-btn--brand{background:var(--tv2-primary);color:#fff;}
-.tv2-btn--wa{background:var(--tv2-wa);color:#fff;}
+.tv2-btn--wa{background:var(--tv2-wa);color:#0b3d2c;}
 .tv2-btn--wa-ghost{background:transparent;border:2px solid var(--tv2-primary);color:var(--tv2-primary);}
 
 .tv2-btn--review{width:100%;margin-top:10px;}
@@ -512,7 +512,7 @@ const STYLES = `
 
 .tv2-ptitle{font-size:13px;line-height:18px;font-weight:700;color:#0F172A;word-break:break-word;margin-bottom:8px;}
 
-.tv2-pcta{margin-top:auto;width:100%;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px 6px;border-radius:9999px;background:var(--tv2-wa);color:#fff;font-family:inherit;font-size:10px;line-height:14px;font-weight:600;text-decoration:none;white-space:normal;text-align:center;transition:background 180ms var(--tv2-e-std),transform 120ms var(--tv2-e-std);}
+.tv2-pcta{margin-top:auto;width:100%;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px 6px;border-radius:9999px;background:var(--tv2-wa);color:#0b3d2c;font-family:inherit;font-size:10px;line-height:14px;font-weight:600;text-decoration:none;white-space:normal;text-align:center;transition:background 180ms var(--tv2-e-std),transform 120ms var(--tv2-e-std);}
 
 .tv2-pcta:hover{background:var(--tv2-wa-hover);}
 
@@ -522,7 +522,7 @@ const STYLES = `
 .tv2-svc{display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--tv2-r-md);background:var(--tv2-muted);}
 .tv2-svc-ico{width:36px;height:36px;flex:0 0 auto;display:grid;place-items:center;border-radius:var(--tv2-r-sm);background:var(--tv2-wash-15);color:var(--tv2-primary);}
 .tv2-svc-title{font-size:14px;line-height:20px;font-weight:600;color:var(--tv2-fg);word-break:break-word;}
-.tv2-svc-pill{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:10px 12px;border-radius:9999px;background:var(--tv2-wa);color:#fff;font-size:11px;line-height:1;font-weight:600;text-decoration:none;transition:background 180ms var(--tv2-e-std),transform 120ms var(--tv2-e-std);}
+.tv2-svc-pill{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:10px 12px;border-radius:9999px;background:var(--tv2-wa);color:#0b3d2c;font-size:11px;line-height:1;font-weight:600;text-decoration:none;transition:background 180ms var(--tv2-e-std),transform 120ms var(--tv2-e-std);}
 .tv2-svc-pill:active{transform:scale(.95);}
 .tv2-svc-more{margin-top:12px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 0;border-radius:9999px;border:none;background:transparent;color:var(--tv2-primary);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background 180ms var(--tv2-e-std),transform 120ms var(--tv2-e-std);}
 .tv2-svc-more:hover{background:var(--tv2-wash-15);}
@@ -971,7 +971,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
           </span>
         </header>
 
-        <main className="tv2-main">
+        <div className="tv2-main">
           <section className="tv2-identity">
             <Image
               className="tv2-avatar"
@@ -1359,7 +1359,7 @@ const TapreviaProfile = ({ onSubmit }: TapreviaProps = {}): React.ReactElement =
               Click here to create your digital business card
             </a>
           </footer>
-        </main>
+        </div>
       </div>
 
       <nav className="tv2-bar" aria-label="Quick actions">

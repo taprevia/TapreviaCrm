@@ -154,7 +154,8 @@ async function main() {
       return await evaluate(`[...document.querySelectorAll('[role="tab"]')].map((t) => t.id)`) as string[];
     })();
 
-    if (tabIds.length !== 11) failures.push(`editor tab count ${tabIds.length}, expected 11`);
+    if (tabIds.length !== 10) failures.push(`editor tab count ${tabIds.length}, expected 10`);
+    if (tabIds.some((id) => id.includes('review-assistant'))) failures.push('separate Review Assistant tab still present');
 
     for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
       for (const theme of ['dark', 'light'] as const) {
@@ -167,7 +168,7 @@ async function main() {
         for (let i = 0; i < 80; i += 1) {
           await sleep(200);
           const count = await evaluate(`document.querySelectorAll('[role="tab"]').length`).catch(() => 0);
-          if (Number(count) === 11) { readyEditor = true; break; }
+          if (Number(count) === 10) { readyEditor = true; break; }
         }
         if (!readyEditor) { failures.push(`editor ${width}/${theme} not ready`); continue; }
         const metrics = await evaluate(`(() => {
@@ -198,7 +199,7 @@ async function main() {
       for (let i = 0; i < 80; i += 1) {
         await sleep(200);
         const count = await evaluate(`document.querySelectorAll('[role="tab"]').length`).catch(() => 0);
-        if (Number(count) === 11) break;
+        if (Number(count) === 10) break;
       }
       for (let index = 0; index < tabIds.length; index += 1) {
         const state = await evaluate(`(() => {
@@ -227,11 +228,18 @@ async function main() {
       const focusRing = tabs.every((tab) => String(tab.className).includes('focus-visible:ring'));
       return { count: tabs.length, focused, allReachable, focusRing, firstIsBasic: focused === 'builder-tab-basic' };
     })()`) as { count: number; focused: string; allReachable: boolean; focusRing: boolean; firstIsBasic: boolean };
-    if (keyboard.count !== 11) failures.push(`keyboard tab count ${keyboard.count}`);
+    if (keyboard.count !== 10) failures.push(`keyboard tab count ${keyboard.count}`);
     if (!keyboard.allReachable) failures.push('not every builder tab is keyboard reachable');
     if (!keyboard.focusRing) failures.push('builder tab focus ring missing');
     if (!keyboard.firstIsBasic) failures.push(`builder tab focus failed (${keyboard.focused})`);
-    results.editor.push({ keyboard });
+    const reviewLink = await evaluate(`(() => {
+      const link = document.querySelector('a[href*="/dashboard/review-management?cardId="]');
+      return link ? link.getAttribute('href') : null;
+    })()`) as string | null;
+    if (!reviewLink || !reviewLink.includes(`cardId=${String(premiumCard._id)}`)) {
+      failures.push(`card-scoped Review Management link missing: ${String(reviewLink)}`);
+    }
+    results.editor.push({ keyboard, reviewLink });
 
     ws.close();
   } finally {

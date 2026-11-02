@@ -295,7 +295,11 @@ async function seed() {
   addProduct('grc', 'google-review-card', 'Google Review Card', 'review', 'card');
   addProduct('plate', 'google-review-nfc-plate', 'Google Review NFC Plate', 'review', 'card');
   addProduct('standee', 'google-review-standee', 'Google Review Standee', 'standee', 'standee');
-  addProduct('publicslug', 'premium-card', 'Premium NFC Card', 'profile', 'card');
+  // Deliberately unknown catalog slug with a Premium-looking display name.
+  addProduct('publicslug', 'premium-public-slug', 'Premium NFC Card', 'profile', 'card');
+  // Historical Premium identity: some pre-Phase-2 catalog rows used the public
+  // path as their catalog slug. Read-time identity must recognize it.
+  addProduct('legacyslug', 'premium-card', 'Premium NFC Card', 'profile', 'card');
   addProduct('unknown', 'mystery-product', 'Mystery Product', 'profile', 'card');
   addProduct('inactiveproduct', 'inactive-review-product', 'Inactive Review Product', 'review', 'card', false);
 
@@ -436,6 +440,11 @@ async function seed() {
     alias: 'public-slug-premium',
     userId: users.cross._id,
   });
+  addCard('legacySlugCard', {
+    name: 'Legacy Slug Premium',
+    alias: 'legacy-slug-premium',
+    userId: users.cross._id,
+  });
   addCard('unknownCard', {
     name: 'Unknown Product',
     alias: 'unknown-product',
@@ -443,6 +452,10 @@ async function seed() {
   });
   addCard('crossCard', { name: 'Cross Review', alias: 'cross-review', userId: users.cross._id });
   addCard('unaliasedCard', { name: 'No Alias', alias: '', userId: users.apiuser._id });
+  addCard('noIdentifierCard', { name: 'No Public Identifier', alias: '', userId: users.apiuser._id });
+  // A historical card must expose at least one resolvable public identifier
+  // (urlAlias or the legacy printed slug) before it can host reviews.
+  cards.noIdentifierCard.slug = '';
 
   addAssignment('premiumProduct', 'premium', 'premium', 'premiumCard');
   addAssignment('premiumNewProduct', 'premium', 'premium', 'premiumNew');
@@ -466,6 +479,7 @@ async function seed() {
   addAssignment('invalidCentralProduct', 'invalidcentral', 'premium', 'invalidCentralCard');
   addAssignment('apiProduct', 'apiuser', 'premium', 'apiCard');
   addAssignment('apiUnaliased', 'apiuser', 'premium', 'unaliasedCard');
+  addAssignment('apiNoIdentifier', 'apiuser', 'premium', 'noIdentifierCard');
   addAssignment('connectorProduct', 'connector', 'premium', 'connectorCard');
   addAssignment('parallelProduct', 'parallel', 'premium', 'parallelCard');
   addAssignment('paraProduct', 'para', 'premium', 'paraCard');
@@ -477,6 +491,7 @@ async function seed() {
   addAssignment('crossProduct', 'cross', 'premium', 'crossCard');
   addAssignment('mislabeledProduct', 'cross', 'business', 'mislabeledCard');
   addAssignment('publicSlugProduct', 'cross', 'publicslug', 'publicSlugCard');
+  addAssignment('legacySlugProduct', 'cross', 'legacyslug', 'legacySlugCard');
   addAssignment('unknownProduct', 'cross', 'unknown', 'unknownCard');
   addAssignment('inactiveProductOnly', 'cross', 'inactiveproduct');
   addAssignment('missingCardProduct', 'apiuser', 'premium', undefined, 'active', { cardId: oid() });
@@ -911,7 +926,7 @@ async function main() {
       'already-enabled missing metadata was not preserved'
     );
   });
-  await check('entitlement: display name and public slug do not grant capability', async () => {
+  await check('entitlement: display name and unknown public slug do not grant capability', async () => {
     const mislabeled = await getCardReviewEntitlement(cards.mislabeledCard as never);
     const publicSlug = await getCardReviewEntitlement(cards.publicSlugCard as never);
     const unknown = await getCardReviewEntitlement(cards.unknownCard as never);
@@ -922,6 +937,10 @@ async function main() {
     const created = await getCardReviewEntitlement(cards.premiumNew as never);
     ok(existing.entitled && created.entitled, 'canonical Premium assignment not recognized');
     ok(existing.productId === 'PREMIUM_NFC_CARD', String(existing.productId));
+  });
+  await check('entitlement: legacy premium-card catalog slug grants for historical assignments', async () => {
+    const legacy = await getCardReviewEntitlement(cards.legacySlugCard as never);
+    ok(legacy.entitled && legacy.productId === 'PREMIUM_NFC_CARD', `legacy slug not recognized (${legacy.productId ?? 'none'})`);
   });
   await check('entitlement: manually granted review account keeps legitimate access', async () => {
     const entitlement = await resolveEntitlement(users.legacyreview._id);
@@ -1166,6 +1185,10 @@ async function main() {
     ok(ids.includes(String(cards.mixedPremium._id)), 'Premium card missing');
     ok(!ids.includes(String(cards.mixedLower._id)), 'lower-tier card listed');
     ok(rows.every((row) => typeof row.reviewOverrides === 'object'), 'reviewOverrides missing from product rows');
+    const premium = rows.find((row) => row.cardId === String(cards.mixedPremium._id)) as
+      | { legacySettings?: { googleReviewUrl?: string; enabled?: boolean } }
+      | undefined;
+    ok(premium?.legacySettings && typeof premium.legacySettings.googleReviewUrl === 'string', 'legacySettings missing from product row');
   });
   await check('preview API: legacy/central/hybrid/fallback are read-only and correct', async () => {
     const legacy = await api('GET', `/api/review-management/preview?assignmentId=${assignments.apiProduct._id}`, {
@@ -1358,11 +1381,12 @@ async function main() {
       body: { source: 'central' },
     });
     ok(inactive.status === 400, `inactive card ${inactive.status}`);
-    const unaliased = await api('PATCH', `/api/review-management/products/${assignments.apiUnaliased._id}`, {
+    const noIdentifier = await api('PATCH', `/api/review-management/products/${assignments.apiNoIdentifier._id}`, {
       user: users.apiuser,
       body: { source: 'central' },
     });
-    ok(unaliased.status === 400, `unaliased card ${unaliased.status}`);
+    ok(noIdentifier.status === 400, `no-identifier card ${noIdentifier.status}`);
+
     const missingCard = await api('PATCH', `/api/review-management/products/${assignments.missingCardProduct._id}`, {
       user: users.apiuser,
       body: { source: 'central' },
@@ -1375,7 +1399,7 @@ async function main() {
         api('PATCH', `/api/review-management/products/${assignments.connectorProduct._id}`, {
           body: { source: 'central' },
         })],
-      ['expired token', { status: 307 }, () => connectorPatch({ source: 'central' }, { token: tokenFor(connector, '-1s') })],
+      ['expired token', { status: 401 }, () => connectorPatch({ source: 'central' }, { token: tokenFor(connector, '-1s') })],
       ['cross-tenant', { status: 404 }, () => connectorPatch({ source: 'central' }, { user: users.cross })],
       ['lower-tier card', { status: 403 }, () =>
         api('PATCH', `/api/review-management/products/${assignments.mixedLowerProduct._id}`, {
@@ -1516,6 +1540,25 @@ async function main() {
       body: { reviewAssistant: { enabled: true } },
     });
     ok(preserved.status === 200, `zero-assignment enabled ${preserved.status}`);
+  });
+  await check('card settings editor: one Card save does not change another Card', async () => {
+    const before = await rawCard(cards.premiumNew._id);
+    const patched = await api('PATCH', `/api/cards/${cards.premiumCard._id}`, {
+      user: users.premium,
+      body: { reviewAssistant: { welcomeMessage: 'Only this card', enabled: true } },
+    });
+    ok(patched.status === 200, `patch ${patched.status}: ${patched.text}`);
+    const changed = await rawCard(cards.premiumCard._id);
+    const untouched = await rawCard(cards.premiumNew._id);
+    ok(
+      (changed?.reviewAssistant as { welcomeMessage?: string } | undefined)?.welcomeMessage === 'Only this card',
+      'target Card was not updated'
+    );
+    ok(
+      JSON.stringify((untouched?.reviewAssistant as unknown) ?? null) ===
+        JSON.stringify((before?.reviewAssistant as unknown) ?? null),
+      'another Card was modified'
+    );
   });
   await check('card editor: unauthorized and cross-tenant requests are denied', async () => {
     const cross = await api('PATCH', `/api/cards/${cards.apiCard._id}`, {

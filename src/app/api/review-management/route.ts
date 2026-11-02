@@ -11,6 +11,8 @@ import {
   getSavedReviewSettings,
   saveReviewSettings,
 } from '@/lib/services/review-management-settings';
+import { getCentralIntegrationRollout } from '@/lib/services/review-rollout';
+import TenantSettings from '@/models/TenantSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +35,14 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
     const settings = await getSavedReviewSettings(auth.user!._id);
-    return ok(settings);
+    const tenant = await TenantSettings.findOne({ userId: auth.user!._id })
+      .select('openai.enabled openai.apiKeyEnc')
+      .lean<{ openai?: { enabled?: boolean; apiKeyEnc?: string } } | null>();
+    return ok({
+      ...settings,
+      publicIntegrationEnabled: getCentralIntegrationRollout(auth.user!._id).effective,
+      aiConfigured: Boolean(tenant?.openai?.enabled && tenant.openai.apiKeyEnc),
+    });
   } catch (error) {
     console.error('Review management GET error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');
@@ -70,12 +79,28 @@ export async function PATCH(request: NextRequest) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid review settings payload');
     }
 
+    await connectDB();
+    const record = body as Record<string, unknown>;
+    const incomingGeneral = record.general as Record<string, unknown> | undefined;
+    const stored = await getSavedReviewSettings(auth.user!._id);
+    if (
+      incomingGeneral &&
+      typeof incomingGeneral.googleReviewUrl === 'string' &&
+      stored.saved &&
+      incomingGeneral.googleReviewUrl === stored.settings.general.googleReviewUrl
+    ) {
+      delete incomingGeneral.googleReviewUrl;
+      if (Object.keys(incomingGeneral).length === 0) delete record.general;
+      // An unchanged legacy URL is a no-op; return the stored settings rather
+      // than rejecting a form that only resubmitted existing values.
+      if (!record.general && !record.content) return ok(stored);
+    }
+
     const parsed = reviewSettingsPatchSchema.safeParse(body);
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid review settings', parsed.error.flatten().fieldErrors);
     }
 
-    await connectDB();
     const expectedRevision =
       parsed.data.revision === undefined ? undefined : String(parsed.data.revision);
     const saved = await saveReviewSettings(
@@ -91,7 +116,14 @@ export async function PATCH(request: NextRequest) {
       return fail(400, 'VALIDATION_ERROR', saved.message, saved.details);
     }
 
-    return ok(saved.saved);
+    const tenant = await TenantSettings.findOne({ userId: auth.user!._id })
+      .select('openai.enabled openai.apiKeyEnc')
+      .lean<{ openai?: { enabled?: boolean; apiKeyEnc?: string } } | null>();
+    return ok({
+      ...saved.saved,
+      publicIntegrationEnabled: getCentralIntegrationRollout(auth.user!._id).effective,
+      aiConfigured: Boolean(tenant?.openai?.enabled && tenant.openai.apiKeyEnc),
+    });
   } catch (error) {
     console.error('Review management PATCH error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');

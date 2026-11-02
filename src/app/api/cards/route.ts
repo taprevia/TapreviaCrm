@@ -8,6 +8,8 @@ import { createCardSchema } from '@/lib/validation/card';
 import { fail, ok, parsePagination } from '@/lib/api';
 import { generateSlug } from '@/lib/utils';
 import { DEFAULT_TEMPLATE_KEY } from '@/lib/card-templates';
+import { resolveCardPreview } from '@/lib/services/product-preview';
+import { literalSearchRegExp, normalizeSearchInput } from '@/lib/search';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,14 +28,19 @@ export async function GET(request: NextRequest) {
 
     const ownership = [{ userId: user._id }, { assignedUserId: user._id }];
     const filter: Record<string, unknown> = {};
-    const search = sp.get('search');
+    const normalizedSearch = normalizeSearchInput(sp.get('search'));
+    if (!normalizedSearch.ok) {
+      return fail(400, 'VALIDATION_ERROR', 'Search term is too long');
+    }
+    const search = normalizedSearch.value;
     if (search) {
+      const regex = literalSearchRegExp(search);
       filter.$and = [
         { $or: ownership },
         {
           $or: [
-            { name: { $regex: search, $options: 'i' } },
-            { urlAlias: { $regex: search, $options: 'i' } },
+            { name: { $regex: regex } },
+            { urlAlias: { $regex: regex } },
           ],
         },
       ];
@@ -47,14 +54,21 @@ export async function GET(request: NextRequest) {
         .skip(skip)
         .limit(limit)
         .select(
-          'name cardLabel urlAlias templateKey isActive profileImageUrl stats status assignedUserId createdAt updatedAt publicSlug'
+          'name cardLabel urlAlias slug publicSlug routeSlug kind redirectUrl reviewAssistant reviewSettingsSource reviewOverrides isActive profileImageUrl stats status userId assignedUserId createdAt updatedAt'
         )
         .lean(),
       Card.countDocuments(filter),
     ]);
 
+    const cardsWithPreview = await Promise.all(
+      (cards as Array<Record<string, unknown>>).map(async (card) => ({
+        ...card,
+        preview: await resolveCardPreview(card as never),
+      }))
+    );
+
     return ok({
-      cards,
+      cards: cardsWithPreview,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
     });
   } catch (error) {

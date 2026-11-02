@@ -59,7 +59,10 @@ export async function GET(request: NextRequest) {
     if (!user) return fail(401, 'UNAUTHORIZED', 'Unauthorized');
 
     await connectDB();
-    const settings = await findOrCreateSettings(user._id);
+    // Read path is non-mutating: returning defaults must not create a tenant
+    // document merely because a dashboard page loaded.
+    const existing = await TenantSettings.findOne({ userId: user._id });
+    const settings = existing ?? new TenantSettings({ userId: user._id });
 
     return ok({ settings: toPublicSettings(settings) });
   } catch (error) {
@@ -106,10 +109,22 @@ export async function PATCH(request: NextRequest) {
 
     // Plaintext apiKey arrives over TLS only — persist encrypted or clear.
     if (apiKey !== undefined) {
-      settings.openai.apiKeyEnc =
-        apiKey.length > 0
-          ? encryptSecret(apiKey)
-          : '';
+      if (apiKey.length > 0) {
+        try {
+          settings.openai.apiKeyEnc = encryptSecret(apiKey);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('APP_KEY')) {
+            return fail(
+              503,
+              'UNAVAILABLE',
+              'AI key storage is not configured on this deployment. Ask the administrator to set APP_KEY.'
+            );
+          }
+          throw error;
+        }
+      } else {
+        settings.openai.apiKeyEnc = '';
+      }
     }
 
     await settings.save();

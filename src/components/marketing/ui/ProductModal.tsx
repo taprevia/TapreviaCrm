@@ -40,15 +40,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
   const handleOrder = () => {
     openWhatsAppOrder({
       productName: product.name,
-      price: product.price,
-      customMessage: `Hi Taprevia! 🚀 I'd like to order the *${product.name}* (priced at ₹${product.price}) — Qty: *${quantity}*. Please confirm my order!`,
+      customMessage: `Hi Taprevia! 🚀 I'd like to order the *${product.name}* — Qty: *${quantity}*. Please confirm my order!`,
     });
   };
 
   const handleAskQuestion = () => {
     openWhatsAppOrder({
       productName: product.name,
-      customMessage: `Hi Taprevia! 👋 I have a question about the *${product.name}* (₹${product.price}). Could you help me out?`,
+      customMessage: `Hi Taprevia! 👋 I have a question about the *${product.name}*. Could you help me out?`,
     });
   };
 
@@ -68,10 +67,6 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose, activeIndex, goTo]);
-
-  const discount = product.originalPrice
-    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
-    : 0;
 
   return (
     <div
@@ -182,32 +177,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
               </h2>
               <div className="mt-2 flex items-center gap-3">
                 <StarRating rating={product.rating} count={product.reviewsCount} size={15} />
-                <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  {discount > 0 ? `${discount}% off` : 'Best Price'}
-                </span>
               </div>
-            </div>
-
-            {/* Price */}
-            <div className="bg-gray-50 rounded-2xl p-4">
-              <div className="flex items-end gap-2.5 flex-wrap">
-                <span className="text-4xl sm:text-5xl font-black text-brand-navy tracking-tight">
-                  ₹{product.price}
-                </span>
-                {product.originalPrice && (
-                  <>
-                    <span className="text-base text-gray-400 line-through font-semibold mb-1.5">
-                      ₹{product.originalPrice}
-                    </span>
-                    <span className="text-xs font-bold text-emerald-600 mb-1.5">
-                      Save ₹{product.originalPrice - product.price}
-                    </span>
-                  </>
-                )}
-              </div>
-              <p className="text-[11px] text-gray-400 mt-1">
-                Inclusive of all taxes · Lifetime validity · No subscription
-              </p>
             </div>
 
             {/* Tagline */}
@@ -280,7 +250,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
                 className="w-full py-4 bg-brand-accent hover:bg-blue-700 text-white text-sm font-extrabold rounded-2xl shadow-lg hover:shadow-brand-accent/30 transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
               >
                 <MessageCircle size={18} />
-                Order on WhatsApp — ₹{product.price * quantity}
+                Order on WhatsApp
               </button>
               <button
                 onClick={handleAskQuestion}
@@ -293,7 +263,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
             {/* Delivery perks */}
             <div className="grid grid-cols-3 gap-2 pt-1">
               {[
-                { icon: Truck, label: 'Shipping ₹79' },
+                { icon: Truck, label: 'Fast Shipping' },
                 { icon: ShieldCheck, label: 'Lifetime Validity' },
                 { icon: MessageCircle, label: 'WhatsApp Ordering' },
               ].map(({ icon: Icon, label }) => (

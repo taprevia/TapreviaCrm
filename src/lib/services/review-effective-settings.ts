@@ -2,18 +2,24 @@
  * Server-only effective Review settings for a Card (Phase 4D.4).
  *
  * The public integration gate is independent from the copy-flow and rotation
- * flags. While it is OFF, public reads remain strictly legacy even if a Card
- * has reviewSettingsSource='central' or 'hybrid'.
+ * flags.
+ *   OFF: public reads remain strictly legacy even if a Card has
+ *        reviewSettingsSource='central' or 'hybrid'.
+ *   ON:  Central Review Management is authoritative for eligible products.
+ *        Hybrid overrides are preserved; missing/invalid central settings use
+ *        the existing complete-legacy fallback.
  */
 
 import ReviewSettings from '@/models/ReviewSettings';
 import {
-  CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED,
-} from '@/lib/review-feature-flags';
-import {
   resolveReviewSettings,
   type ResolvedReviewSettings,
 } from '@/lib/services/review-settings-resolver';
+import {
+  isCentralPublicIntegrationEnabledForTenant,
+  isLocalCentralReviewForceAllEnabled,
+  resolveEffectiveReviewSettingsSource,
+} from '@/lib/services/review-rollout';
 
 interface CardWithReviewSettings {
   reviewAssistant?: unknown;
@@ -26,16 +32,19 @@ interface CardWithReviewSettings {
 export async function resolveEffectiveReviewSettings(
   card: CardWithReviewSettings
 ): Promise<ResolvedReviewSettings> {
-  const source =
-    card.reviewSettingsSource === 'central' || card.reviewSettingsSource === 'hybrid'
-      ? card.reviewSettingsSource
-      : 'legacy';
+  const ownerId = card.userId ?? card.assignedUserId;
+  // Central ON makes central authoritative for eligible review products.
+  // Central OFF resolves exactly as before: legacy public behavior.
+  const source = resolveEffectiveReviewSettingsSource(
+    card.reviewSettingsSource,
+    isCentralPublicIntegrationEnabledForTenant(ownerId),
+    { forceAll: isLocalCentralReviewForceAllEnabled() }
+  );
 
-  if (!CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED || source === 'legacy') {
+  if (source === 'legacy') {
     return resolveReviewSettings({ card, source: 'legacy' });
   }
 
-  const ownerId = card.userId ?? card.assignedUserId;
   const central = ownerId
     ? ((await ReviewSettings.findOne({ businessId: ownerId })
         .select('schemaVersion general content')

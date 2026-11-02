@@ -29,6 +29,7 @@ import {
   REVIEW_SETTINGS_SCHEMA_VERSION,
   type ReviewMode,
 } from '@/lib/review-settings-defaults';
+import { isSafeExternalUrl } from '@/lib/safe-url';
 
 export { REVIEW_SETTINGS_SCHEMA_VERSION };
 
@@ -63,6 +64,7 @@ export interface ReviewSettingsGeneralInput {
   enabled?: boolean;
   googleReviewUrl?: string;
   welcomeMessage?: string;
+  businessName?: string;
 }
 
 export interface ReviewSettingsContentInput {
@@ -119,6 +121,7 @@ interface NormalizedValues {
   enabled: boolean;
   googleReviewUrl: string;
   welcomeMessage: string;
+  businessName: string;
   category: string;
   languages: string[];
   preferredLength: ReviewPreferredLength;
@@ -196,6 +199,7 @@ function legacyValues(raw: unknown): NormalizedValues {
     enabled: config.enabled === true,
     googleReviewUrl: cleanString(config.googleReviewUrl, MAX_URL_LENGTH) ?? '',
     welcomeMessage: cleanString(config.welcomeMessage, MAX_WELCOME_LENGTH) ?? '',
+    businessName: cleanString(config.businessName, 120) ?? '',
     category: cleanString(config.category, MAX_CATEGORY_LENGTH) ?? '',
     // Existing canonical behavior treats an empty language list as English.
     languages: languages && languages.length > 0 ? languages : ['English'],
@@ -251,7 +255,7 @@ function validateCentral(
   const general = (generalRaw ?? {}) as Record<string, unknown>;
   const content = (contentRaw ?? {}) as Record<string, unknown>;
 
-  const generalKeys = ['enabled', 'googleReviewUrl', 'welcomeMessage'];
+  const generalKeys = ['enabled', 'googleReviewUrl', 'welcomeMessage', 'businessName'];
   const contentKeys = [
     'category',
     'languages',
@@ -284,6 +288,11 @@ function validateCentral(
     const message = validateString(general.welcomeMessage, MAX_WELCOME_LENGTH);
     if (message === undefined) return { ok: false };
     values.welcomeMessage = message;
+  }
+  if (Object.prototype.hasOwnProperty.call(general, 'businessName')) {
+    const name = validateString(general.businessName, 120);
+    if (name === undefined) return { ok: false };
+    values.businessName = name;
   }
   if (Object.prototype.hasOwnProperty.call(content, 'category')) {
     const category = validateString(content.category, MAX_CATEGORY_LENGTH);
@@ -407,6 +416,35 @@ function withMetadata(
 }
 
 /**
+ * Preserve an existing product-specific Google destination when central/hybrid
+ * settings do not provide one.
+ *
+ * This is intentionally narrow:
+ *   - it only fills an EMPTY effective destination;
+ *   - it never replaces a non-empty central URL or hybrid override;
+ *   - an explicit hybrid `googleReviewUrl` override (including an explicit
+ *     empty value) is respected and is never replaced by the legacy value.
+ *
+ * It does not mutate stored settings; callers still read the existing Card
+ * `reviewAssistant` values unchanged.
+ */
+function applyLegacyDestinationFallback(
+  resolved: ResolvedReviewSettings,
+  legacy: Pick<ResolvedReviewSettings, 'googleReviewUrl'>,
+  overrides: unknown,
+  source: 'central' | 'hybrid'
+): ResolvedReviewSettings {
+  if (resolved.googleReviewUrl) return resolved;
+  const explicitHybridOverride =
+    source === 'hybrid' &&
+    isRecord(overrides) &&
+    Object.prototype.hasOwnProperty.call(overrides, 'googleReviewUrl');
+  if (explicitHybridOverride) return resolved;
+  if (!isSafeExternalUrl(legacy.googleReviewUrl)) return resolved;
+  return { ...resolved, googleReviewUrl: legacy.googleReviewUrl };
+}
+
+/**
  * Resolve effective Review settings without touching storage.
  *
  * Legacy is the default and is behavior-equivalent to the existing card
@@ -435,11 +473,12 @@ export function resolveReviewSettings(
 
   if (source === 'central') {
     const defaults = legacyValues(undefined);
-    return withMetadata(
+    const resolved = withMetadata(
       { ...defaults, ...central.value.values },
       'central',
       central.value.schemaVersion
     );
+    return applyLegacyDestinationFallback(resolved, legacy, input.overrides, 'central');
   }
 
   // Hybrid requires valid central settings; otherwise the safe fallback is the
@@ -450,7 +489,7 @@ export function resolveReviewSettings(
   }
 
   const defaults = legacyValues(undefined);
-  return withMetadata(
+  const resolved = withMetadata(
     {
       ...defaults,
       ...central.value.values,
@@ -459,4 +498,5 @@ export function resolveReviewSettings(
     'hybrid',
     central.value.schemaVersion
   );
+  return applyLegacyDestinationFallback(resolved, legacy, input.overrides, 'hybrid');
 }

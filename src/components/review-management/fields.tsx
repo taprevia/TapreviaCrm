@@ -37,7 +37,7 @@ const TONES = {
   light: {
     field:
       'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 hover:border-gray-400 focus:border-blue-500 focus:ring-blue-500/20',
-    label: 'text-gray-700',
+    label: 'text-ink-mute',
     faint: 'text-gray-500',
     panel: 'border-gray-200 bg-white shadow-xl',
     active: 'bg-blue-50 text-blue-700',

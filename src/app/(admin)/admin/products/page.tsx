@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/modal';
 import { Search, Package, Eye, Sparkles, Lock } from 'lucide-react';
 import { PRODUCT_CATALOG, ALL_PRODUCT_IDS, type ProductId, type ProductDefinition } from '@/config/products';
 import { CAPABILITY_DEFS, type CapabilityId } from '@/config/capabilities';
+import { isHiddenPvcProduct } from '@/lib/marketing/product-visibility';
 
 interface CatalogProduct {
   _id: string;
@@ -77,9 +78,10 @@ export default function AdminProductsPage() {
       isHardcoded: boolean;
     }> = [];
 
-    // Add hard-coded products
+    // Add hard-coded products (PVC-named entries stay hidden from discovery)
     for (const productId of ALL_PRODUCT_IDS) {
       const def = PRODUCT_CATALOG[productId];
+      if (isHiddenPvcProduct({ id: productId, name: def.name })) continue;
       const dbRecord = dbProducts.find(
         (p) => p.slug.toLowerCase() === productId.toLowerCase().replace(/_/g, '-') ||
                p.slug.toLowerCase() === productId.toLowerCase()
@@ -292,18 +294,20 @@ export default function AdminProductsPage() {
               </div>
             )}
 
-            {selectedProduct.metadata.materials && (
+            {selectedProduct.metadata.materials?.filter((mat) => mat !== 'pvc').length ? (
               <div>
                 <h3 className="text-sm font-medium text-ink mb-2">Available Materials</h3>
                 <div className="flex gap-2">
-                  {selectedProduct.metadata.materials.map((mat) => (
-                    <Badge key={mat} variant="default" className="bg-field text-ink-mute ring-line-subtle">
-                      {mat.toUpperCase()}
-                    </Badge>
-                  ))}
+                  {selectedProduct.metadata.materials
+                    .filter((mat) => mat !== 'pvc')
+                    .map((mat) => (
+                      <Badge key={mat} variant="default" className="bg-field text-ink-mute ring-line-subtle">
+                        {mat.toUpperCase()}
+                      </Badge>
+                    ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
             <div className="flex justify-end pt-2">
               <Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -41,7 +41,17 @@
     "test:phase4d9-matrix": "tsx scripts/test-phase4d9-matrix.ts",
     "test:phase4d9-historical": "tsx scripts/test-phase4d9-historical.ts",
     "test:phase4d9-fixes": "tsx scripts/test-phase4d9-fixes.ts",
-    "test:phase4d10p1": "tsx scripts/test-phase4d10p1-preview-config.ts"
+    "test:phase4d10p1": "tsx scripts/test-phase4d10p1-preview-config.ts",
+    "test:phase4d10p2": "tsx scripts/test-phase4d10p2-builder-tabs.ts",
+    "test:phase4d10p3-write-api": "tsx scripts/test-phase4d10p3-write-api.ts",
+    "test:phase4d10p3-ui": "tsx scripts/test-phase4d10p3-ui-workflows.ts",
+    "test:p36-security": "tsx scripts/p36-security-audit.ts",
+    "test:p36-performance": "tsx scripts/p36-performance-audit.ts",
+    "test:p36-accessibility": "tsx scripts/p36-accessibility-audit.ts",
+    "test:p36-reliability": "tsx scripts/p36-reliability-audit.ts",
+    "test:p39-otp": "tsx scripts/test-phase4d10p3-otp.ts",
+    "test:p39-otp-ui": "tsx scripts/test-phase4d10p3-otp-ui.ts",
+    "test:pvc-visibility": "tsx scripts/test-pvc-product-visibility.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

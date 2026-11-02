@@ -38,7 +38,7 @@ const config: Config = {
           DEFAULT: "#F8FAFC",
           inverse: "#FFFFFF",
           mute: "#94A3B8",
-          faint: "#64748B",
+          faint: "#94A3B8",
         },
         ok: "#10B981",
         wa: "#25D366",

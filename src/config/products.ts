@@ -115,7 +115,7 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       'tap_analytics', 'dynamic_dashboard',
     ],
     metadata: {
-      materials: ['pvc', 'metal', 'wooden'],
+      materials: ['metal', 'wooden'],
     },
     publicSlug: 'business-card',
   },
@@ -135,7 +135,7 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       'review_ai_suggestions',
     ],
     metadata: {
-      materials: ['pvc', 'metal', 'wooden'],
+      materials: ['metal', 'wooden'],
     },
     publicSlug: 'premium-card',
   },

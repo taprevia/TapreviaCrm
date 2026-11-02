@@ -35,9 +35,9 @@ export function Footer({ minimal }: FooterProps) {
               <div>
                 <h3 className="text-sm font-semibold text-ink">Company</h3>
                 <ul className="mt-2 space-y-2">
-                  <li><a href="#" className="text-sm text-ink-mute hover:text-ink">About</a></li>
-                  <li><a href="#" className="text-sm text-ink-mute hover:text-ink">Contact</a></li>
-                  <li><a href="#" className="text-sm text-ink-mute hover:text-ink">Privacy</a></li>
+                  <li><Link href="/terms" className="text-sm text-ink-mute hover:text-ink">Terms</Link></li>
+                  <li><Link href="/contacts" className="text-sm text-ink-mute hover:text-ink">Contact</Link></li>
+                  <li><Link href="/privacy" className="text-sm text-ink-mute hover:text-ink">Privacy</Link></li>
                 </ul>
               </div>
             </>

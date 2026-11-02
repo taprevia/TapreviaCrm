@@ -206,7 +206,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
               <span className={labelClass}>Call</span>
             </a>
           ) : (
-            <span className={`${cellClass} opacity-40`} aria-hidden="true">
+            <span className={`${cellClass} opacity-100`} aria-hidden="true">
               <Phone size={22} className="text-gray-900" />
               <span className={labelClass}>Call</span>
             </span>
@@ -221,7 +221,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
               <span className={labelClass}>WhatsApp</span>
             </a>
           ) : (
-            <span className={`${cellClass} opacity-40`} aria-hidden="true">
+            <span className={`${cellClass} opacity-100`} aria-hidden="true">
               <span className="flex h-11 items-center rounded-full bg-[#25D366] px-5 text-[#0B0F19]">
                 <BrandIcon platform="whatsapp" size={20} />
               </span>

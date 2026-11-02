@@ -64,6 +64,9 @@ interface ProductEntry {
   } | null;
   instanceType: 'standee' | null;
   publicUrl: string | null;
+  preview?:
+    | { ok: true; kind: string; href: string }
+    | { ok: false; kind: string; reason: string; message: string };
   instance: StandeeInstance | null;
 }
 
@@ -76,7 +79,7 @@ function isSafeUrl(v: string): boolean {
   return /^https?:\/\/.+/i.test(v.trim());
 }
 
-export default function StandeeManager() {
+export default function StandeeManager({ assignmentId }: { assignmentId?: string } = {}) {
   const [products, setProducts] = useState<ProductEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +101,10 @@ export default function StandeeManager() {
   }, []);
 
   useEffect(() => {
-    fetchStandees();
+    void fetchStandees();
+    // fetchStandees closes over the current scope; it is intentionally re-run
+    // only when the mounted manager changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchStandees = async () => {
@@ -115,9 +121,11 @@ export default function StandeeManager() {
         return;
       }
       const data = await res.json();
-      const standees = (data.products ?? []).filter(
+      const standees = ((data.products ?? []).filter(
         (p: ProductEntry) => p.instanceType === 'standee' && p.instance
-      ) as ProductEntry[];
+      ) as ProductEntry[]).filter(
+        (p: ProductEntry) => !assignmentId || p.assignmentId === assignmentId
+      );
 
       setProducts(standees);
 
@@ -224,6 +232,14 @@ export default function StandeeManager() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {assignmentId && (
+        <Link
+          href="/dashboard/standees"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-mute transition-colors hover:text-ink"
+        >
+          ← Back to My Standees
+        </Link>
+      )}
       {message && (
         <div
           className={`rounded-lg p-3 text-sm ring-1 animate-fade-in ${
@@ -252,9 +268,11 @@ export default function StandeeManager() {
             <div className="rounded-full bg-field p-4 mb-4">
               <Lock className="h-8 w-8 text-ink-faint" />
             </div>
-            <p className="text-sm font-medium text-ink">No standees yet</p>
+            <p className="text-sm font-medium text-ink">{assignmentId ? 'Standee unavailable' : 'No standees yet'}</p>
             <p className="text-sm text-ink-mute mt-1">
-              When you purchase a Taprevia standee product, its slots appear here for configuration.
+              {assignmentId
+                ? 'This standee is not available for your account. Return to My Standees to choose another product.'
+                : 'When you purchase a Taprevia standee product, use Manage to configure its slots.'}
             </p>
           </div>
         </Card>
@@ -271,9 +289,16 @@ export default function StandeeManager() {
           // pending destination.
           const configuredCount = slots.filter((s) => Boolean(s?.destinationUrl?.trim())).length;
           const allConfigured = slotCount > 0 && configuredCount >= slotCount;
-          // Domain-qualified Public URL — the single link customers share. The
-          // internal /r/ routing URL is never surfaced here.
-          const publicPanelUrl = row.publicUrl && origin ? `${origin}${row.publicUrl}` : null;
+          // One canonical customer-facing URL from the resolver. The internal
+          // permanent /r/ route is never surfaced in customer management.
+          const canonicalPath = row.preview?.ok ? row.preview.href : row.publicUrl;
+          const publicPanelUrl = canonicalPath
+            ? canonicalPath.startsWith('http')
+              ? canonicalPath
+              : origin
+                ? `${origin}${canonicalPath}`
+                : canonicalPath
+            : null;
 
           return (
             <Card key={row.assignmentId} className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-4">
@@ -373,10 +398,10 @@ export default function StandeeManager() {
                   <button
                     type="button"
 onClick={() => copy(publicPanelUrl, inst.id)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-2 font-mono text-sm text-accent-400 hover:bg-white/5 transition-colors"
+                  className="inline-flex max-w-full min-w-0 items-center gap-2 rounded-lg bg-field px-3 py-2 font-mono text-sm text-accent-400 hover:bg-white/5 transition-colors"
                 >
                   <Link2 className="h-4 w-4 shrink-0" />
-                  {publicPanelUrl}
+                  <span className="min-w-0 truncate">{publicPanelUrl}</span>
                   {copied?.id === inst.id ? (
                       <Check className="h-4 w-4 text-ok" />
                     ) : (
@@ -386,7 +411,8 @@ onClick={() => copy(publicPanelUrl, inst.id)}
                 )}
               </div>
 
-              {/* Fixed slots */}
+              {/* Fixed slots — only inside the scoped Manage view. */}
+              {assignmentId && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-ink-mute uppercase tracking-wider">
@@ -458,6 +484,7 @@ onClick={() => copy(publicPanelUrl, inst.id)}
                   );
                 })}
               </div>
+              )}
 
               {savingSlot && (
                 <div className="flex items-center gap-2 text-xs text-ink-mute">

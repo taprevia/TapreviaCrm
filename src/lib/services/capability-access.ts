@@ -12,7 +12,8 @@
 
 import type { CapabilityId } from '@/config/capabilities';
 import type { ProductId } from '@/config/products';
-import { PRODUCT_CATALOG, isProductId, getProductCapabilities, getStandeeProfileConfig } from '@/config/products';
+import { getProductCapabilities, getStandeeProfileConfig } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import Standee from '@/models/Standee';
@@ -104,49 +105,41 @@ export async function resolveEntitlement(userId: string | unknown): Promise<Cust
   let standeeLimits: StandeeLimits | null = null;
 
   for (const catalog of catalogProducts) {
-    const productId = catalog.slug.toUpperCase().replace(/-/g, '_') as ProductId;
+    const matchedId = resolveCanonicalProductId(catalog.slug);
 
-    if (!isProductId(productId)) {
-      // Legacy product that doesn't map to our hard-coded catalog
-      // Try to find by iterating all products
-      const matchedId = Object.keys(PRODUCT_CATALOG).find(
-        (id) => id.toLowerCase() === catalog.slug.toLowerCase() ||
-                id.replace(/_/g, '-') === catalog.slug.toLowerCase()
-      ) as ProductId | undefined;
+    if (!matchedId) {
+      // Generic standee product (e.g. Counter Standee): the platform set is
+      // the buyer's own, so derive capabilities from their standee records.
+      if (catalog.category === 'standee' || catalog.kind === 'standee') {
+        for (const a of activeAssignments) {
+          if (!a.standeeId || String(a.catalogProductId) !== String(catalog._id)) continue;
+          const standee = standeeById.get(String(a.standeeId));
+          if (!standee) continue;
 
-      if (!matchedId) {
-        // Generic standee product (e.g. Counter Standee): the platform set is
-        // the buyer's own, so derive capabilities from their standee records.
-        if (catalog.category === 'standee' || catalog.kind === 'standee') {
-          for (const a of activeAssignments) {
-            if (!a.standeeId || String(a.catalogProductId) !== String(catalog._id)) continue;
-            const standee = standeeById.get(String(a.standeeId));
-            if (!standee) continue;
+          for (const platform of standee.fixedProfiles ?? []) {
+            const base = PLATFORM_BASE_CAP[platform];
+            if (base) capabilities.add(base);
+          }
 
-            for (const platform of standee.fixedProfiles ?? []) {
-              const base = PLATFORM_BASE_CAP[platform];
-              if (base) capabilities.add(base);
-            }
+          capabilities.add('standee');
+          const profileCount = standee.maxProfiles ?? standee.fixedProfiles?.length ?? 0;
+          if (profileCount > 1) capabilities.add('standee_multi_profile');
+          capabilities.add('standee_analytics');
+          capabilities.add('standee_dynamic_link');
 
-            capabilities.add('standee');
-            const profileCount = standee.maxProfiles ?? standee.fixedProfiles?.length ?? 0;
-            if (profileCount > 1) capabilities.add('standee_multi_profile');
-            capabilities.add('standee_analytics');
-            capabilities.add('standee_dynamic_link');
-
-            const config: StandeeLimits = {
-              maxProfiles: profileCount,
-              nfcSlots: profileCount,
-              qrSlots: profileCount,
-              fixedProfiles: standee.fixedProfiles ?? [],
-            };
-            if (!standeeLimits || config.maxProfiles > standeeLimits.maxProfiles) {
-              standeeLimits = config;
-            }
+          const config: StandeeLimits = {
+            maxProfiles: profileCount,
+            nfcSlots: profileCount,
+            qrSlots: profileCount,
+            fixedProfiles: standee.fixedProfiles ?? [],
+          };
+          if (!standeeLimits || config.maxProfiles > standeeLimits.maxProfiles) {
+            standeeLimits = config;
           }
         }
-        continue;
       }
+      continue;
+    }
 
       productIds.push(matchedId);
 
@@ -155,28 +148,13 @@ export async function resolveEntitlement(userId: string | unknown): Promise<Cust
         capabilities.add(cap);
       }
 
-      // Check for standee limits
+      // Check for standee limits — take the most generous limits.
       const config = getStandeeProfileConfig(matchedId);
       if (config) {
-        standeeLimits = config;
-      }
-    } else {
-      productIds.push(productId);
-
-      const caps = getProductCapabilities(productId);
-      for (const cap of caps) {
-        capabilities.add(cap);
-      }
-
-      // Check for standee limits
-      const config = getStandeeProfileConfig(productId);
-      if (config) {
-        // Take the most generous limits
         if (!standeeLimits || config.maxProfiles > standeeLimits.maxProfiles) {
           standeeLimits = config;
         }
       }
-    }
   }
 
   return {

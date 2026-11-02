@@ -17,7 +17,7 @@ export const ChatBubble: React.FC = () => {
         <div className="mb-3 w-80 bg-white rounded-3xl p-5 shadow-2xl border border-gray-100 animate-in fade-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center justify-between pb-3 border-b border-gray-100">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
+              <div className="w-10 h-10 rounded-full bg-emerald-700 text-white flex items-center justify-center font-bold">
               T
               </div>
               <div>
@@ -44,7 +44,7 @@ export const ChatBubble: React.FC = () => {
             href={whatsappUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm"
+            className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm"
           >
             <MessageCircle size={16} />
             Order / Chat on WhatsApp

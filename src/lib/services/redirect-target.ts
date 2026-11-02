@@ -19,6 +19,8 @@ export type RoutableCard = {
   redirectUrl?: string | null;
   publicSlug?: string | null;
   urlAlias?: string | null;
+  /** Legacy printed `/c/{slug}` identity; profile fallback only. */
+  slug?: string | null;
 };
 
 const SAFE_EXTERNAL = /^https?:\/\//i;
@@ -33,14 +35,20 @@ export function resolveCardDestination(card: RoutableCard): string | null {
 
   const publicSlug = clean(card.publicSlug);
   const urlAlias = clean(card.urlAlias);
+  const slug = clean(card.slug);
   const kind = clean(card.kind) || 'profile';
 
   switch (kind) {
     case 'review':
-      return urlAlias ? `/review/${encodeURIComponent(urlAlias)}` : null;
+      // getPublicCardByAlias accepts the legacy printed slug as well, so a
+      // historical review card without urlAlias keeps a working destination.
+      return urlAlias || slug ? `/review/${encodeURIComponent(urlAlias || slug)}` : null;
     case 'profile':
       if (publicSlug) return `/${publicSlug}`;
-      return urlAlias ? `/profile/${encodeURIComponent(urlAlias)}?src=qr` : null;
+      if (urlAlias) return `/profile/${encodeURIComponent(urlAlias)}?src=qr`;
+      // Legacy printed cards may only carry `slug`; /c/{slug} is the existing
+      // public shim and forwards to the profile without rewriting stored data.
+      return slug ? `/c/${encodeURIComponent(slug)}` : null;
     case 'social':
       // Without a configured destination a social card has no valid landing
       // page (its human URL dispatches to the same missing redirect), so fail

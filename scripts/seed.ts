@@ -1,10 +1,35 @@
+/**
+ * Seed defaults. Requires explicit local write confirmation:
+ *   npx tsx scripts/seed.ts --yes
+ * Remote targets require --allow-remote --confirm-remote plus owner approval.
+ */
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import CatalogProduct from '../src/models/CatalogProduct';
 import User from '../src/models/User';
 import { ALL_PRODUCT_IDS, PRODUCT_CATALOG, type ProductId } from '../src/config/products';
+import {
+  assertScriptWriteGuard,
+  formatTargetSummary,
+  hasFlag,
+  parseMongoTarget,
+} from '../src/lib/ops-script-safety';
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/nfc-crm';
+const SCRIPT_ARGS = process.argv.slice(2);
+let SCRIPT_TARGET: ReturnType<typeof parseMongoTarget>;
+try {
+  SCRIPT_TARGET = parseMongoTarget(MONGODB_URI, process.env.MONGODB_DB);
+  assertScriptWriteGuard(SCRIPT_TARGET, {
+    allowRemote: hasFlag(SCRIPT_ARGS, '--allow-remote') || process.env.ALLOW_REMOTE_DB_SCRIPT === 'true',
+    remoteConfirmed: hasFlag(SCRIPT_ARGS, '--confirm-remote') || process.env.CONFIRM_REMOTE_DB === SCRIPT_TARGET.dbName,
+    writeConfirmed: hasFlag(SCRIPT_ARGS, '--yes') || process.env.CONFIRM_DB_WRITE === SCRIPT_TARGET.dbName,
+  });
+} catch (error) {
+  console.error(`[seed] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
+console.log(`[seed] ${formatTargetSummary(SCRIPT_TARGET)} action=seed defaults`);
 
 /**
  * Map each product to its software experience kind (the value stored on

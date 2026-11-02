@@ -28,6 +28,9 @@ interface Vcard {
   status?: string;
   createdAt?: string;
   updatedAt?: string;
+  preview?:
+    | { ok: true; kind: string; href: string }
+    | { ok: false; kind: string; reason: string; message: string };
 }
 
 interface ListMeta {
@@ -49,9 +52,10 @@ function templateNameOf(key: string, names: Record<string, string>): string {
  *  back to the legacy /profile/{alias} route for cards without an allocated
  *  public slug so unbound cards still resolve. */
 function resolveCardPublicUrl(vcard: Vcard, origin: string): string {
-  const publicSlug = (vcard.publicSlug ?? '').trim();
-  if (publicSlug && origin) return `${origin}/${publicSlug}`;
-  return `/profile/${vcard.urlAlias}`;
+  if (!vcard.preview?.ok) return '';
+  const href = vcard.preview.href;
+  if (href.startsWith('http')) return href;
+  return origin ? `${origin}${href}` : href;
 }
 
 export default function VcardsPage() {
@@ -102,14 +106,14 @@ export default function VcardsPage() {
   }, []);
 
   const openQr = async (vcard: Vcard) => {
-    if (!origin) {
-      toast({ title: 'QR unavailable', description: 'A canonical public URL is not configured.', variant: 'error' });
+    const url = resolveCardPublicUrl(vcard, window.location.origin);
+    if (!origin || !url) {
+      toast({ title: 'QR unavailable', description: 'A canonical public URL is not configured for this product.', variant: 'error' });
       return;
     }
     setQrTarget(vcard);
     setQrDataUrl('');
     try {
-      const url = resolveCardPublicUrl(vcard, window.location.origin);
       const dataUrl = await QRCode.toDataURL(url, { width: 256, margin: 2 });
       setQrDataUrl(dataUrl);
     } catch (error) {
@@ -277,23 +281,25 @@ export default function VcardsPage() {
                 {/* Body */}
                 <div className="p-5 space-y-1">
                   <h2 className="truncate text-base font-semibold text-ink">{resolveCardDisplayName(vcard)}</h2>
-                  <a
-                    href={
-                      vcard.publicSlug && origin
-                        ? `${origin}/${vcard.publicSlug}`
-                        : `/profile/${vcard.urlAlias}`
+                  {(() => {
+                    const canonical = resolveCardPublicUrl(vcard, origin);
+                    if (!canonical) {
+                      return (
+                        <p className="text-xs text-ink-faint">Public URL available after setup.</p>
+                      );
                     }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex max-w-full items-center gap-1.5 text-xs text-ink-mute font-mono hover:text-accent-400 transition-colors"
-                  >
-                    <span className="truncate">
-                      {vcard.publicSlug && origin
-                        ? `${origin}/${vcard.publicSlug}`
-                        : `/profile/${vcard.urlAlias}`}
-                    </span>
-                    <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  </a>
+                    return (
+                      <a
+                        href={canonical}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex max-w-full items-center gap-1.5 text-xs text-ink-mute font-mono hover:text-accent-400 transition-colors"
+                      >
+                        <span className="truncate">{canonical}</span>
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      </a>
+                    );
+                  })()}
                   <div className="flex items-center gap-4 pt-2">
                     <span className="flex items-center gap-1.5 text-xs tabular-nums text-ink-mute">
                       <Eye className="h-3.5 w-3.5" aria-hidden="true" />
@@ -317,6 +323,18 @@ export default function VcardsPage() {
                       Edit
                     </Button>
                   </Link>
+                  {vcard.preview?.ok && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        window.open(vcard.preview && vcard.preview.ok ? vcard.preview.href : '', '_blank', 'noopener,noreferrer')
+                      }
+                    >
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                      Preview
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => openQr(vcard)}>
                     <QrCode className="mr-1.5 h-3.5 w-3.5" />
                     QR

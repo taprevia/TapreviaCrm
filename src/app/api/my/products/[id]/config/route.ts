@@ -7,6 +7,7 @@ import Standee from '@/models/Standee';
 import Profile from '@/models/Profile';
 import UserProduct from '@/models/UserProduct';
 import { updateProductConfigSchema } from '@/lib/validation/product-config';
+import { isSupportedGoogleReviewUrl } from '@/lib/validation/google-review-url';
 import { hasCapability } from '@/lib/services/capability-access';
 
 type Params = { params: { id: string } };
@@ -50,6 +51,28 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const category = catalog?.category ?? '';
 
     const body = await request.json().catch(() => null);
+    // Keep existing legacy review destinations editable when the submitted
+    // value is unchanged. New/changed values still pass the Google policy.
+    if (
+      body &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      category === 'card' &&
+      assignment.cardId
+    ) {
+      const incoming = (body as { googleReview?: { googleReviewUrl?: unknown } }).googleReview;
+      if (incoming && typeof incoming.googleReviewUrl === 'string') {
+        const existing = (await Card.findById(assignment.cardId)
+          .select('reviewAssistant.googleReviewUrl')
+          .lean()) as { reviewAssistant?: { googleReviewUrl?: string } } | null;
+        if (
+          existing?.reviewAssistant?.googleReviewUrl &&
+          existing.reviewAssistant.googleReviewUrl === incoming.googleReviewUrl
+        ) {
+          delete incoming.googleReviewUrl;
+        }
+      }
+    }
     const parsed = updateProductConfigSchema.safeParse(body);
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid configuration', parsed.error.flatten().fieldErrors);
@@ -218,6 +241,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         }
         if (!isSafeUrl(destinationUrl)) {
           return fail(400, 'VALIDATION_ERROR', 'Invalid destination URL');
+        }
+        if (
+          (slotDoc.platform ?? '').trim().toLowerCase() === 'google_review' &&
+          !isSupportedGoogleReviewUrl(destinationUrl)
+        ) {
+          return fail(400, 'VALIDATION_ERROR', 'Enter a supported Google review link');
         }
         const update: Record<string, unknown> = {
           [`socialQrs.${index}.destinationUrl`]: destinationUrl,

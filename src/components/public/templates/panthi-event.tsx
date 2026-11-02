@@ -1409,7 +1409,7 @@ export function PanthiEventTemplate({
         </main>
       </div>
 
-      <nav className="pep2-bar" aria-label="Quick actions">
+      <nav className="pep2-bar" aria-label="Event quick actions">
         <div className="pep2-bar-in">
           {data.phoneRaw ? (
             <a className="pep2-btn pep2-btn--brand pep2-bar-btn pep2-bar-btn--brand" href={`tel:+${data.phoneRaw}`}>

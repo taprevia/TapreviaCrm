@@ -6,14 +6,19 @@ import UserProduct from '@/models/UserProduct';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
 import ProductTitleLog from '@/models/ProductTitleLog';
-import { PRODUCT_CATALOG, type ProductId, isProductId } from '@/config/products';
+import { PRODUCT_CATALOG, type ProductId } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { resolveProductTitle } from '@/lib/services/product-title';
+import { resolveProductUrls } from '@/lib/services/product-preview';
+import { getReviewProductForUser } from '@/lib/services/review-product-eligibility';
+import TenantSettings from '@/models/TenantSettings';
 import { renameProductTitleInputSchema, sanitizeProductTitle } from '@/lib/validation/product-title';
 
 type Params = { params: { id: string } };
 
 type AssignmentDoc = {
   _id: unknown;
+  userId: unknown;
   catalogProductId: Record<string, unknown> | null;
   cardId: unknown;
   standeeId: unknown;
@@ -103,9 +108,7 @@ async function loadProductDetail(
 function buildProductPayload({ assignment, instance, instanceType }: LoadedProduct) {
   const catalog = assignment.catalogProductId as Record<string, unknown> | null;
   const slug = (catalog?.slug as string) ?? '';
-  const productId: ProductId | null = isProductId(slug?.toUpperCase()?.replace(/-/g, '_'))
-    ? (slug.toUpperCase().replace(/-/g, '_') as ProductId)
-    : null;
+  const productId: ProductId | null = resolveCanonicalProductId(slug);
   const productDef = productId ? PRODUCT_CATALOG[productId] : null;
   const routeSlug = (instance?.routeSlug as string | undefined) ?? '';
 
@@ -187,6 +190,66 @@ function buildProductPayload({ assignment, instance, instanceType }: LoadedProdu
   };
 }
 
+async function buildProductPayloadWithUrls(loaded: LoadedProduct) {
+  const payload = buildProductPayload(loaded);
+  const urls = await resolveProductUrls({
+    instanceType: loaded.instanceType,
+    instance: loaded.instance,
+  });
+
+  // Additive Premium/profile review action. The canonical NFC destination is
+  // unchanged; this only exposes an explicit review page when the product is
+  // review-entitled. Existing review cards keep using their canonical URL.
+  let review: {
+    eligible: boolean;
+    cardKind: string;
+    url: string | null;
+    googleConfigured: boolean;
+    aiConfigured: boolean;
+    managementUrl: string;
+  } | null = null;
+  if (
+    loaded.instanceType === 'card' &&
+    (loaded.instance?.urlAlias || loaded.instance?.slug)
+  ) {
+    try {
+      const lookup = await getReviewProductForUser(
+        String(loaded.assignment.userId),
+        String(loaded.assignment._id)
+      );
+      if (lookup.ok && lookup.product.eligible) {
+        let aiConfigured = false;
+        try {
+          const settings = await TenantSettings.findOne({ userId: loaded.assignment.userId })
+            .select('openai.enabled openai.apiKeyEnc')
+            .lean<{ openai?: { enabled?: boolean; apiKeyEnc?: string } } | null>();
+          aiConfigured = Boolean(settings?.openai?.enabled && settings.openai.apiKeyEnc);
+        } catch {
+          // AI status is informational; never block the product page.
+        }
+        review = {
+          eligible: true,
+          cardKind: lookup.product.cardKind,
+          url: lookup.product.previewUrl,
+          googleConfigured: lookup.product.googleDestinationConfigured,
+          aiConfigured,
+          managementUrl: `/dashboard/review-management?cardId=${encodeURIComponent(String(loaded.assignment.cardId))}`,
+        };
+      }
+    } catch {
+      // Review availability must never block product configuration.
+    }
+  }
+
+  return {
+    ...payload,
+    canonicalPublicUrl: urls.canonicalPublicUrl,
+    previewUrl: urls.previewUrl,
+    configurationStatus: urls.configurationStatus,
+    review,
+  };
+}
+
 /**
  * GET /api/my/products/[id] — get a single product assignment with instance.
  * Verifies ownership before returning data.
@@ -203,7 +266,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       return fail(404, 'NOT_FOUND', 'Product assignment not found');
     }
 
-    return ok({ product: buildProductPayload(loaded) });
+    return ok({ product: await buildProductPayloadWithUrls(loaded) });
   } catch (error) {
     console.error('Product detail GET error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');
@@ -325,7 +388,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return fail(404, 'NOT_FOUND', 'Product assignment not found');
     }
 
-    return ok({ product: buildProductPayload(reloaded) });
+    return ok({ product: await buildProductPayloadWithUrls(reloaded) });
   } catch (error) {
     console.error('Product rename PATCH error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');

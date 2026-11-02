@@ -5,12 +5,13 @@ import User from '@/models/User';
 import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import { deriveCardKind } from '@/lib/services/product-experience';
-import { provisionCardForAssignment, allocateCardRouteSlug, allocateDigitalCardUid } from '@/lib/services/card-identity';
+import { provisionCardForAssignment, allocateCardRouteSlug, allocateDigitalCardUid, findCardByUid } from '@/lib/services/card-identity';
 import { ensureCardPublicSlug, ensureStandeePublicSlug } from '@/lib/services/human-url';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { generateQrId } from '@/lib/utils';
 import { generateUniqueTimestampUid } from '@/lib/uid';
-import { isProductId, getProductDef, getStandeeProfileConfig } from '@/config/products';
+import { isProductId, getProductDef, getProductCapabilities, getStandeeProfileConfig } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 
 type UserDoc = ReturnType<typeof User.hydrate>;
 type CatalogProductDoc = ReturnType<typeof CatalogProduct.hydrate>;
@@ -67,6 +68,11 @@ interface AssignUserProductArgs {
  * synthetic digital-first UID when no hardware is supplied yet), standees generate panel +
  * social QRs, everything else only records the assignment.
  */
+function productGrantsReview(catalogItem: { slug?: string }): boolean {
+  const productId = resolveCanonicalProductId(catalogItem.slug);
+  return productId ? getProductCapabilities(productId).includes('review_ai_suggestions') : false;
+}
+
 export async function assignUserProduct({
   user,
   catalogItem,
@@ -75,8 +81,15 @@ export async function assignUserProduct({
   platforms,
   notes,
   assignedBy,
-  material = 'pvc',
+  material,
 }: AssignUserProductArgs): Promise<AssignUserProductResult> {
+  if (material === 'pvc') {
+    return {
+      ok: false,
+      status: 400,
+      error: 'PVC is no longer available for new assignments',
+    };
+  }
   switch (catalogItem.category) {
     case 'card': {
       const derivedKind = deriveCardKind(catalogItem.kind);
@@ -106,6 +119,29 @@ export async function assignUserProduct({
       // physical card is bound later the admin replaces ONLY `cardUid` in place
       // (see replaceCardForAssignment) — the permanent routeSlug/uid and public
       // URL are preserved, so nothing already shared or printed breaks.
+      // Validate duplicate assignment BEFORE provisioning/mutating any card.
+      // provisionCardForAssignment can change an existing Card.kind; a request
+      // that ultimately returns 409 must not leave that mutation behind.
+      if (cardUid) {
+        const existingCard = await findCardByUid(cardUid);
+        if (existingCard) {
+          const duplicate = await UserProduct.findOne({
+            userId: user._id,
+            cardId: existingCard._id,
+            status: 'active',
+          })
+            .select('_id')
+            .lean<{ _id: unknown } | null>();
+          if (duplicate) {
+            return {
+              ok: false,
+              status: 409,
+              error: 'This card is already assigned to this customer',
+            };
+          }
+        }
+      }
+
       const bindingUid = cardUid ?? (await allocateDigitalCardUid());
 
       // Provision + bind the card. A physical UID claims/binds directly (no
@@ -156,6 +192,14 @@ export async function assignUserProduct({
           { $setOnInsert: { userId: user._id }, $set: { cardId: assigned._id } },
           { new: true, upsert: true }
         );
+
+        // New review-capable products start on the central settings source.
+        // Existing Cards are never modified; no central document is required
+        // yet, and the resolver still falls back to legacy until one exists.
+        if (provisioned.created && productGrantsReview(catalogItem)) {
+          assigned.reviewSettingsSource = 'central';
+          await assigned.save();
+        }
 
         const userProduct = await UserProduct.create({
           userId: user._id,
@@ -261,6 +305,9 @@ export async function assignUserProduct({
           qrColor: '#000000',
           label: getStandeePlatformById(platform)?.name ?? platform,
         })),
+        ...(productGrantsReview(catalogItem)
+          ? { reviewSettingsSource: 'central' as const }
+          : {}),
       });
 
       const previousStandy = user.hasStandy;

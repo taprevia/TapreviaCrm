@@ -124,7 +124,8 @@ for (const total of [0, 1, 3, 4, 5, 10]) {
   assert.equal(remainingCardCount(total), Math.max(0, total - 4));
 }
 
-// QR always uses the permanent /r/{routeSlug} route and never /c/{slug}.
+// QR prefers the permanent /r/{routeSlug} route, then the existing human and
+// legacy public routes; it never invents an identifier.
 assert.equal(
   permanentCardUrl({ routeSlug: 'abc123' }, 'https://taprev.in'),
   'https://taprev.in/r/abc123'
@@ -132,6 +133,9 @@ assert.equal(
 assert.equal(permanentCardUrl({ routeSlug: '' }, 'https://taprev.in'), '');
 assert.equal(permanentCardUrl({}, 'https://taprev.in'), '');
 assert.equal(permanentCardUrl({ routeSlug: 'abc123' }, ''), '');
+assert.equal(permanentCardUrl({ publicSlug: 'acme/premium' }, 'https://taprev.in'), 'https://taprev.in/acme/premium');
+assert.equal(permanentCardUrl({ urlAlias: 'legacy-alias' }, 'https://taprev.in'), 'https://taprev.in/profile/legacy-alias');
+assert.equal(permanentCardUrl({ slug: 'legacy-slug' }, 'https://taprev.in'), 'https://taprev.in/c/legacy-slug');
 assert.notEqual(
   permanentCardUrl({ routeSlug: 'card-a' }, 'https://taprev.in'),
   permanentCardUrl({ routeSlug: 'card-b' }, 'https://taprev.in')
@@ -172,7 +176,17 @@ assert.equal(
   resolveCardDestination({ kind: 'social', urlAlias: 'alias' }),
   null
 );
+assert.equal(
+  resolveCardDestination({ kind: 'profile', slug: 'legacy-slug' }),
+  '/c/legacy-slug'
+);
 assert.equal(resolveCardDestination({ kind: 'review', publicSlug: 'biz/x' }), null);
+// The public review resolver accepts the legacy printed slug, so interception
+// fallback must match it rather than dropping a historical review card.
+assert.equal(
+  resolveCardDestination({ kind: 'review', slug: 'legacy-slug' }),
+  '/review/legacy-slug'
+);
 assert.equal(resolveCardDestination({ kind: 'profile' }), null);
 assert.equal(resolveCardDestination({ kind: 'future-product', publicSlug: 'biz/x' }), null);
 

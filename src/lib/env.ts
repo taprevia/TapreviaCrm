@@ -60,10 +60,18 @@ export function getEnv(): AppEnv | null {
  * production without JWT_SECRET set — it throws instead.
  */
 export function requireJwtSecret(): string {
-  const env = getEnv();
-  if (env?.JWT_SECRET) return env.JWT_SECRET;
+  // JWT validation is deliberately independent of database configuration:
+  // middleware needs only the signing secret, and must not fail with a 500
+  // just because MONGODB_URI is absent. Missing/invalid critical runtime
+  // configuration is handled at the server-start boundary and /api/health.
+  const value = process.env.JWT_SECRET?.trim();
+  if (value && value.length >= 24 && value.length <= 512) return value;
   if (isProd) {
-    throw new Error('JWT_SECRET is required in production');
+    throw new Error(
+      value
+        ? 'JWT_SECRET must be 24–512 characters in production'
+        : 'JWT_SECRET is required in production'
+    );
   }
   const dev = 'dev-only-insecure-jwt-secret-change-me';
   console.warn('[env] JWT_SECRET not set — using insecure dev placeholder');

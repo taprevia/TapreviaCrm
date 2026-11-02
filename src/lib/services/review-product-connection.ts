@@ -13,6 +13,7 @@ import ReviewCategory from '@/models/ReviewCategory';
 import ReviewTemplate from '@/models/ReviewTemplate';
 import { getReviewProductForUser } from '@/lib/services/review-product-eligibility';
 import { getSavedReviewSettings } from '@/lib/services/review-management-settings';
+import { isCentralPublicIntegrationEnabledForTenant } from '@/lib/services/review-rollout';
 import { resolveReviewSettings } from '@/lib/services/review-settings-resolver';
 import { resolveStandeeEffectiveReviewSettings } from '@/lib/services/review-standee-settings';
 import type { ReviewProductConnectionInput } from '@/lib/validation/review-settings';
@@ -102,6 +103,22 @@ export async function connectReviewProduct(args: {
       status: 400,
       code: 'VALIDATION_ERROR',
       message: 'This product is not an active review host',
+    };
+  }
+  // Central ON disables the legacy product-specific workflow for eligible
+  // products. The stored legacy settings remain untouched for rollback and
+  // become active again when central integration is turned OFF.
+  if (
+    args.input.source === 'legacy' &&
+    isCentralPublicIntegrationEnabledForTenant(args.userId) &&
+    (product.settingsSource === 'central' || product.settingsSource === 'hybrid')
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'VALIDATION_ERROR',
+      message:
+        'Central Review Management is active for this product. Product-specific review settings cannot be enabled while Central Public Review Integration is on.',
     };
   }
 

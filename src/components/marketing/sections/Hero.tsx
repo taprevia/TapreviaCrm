@@ -145,7 +145,7 @@ export const Hero: React.FC = () => {
                   ))}
                 </div>
                 <p className="text-xs font-bold text-brand-navy leading-snug">&quot;Looks incredibly premium.&quot;</p>
-                <p className="text-[10px] text-gray-400 mt-1">— Verified buyer</p>
+                <p className="text-[10px] text-gray-500 mt-1">— Verified buyer</p>
               </div>
 
             </div>

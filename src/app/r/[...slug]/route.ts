@@ -10,6 +10,7 @@ import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { resolveCardDestination } from '@/lib/services/redirect-target';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
   isStandeeReviewHostEligible,
   standeeHasGoogleReviewSlot,
@@ -245,7 +246,14 @@ export async function GET(
         // Fail-open.
       }
 
+      const multiProfileStandee =
+        (standee.maxProfiles ?? 0) > 1 || (standee.fixedProfiles?.length ?? 0) > 1;
+
+      // Multi-profile panel QRs must keep opening the profile picker. Only a
+      // single-purpose Google Review Standee's panel QR enters the review host.
+      // The Google Review slot itself is handled by the slot/QR branches above.
       if (
+        !multiProfileStandee &&
         reviewEligible &&
         standeeHasGoogleReviewSlot({
           _id: standee._id,
@@ -321,10 +329,11 @@ export async function GET(
         ],
       })
     )
-      .select('_id urlAlias slug kind redirectUrl cardUid')
+      .select('_id urlAlias publicSlug slug kind redirectUrl cardUid')
       .lean()) as {
       _id: unknown;
       urlAlias: string;
+      publicSlug?: string;
       slug: string;
       kind: string;
       redirectUrl: string;
@@ -339,17 +348,18 @@ export async function GET(
           incrementTapCount(legacyCard._id),
         ]);
       }
-      if (legacyCard.urlAlias) {
-        return NextResponse.redirect(
-          new URL(`/profile/${legacyCard.urlAlias}?src=qr`, request.url),
-          307
-        );
+      // Use the same product-aware resolver as the routeSlug branch so legacy
+      // profile Cards with only a `slug` reach `/c/{slug}` instead of a 404.
+      const destination = resolveCardDestination(legacyCard);
+      if (destination) {
+        return NextResponse.redirect(new URL(destination, request.url), 307);
       }
     }
 
     // ── 4. 404 ─────────────────────────────────────────────────────────
     return new Response('Not found', { status: 404 });
   } catch (error) {
+    emitReviewEvent({ event: 'review.routing.error', errorCategory: 'routing', reasonCategory: 'dynamic_route' });
     console.error('Dynamic route resolver error:', error);
     return new Response('Internal server error', { status: 500 });
   }

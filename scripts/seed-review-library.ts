@@ -5,7 +5,8 @@
  * the same artifact the admin import accepts. Upserts by key only; never touches
  * or deletes any other collection. Idempotent, safe to re-run.
  *
- * Run:  MONGODB_URI=mongodb://localhost:27017/nfc-crm npx tsx scripts/seed-review-library.ts
+ * Run:  MONGODB_URI=mongodb://localhost:27017/nfc-crm npx tsx scripts/seed-review-library.ts --yes
+ * Remote targets require --allow-remote --confirm-remote plus owner approval.
  */
 
 import mongoose from 'mongoose';
@@ -18,8 +19,28 @@ import {
   normalizeTemplatePayload,
   normalizeCategoryPayload,
 } from '../src/lib/validation/review-library';
+import {
+  assertScriptWriteGuard,
+  formatTargetSummary,
+  hasFlag,
+  parseMongoTarget,
+} from '../src/lib/ops-script-safety';
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/nfc-crm';
+const SCRIPT_ARGS = process.argv.slice(2);
+let SCRIPT_TARGET: ReturnType<typeof parseMongoTarget>;
+try {
+  SCRIPT_TARGET = parseMongoTarget(MONGODB_URI, process.env.MONGODB_DB);
+  assertScriptWriteGuard(SCRIPT_TARGET, {
+    allowRemote: hasFlag(SCRIPT_ARGS, '--allow-remote') || process.env.ALLOW_REMOTE_DB_SCRIPT === 'true',
+    remoteConfirmed: hasFlag(SCRIPT_ARGS, '--confirm-remote') || process.env.CONFIRM_REMOTE_DB === SCRIPT_TARGET.dbName,
+    writeConfirmed: hasFlag(SCRIPT_ARGS, '--yes') || process.env.CONFIRM_DB_WRITE === SCRIPT_TARGET.dbName,
+  });
+} catch (error) {
+  console.error(`[seed-review-library] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
+console.log(`[seed-review-library] ${formatTargetSummary(SCRIPT_TARGET)} action=seed review library`);
 const ARTIFACT_PATH = join(__dirname, 'data', 'review-library-mobile-repair.json');
 
 async function seed() {

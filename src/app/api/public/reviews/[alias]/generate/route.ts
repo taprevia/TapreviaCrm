@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { fail, ok, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
 import { generateReviewSuggestion } from '@/lib/services/review-generate';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 import { reviewPreferredLengthSchema } from '@/lib/validation/card';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +27,7 @@ const generateBodySchema = z.object({
   feedback: z
     .string()
     .trim()
-    .min(20, 'Tell us a little more about your experience.')
+    .min(3, 'Add at least 3 characters about your experience.')
     .max(5000, 'Feedback is too long.'),
   topics: z.array(z.string().trim().min(1).max(60)).max(12).optional(),
   language: z.string().trim().min(1).max(40).optional(),
@@ -63,14 +64,19 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (result.code === 'NOT_FOUND') {
         return fail(404, 'NOT_FOUND', result.message);
       }
+      if (result.code === 'NO_MATCHING_REVIEW_TEMPLATE') return fail(404, 'NO_MATCHING_REVIEW_TEMPLATE', result.message);
+      if (result.code === 'AI_NOT_CONFIGURED') {
+        return fail(503, 'AI_NOT_CONFIGURED', result.message);
+      }
       if (result.code === 'UNAVAILABLE') {
         return fail(503, 'UNAVAILABLE', result.message);
       }
       return fail(429, 'LIMIT_REACHED', result.message);
     }
 
-    return ok({ review: result.review });
+    return ok({ review: result.review, engine: result.engine });
   } catch (error) {
+    emitReviewEvent({ event: 'review.generation.failure', hostType: 'card', outcome: 'failure', errorCategory: 'internal' });
     console.error('Review generate POST error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Could not generate a review draft');
   }

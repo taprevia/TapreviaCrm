@@ -8,6 +8,10 @@ export interface ReviewSettingsResponse {
   revision: string;
   settings: ReviewSettingsDraft;
   updatedAt?: string;
+  /** Server feature flag: central settings are publicly active. */
+  publicIntegrationEnabled?: boolean;
+  /** Server-side: tenant OpenAI is enabled and a key is stored. */
+  aiConfigured?: boolean;
 }
 
 export interface ReviewOptionChoice {
@@ -75,8 +79,25 @@ export interface ReviewProduct {
   settingsSource: ReviewSettingsSource;
   settingsRevision: number;
   reviewOverrides: ReviewProductOverrides;
+  /** Raw legacy Card settings, used by the individual Configure editor. */
+  legacySettings?: ReviewProductOverrides & {
+    styleMode?: 'fixed' | 'varied';
+    lengthMode?: 'fixed' | 'varied';
+    enabled?: boolean;
+    googleReviewUrl?: string;
+    welcomeMessage?: string;
+    category?: string;
+    languages?: string[];
+    writingStyle?: 'friendly' | 'professional' | 'casual' | 'simple';
+    preferredLength?: 'short' | 'medium' | 'detailed';
+    feedbackTopics?: string[];
+    services?: string[];
+    employees?: string[];
+    keywords?: string[];
+  };
   reviewAssistantEnabled: boolean;
   googleDestinationConfigured: boolean;
+  effectiveGoogleReviewUrl: string;
   standeeGoogleReviewUrl?: string;
   productGrantsReview: boolean;
   accountReviewEntitled: boolean;

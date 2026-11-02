@@ -28,11 +28,13 @@ import {
   Globe,
   Info,
   QrCode,
-  Settings2,
   Pencil,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react';
-import { getStandeePlatformById } from '@/lib/constants';
+import StandeeManager from '@/components/dashboard/standee-manager';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { shouldShowPremiumReviewSection } from '@/lib/services/review-ui';
 
 interface ProductInstanceData {
   id: string;
@@ -95,11 +97,19 @@ interface ProductDetailResponse {
   instanceType: 'card' | 'standee' | null;
   instance: ProductInstanceData | null;
   publicUrl?: string | null;
+  canonicalPublicUrl?: string | null;
+  previewUrl?: string | null;
+  configurationStatus?: string;
+  review?: {
+    eligible: boolean;
+    cardKind: string;
+    url: string | null;
+    googleConfigured: boolean;
+    aiConfigured: boolean;
+    managementUrl: string;
+  } | null;
 }
 
-function platformName(id: string): string {
-  return getStandeePlatformById(id)?.name ?? id.replace(/_/g, ' ');
-}
 
 export default function ProductConfigPage({ params }: { params: { id: string } }) {
   const [data, setData] = useState<ProductDetailResponse | null>(null);
@@ -293,9 +303,17 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
 
   // Domain-qualified public link for the customer's product — the payload used
   // when a card/QR is encoded or shared.
-  const publicUrlFull = data?.publicUrl && origin
-    ? `${origin}${data.publicUrl}`
+  const canonicalPublicUrl = data?.canonicalPublicUrl ?? data?.publicUrl ?? null;
+  const publicUrlFull = canonicalPublicUrl
+    ? canonicalPublicUrl.startsWith('http')
+      ? canonicalPublicUrl
+      : origin
+        ? `${origin}${canonicalPublicUrl}`
+        : canonicalPublicUrl
     : null;
+
+  const reviewSection =
+    data?.review && shouldShowPremiumReviewSection(data.review) ? data.review : null;
 
   const kind = data?.catalogProduct?.kind ?? '';
   const isProfile = kind === 'profile';
@@ -307,13 +325,13 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
     (isProfile || Boolean(data.instance?.whatsappConfig?.phoneNumber || whatsapp.phoneNumber));
 
   // A card's public URL is only live once its destination is actually
-  // configured: review cards need the Review Assistant enabled, social cards
+  // configured: review cards need reviews enabled in Review Management, social cards
   // need a valid external destination URL. Profile cards and standees always
   // render, so they remain live. Null = live; otherwise the neutral message
   // replacing the copyable link until the destination goes live.
   const publicUrlPendingReason =
     isReview && data?.instance?.reviewAssistant?.enabled !== true
-      ? 'This URL goes live once you enable Review Assistant.'
+      ? 'This URL goes live once you enable reviews in Review Management.'
       : isSocial && !isSafeExternalUrl(data?.instance?.redirectUrl ?? '')
         ? 'This URL goes live once you set a destination link.'
         : null;
@@ -498,53 +516,58 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
         </Card>
       )}
 
-      {isStandee ? (
-        /* ── Standee: slots + link to the standee manager ────────────────── */
-        <Card className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-4">
+      {reviewSection && (
+        <Card className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-3">
           <div>
-            <h2 className="text-base font-semibold text-ink flex items-center gap-2">
-              <QrCode className="h-4 w-4 text-accent-400" />
-              Profile Slots
+            <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+              <Sparkles className="h-4 w-4 text-accent-400" aria-hidden="true" />
+              Google Reviews
             </h2>
-            <p className="text-sm text-ink-mute mt-0.5">
-              Each slot resolves dynamically to the destination you set. Change a slot&apos;s destination anytime — no reprint needed.
+            <p className="mt-0.5 text-sm text-ink-mute">
+              Your card still opens your profile by default. This optional review page is a separate
+              link/QR destination for customers who want to leave a Google review.
             </p>
           </div>
-
-          {(data.instance?.socialQrs ?? []).length > 0 ? (
-            <div className="space-y-2">
-              {(data.instance!.socialQrs ?? []).map((qr, idx) => (
-                <div key={qr.qrId} className="flex items-center justify-between rounded-lg border border-line-subtle px-3.5 py-2.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent-600/10 text-[10px] font-semibold text-accent-400">
-                      {idx + 1}
-                    </span>
-                    <span className="text-sm font-medium text-ink">{platformName(qr.platform)}</span>
-                    {qr.destinationUrl && (
-                      <span className="hidden sm:block truncate text-xs text-ink-faint max-w-[160px]">
-                        {qr.destinationUrl}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
+          {reviewSection.googleConfigured && reviewSection.url ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <a href={reviewSection.url} target="_blank" rel="noopener noreferrer">
+                <Button variant="outline" size="sm">
+                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Open review page
+                </Button>
+              </a>
+              <Link href={reviewSection.managementUrl}>
+                <Button variant="ghost" size="sm">Review settings</Button>
+              </Link>
             </div>
           ) : (
-            <p className="text-sm text-ink-mute">
-              No slots are configured yet. Set each slot&apos;s destination from the standee manager.
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href={reviewSection.managementUrl}>
+                <Button size="sm">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Set up Google review link
+                </Button>
+              </Link>
+              <span className="text-xs text-ink-faint">AI writing is configured in Dashboard Settings.</span>
+            </div>
           )}
-
-          <div className="pt-1">
-            <Link
-              href="/dashboard/standees"
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-sm font-medium text-gray-900 transition-all duration-200 hover:bg-gray-200/80 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 active:scale-[0.98]"
-            >
-              <Settings2 className="mr-2 h-4 w-4" />
-              Manage slots
-            </Link>
-          </div>
+          <p className="text-xs text-ink-faint">
+            {reviewSection.aiConfigured
+              ? 'AI writing is configured for your business. Template/manual review guidance remains available.'
+              : 'AI writing is not configured. Template/manual review guidance remains available.'}
+          </p>
         </Card>
+      )}
+
+      {isStandee ? (
+        /* ── Standee Manage: slots live only in this scoped view ─────────── */
+        <div>
+          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink">
+            <QrCode className="h-4 w-4 text-accent-400" />
+            Manage standee
+          </h2>
+          <StandeeManager assignmentId={params.id} />
+        </div>
       ) : (
         /* ── Card: destination editor ────────────────────────────────────── */
         <Card className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-4">

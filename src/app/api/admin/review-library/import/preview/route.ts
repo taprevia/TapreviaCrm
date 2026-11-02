@@ -19,9 +19,13 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid import payload', parsed.error.flatten().fieldErrors);
     }
+    if (parsed.data.categories.length === 0 && parsed.data.templates.length === 0) {
+      return fail(400, 'VALIDATION_ERROR', 'No categories or templates to preview');
+    }
 
+    const overwrite = (body as { overwrite?: unknown } | null)?.overwrite === true;
     await connectDB();
-    const analysis = await analyzeReviewImport(parsed.data);
+    const analysis = await analyzeReviewImport(parsed.data, { overwrite });
     return ok({ preview: analysis });
   } catch (error) {
     console.error('Admin review-library import preview error:', error);

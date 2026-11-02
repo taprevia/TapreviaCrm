@@ -85,10 +85,12 @@ interface ProductEntry {
   quantity: number;
   material?: string;
   createdAt?: string;
+  preview?:
+    | { ok: true; kind: string; href: string }
+    | { ok: false; kind: string; reason: string; message: string };
 }
 
 const MATERIAL_LABEL: Record<string, string> = {
-  pvc: 'PVC',
   metal: 'Metal',
   wooden: 'Wooden',
 };
@@ -300,11 +302,16 @@ export default function MyProductsPage() {
               inst?.maxProfiles ??
               inst?.socialQrs?.length;
             const material = MATERIAL_LABEL[product.material ?? ''] ?? null;
-            // Domain-qualified human-friendly public URL — what customers
-            // scan/share. Always resolved to a full origin, never the internal
-            // /r/ routing URL.
-            const publicUrlFull =
-              product.publicUrl && origin ? `${origin}${product.publicUrl}` : null;
+            // One canonical customer-facing URL from the authoritative preview
+            // resolver. Never the internal permanent /r/ (or legacy /c) route.
+            const canonicalHref = product.preview?.ok ? product.preview.href : null;
+            const publicUrlFull = canonicalHref
+              ? canonicalHref.startsWith('http')
+                ? canonicalHref
+                : origin
+                  ? `${origin}${canonicalHref}`
+                  : canonicalHref
+              : null;
             const destination = inst ? cardDestination(inst, publicUrlFull) : null;
             const manageHref = resolveProductManageHref(product);
 
@@ -446,7 +453,7 @@ export default function MyProductsPage() {
 
                 {/* Human-friendly public URL — what customers share/display */}
                 {publicUrlFull && (
-                  <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-field px-3.5 py-2.5 ring-1 ring-accent-600/20">
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-field px-3.5 py-2.5 ring-1 ring-accent-600/20">
                     <div className="flex min-w-0 items-center gap-2">
                       <Globe className="h-4 w-4 shrink-0 text-accent-400" aria-hidden="true" />
                       <span className="truncate font-mono text-sm text-accent-400">
@@ -485,16 +492,22 @@ export default function MyProductsPage() {
                     <Settings2 className="mr-1.5 h-3.5 w-3.5" />
                     {needsConfig ? 'Set Up' : 'Manage'}
                   </Link>
-                  {/* Preview the custom public URL when one is allocated. */}
-                  {publicUrlFull && (
+                  {/* Preview the saved customer-facing experience for this exact instance. */}
+                  {product.preview?.ok ? (
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => window.open(publicUrlFull, '_blank')}
+                      onClick={() =>
+                        window.open(product.preview && product.preview.ok ? product.preview.href : '', '_blank', 'noopener,noreferrer')
+                      }
                     >
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                       Preview
                     </Button>
+                  ) : (
+                    <span className="text-xs text-ink-faint">
+                      {product.preview?.ok === false ? product.preview.message : 'Preview unavailable'}
+                    </span>
                   )}
                 </div>
               </Card>

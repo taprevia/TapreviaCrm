@@ -37,6 +37,11 @@ const UserSchema = new Schema(
 UserSchema.index({ bizSlug: 1 }, { unique: true, sparse: true });
 UserSchema.index({ customerId: 1 }, { unique: true, sparse: true });
 
+/** Full bcrypt hash validation (not just a prefix check). */
+export function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
+}
+
 UserSchema.pre('save', async function () {
   if (this.customerId) return;
   this.customerId = await assignCustomerId(this);
@@ -44,7 +49,7 @@ UserSchema.pre('save', async function () {
 
 UserSchema.pre('save', async function () {
   if (!this.isModified('passwordHash')) return;
-  if (/^\$2[aby]\$/.test(this.passwordHash)) return;
+  if (isBcryptHash(this.passwordHash)) return;
   const salt = await bcrypt.genSalt(12);
   this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
 });

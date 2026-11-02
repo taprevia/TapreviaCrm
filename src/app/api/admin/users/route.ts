@@ -7,6 +7,7 @@ import Profile from '@/models/Profile';
 import Card from '@/models/Card';
 import { createCustomerSchema } from '@/lib/validation/catalog';
 import { createCustomerWithProducts } from '@/lib/services/customer-creation';
+import { literalSearchRegExp, normalizeSearchInput } from '@/lib/search';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +22,16 @@ const admin = await requireAdminStrict(request);
       new URL(request.url).searchParams
     );
 
+    const normalizedSearch = normalizeSearchInput(typeof search === 'string' ? search : null);
+    if (!normalizedSearch.ok) {
+      return fail(400, 'VALIDATION_ERROR', 'Search term is too long');
+    }
     const query: Record<string, unknown> = { role: 'customer' };
-    if (search) {
+    if (normalizedSearch.value) {
+      const regex = literalSearchRegExp(normalizedSearch.value);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
+        { name: { $regex: regex } },
+        { email: { $regex: regex } },
       ];
     }
 

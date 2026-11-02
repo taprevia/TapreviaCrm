@@ -198,7 +198,7 @@ export const Footer: React.FC = () => {
             </p>
 
             <div className="pt-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-300 mb-2">Get product updates</h4>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-300 mb-2">Get product updates</h3>
               {subscribed ? (
                 <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold bg-emerald-950/50 p-2.5 rounded-xl border border-emerald-800">
                   <CheckCircle2 size={16} /> Subscribed successfully!
@@ -223,7 +223,7 @@ export const Footer: React.FC = () => {
 
           {/* Column 2: Product Links */}
           <div>
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Product</h4>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Product</h3>
             <ul className="space-y-2.5 text-xs text-gray-400">
               {nav.product.map((item) => (
                 <li key={item.label}>
@@ -235,7 +235,7 @@ export const Footer: React.FC = () => {
 
           {/* Column 3: Company Links */}
           <div>
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Company</h4>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Company</h3>
             <ul className="space-y-2.5 text-xs text-gray-400">
               {nav.company.map((item) => (
                 <li key={item.label}>
@@ -247,7 +247,7 @@ export const Footer: React.FC = () => {
 
           {/* Column 4: Contact Info */}
           <div className="space-y-3">
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Contact Us</h4>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Contact Us</h3>
 
             <a href={contact.phone.href} className="flex items-start gap-3 text-xs text-gray-400 hover:text-white transition-colors group">
               <Phone size={16} className="text-brand-accent shrink-0 mt-0.5 group-hover:scale-110 transition-transform" />
@@ -283,13 +283,13 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Bottom Copyright & Legal Links */}
-        <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+        <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-gray-400">
           <p>{FOOTER_CONFIG.copyright}</p>
           <div className="flex items-center gap-6">
             {nav.legal.map((item, idx) => (
               <React.Fragment key={item.label}>
                 {idx > 0 && <span className="text-gray-800">·</span>}
-                <Link href={item.href} className="hover:text-gray-400 transition-colors">{item.label}</Link>
+                <Link href={item.href} className="hover:text-gray-300 transition-colors">{item.label}</Link>
               </React.Fragment>
             ))}
           </div>

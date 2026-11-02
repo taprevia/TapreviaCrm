@@ -11,7 +11,7 @@ import { PublicVcardRenderer } from '@/components/public/template-registry';
 import { canUseFeature } from '@/lib/services/feature-access';
 import { getCardReviewEntitlement } from '@/lib/services/review-entitlement';
 import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
-import { CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED } from '@/lib/review-feature-flags';
+import { isCentralPublicIntegrationEnabledForTenant } from '@/lib/services/review-rollout';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
@@ -47,8 +47,15 @@ async function dispatchSocialCard(card: ICard): Promise<never> {
  * with an invalid destination).
  */
 async function dispatchReviewCard(card: ICard, alias: string): Promise<never> {
-  const enabled = card.reviewAssistant?.enabled === true;
-  if (!enabled) notFound();
+  // The effective settings are authoritative: legacy `enabled` alone misses
+  // central/hybrid cards whose review experience is enabled in Review
+  // Management. Entitlement is checked here too so a public alias never opens
+  // a review page the product cannot serve.
+  const [entitlement, effective] = await Promise.all([
+    getCardReviewEntitlement(card),
+    resolveEffectiveReviewSettings(card),
+  ]);
+  if (!entitlement.entitled || !effective.enabled || !alias) notFound();
   redirect(`/review/${alias}`);
 }
 
@@ -96,11 +103,12 @@ export async function PublicCardPage({ card }: { card: ICard }) {
   // to the existing review page. The public profile URL/NFC/QR destination is
   // deliberately unchanged.
   let premiumReviewUrl: string | null = null;
+  const centralRolloutEnabled = isCentralPublicIntegrationEnabledForTenant(ownerId);
   const couldHostReview =
     card.kind === 'profile' &&
     Boolean(card.urlAlias) &&
     (card.reviewAssistant?.enabled === true ||
-      (CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED &&
+      (centralRolloutEnabled &&
         (card.reviewSettingsSource === 'central' || card.reviewSettingsSource === 'hybrid')));
   if (couldHostReview) {
     const [entitlement, effectiveReview] = await Promise.all([

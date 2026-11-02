@@ -32,7 +32,8 @@ import {
   EXPERIENCE_RULES,
   resolveExperience,
 } from '@/lib/feature-keys';
-import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
+import { getProductCapabilities } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 
 export type ResolvedFeatures = Record<FeatureKey, IFeatureConfig>;
 
@@ -70,10 +71,9 @@ function productGrants(
   // that now carries `review_ai_suggestions` in the stable product catalog.
   // The grant is derived from the immutable catalog slug, so existing and new
   // assignments unlock together without a database backfill.
-  const slug = (product.slug ?? '').trim().toLowerCase();
-  const productId = slug.toUpperCase().replace(/-/g, '_');
-  if (isProductId(productId)) {
-    const caps = getProductCapabilities(productId as ProductId);
+  const productId = resolveCanonicalProductId(product.slug);
+  if (productId) {
+    const caps = getProductCapabilities(productId);
     if (caps.includes('review_ai_suggestions')) {
       grants.review = { enabled: true };
     }

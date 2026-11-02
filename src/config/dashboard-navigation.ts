@@ -91,7 +91,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: '/admin/products', label: 'Products', icon: CreditCard, requiredCapability: null },
   { href: '/admin/templates', label: 'Templates', icon: ImageIcon, requiredCapability: null },
   { href: '/admin/review-library', label: 'Review Library', icon: Library, requiredCapability: null },
-  { href: '/admin/standee-qr', label: 'Standee QRs', icon: QrCode, requiredCapability: null },
 ];
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────

@@ -180,7 +180,6 @@ export function ReviewAnalyticsPanel() {
     totals &&
       (totals.visits ||
         totals.totalCopies ||
-        totals.rotationCopies ||
         totals.suggestionsShown ||
         totals.generated ||
         totals.googleClicks)
@@ -226,7 +225,7 @@ export function ReviewAnalyticsPanel() {
 
       {loading && (
         <div className="space-y-4" role="status" aria-label="Loading review analytics">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 5 }).map((_, index) => (
               <div key={index} className="h-24 animate-pulse rounded-xl bg-surface ring-1 ring-line-subtle" />
             ))}
@@ -256,7 +255,7 @@ export function ReviewAnalyticsPanel() {
 
       {!loading && !error && data && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               icon={Eye}
               label="Review Assistant visits"
@@ -282,18 +281,7 @@ export function ReviewAnalyticsPanel() {
               label="Total reviews copied"
               value={(totals?.totalCopies ?? 0).toLocaleString()}
               iconClassName="bg-emerald-500/10 text-emerald-400"
-              hint={
-                totals?.unclassifiedCopies
-                  ? `${totals.unclassifiedCopies.toLocaleString()} historical unclassified`
-                  : 'Canonical successful-copy events'
-              }
-            />
-            <StatCard
-              icon={RefreshCw}
-              label="Rotation template copies"
-              value={(totals?.rotationCopies ?? 0).toLocaleString()}
-              iconClassName="bg-amber-500/10 text-amber-400"
-              hint="Separate rotation audit metric"
+              hint="All successful copy events in this period"
             />
           </div>
 
@@ -348,13 +336,11 @@ export function ReviewAnalyticsPanel() {
                         {product.hostType === 'standee' ? 'Standee' : 'Card'}
                       </Badge>
                     </div>
-                    <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Metric label="Visits" value={product.visits} />
                       <Metric label="AI copied" value={product.aiCopies} />
                       <Metric label="Manual copied" value={product.manualCopies} />
                       <Metric label="Total copied" value={product.totalCopies} />
-                      <Metric label="Rotation" value={product.rotationCopies} />
-                      <Metric label="Unclassified" value={product.unclassifiedCopies} />
                     </dl>
                   </div>
                 ))}
@@ -363,9 +349,8 @@ export function ReviewAnalyticsPanel() {
           </SectionCard>
 
           <p className="text-[11px] leading-relaxed text-ink-faint">
-            Rotation template copies come from the rotation audit and are intentionally not added
-            to total copied reviews, preventing double counting. Historical copy events without a
-            source remain in the total and are shown as unclassified.
+            Total reviews copied counts every successful copy event in this period. AI and manual
+            figures show the events whose source was recorded.
             {firstDay && lastDay
               ? ` Window: ${firstDay.date} to ${lastDay.date}.`
               : ''}

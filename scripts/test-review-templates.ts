@@ -494,7 +494,14 @@ async function run() {
       { new: true }
     );
     const disabled = await generateReviewSuggestion({ ...base, alias: 'm12verify01' });
-    report('13a kill-switch → UNAVAILABLE (no provider call)', disabled.ok === false && disabled.code === 'UNAVAILABLE');
+    // Phase B: a tenant without enabled+keyed OpenAI uses the stored Review
+    // Library; the provider must still never be called.
+    report(
+      '13a kill-switch → stored library (no provider call)',
+      disabled.ok === true && disabled.engine === 'library',
+      disabled.ok ? `engine=${disabled.engine}` : `code=${disabled.code}`
+    );
+    report('13a2 kill-switch made zero provider calls', fake.calls === 0, `calls=${fake.calls}`);
 
     // Daily limit reservation (2 allowed, 3rd rejected), provider called exactly 2×.
     await TenantSettings.findOneAndUpdate(

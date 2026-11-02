@@ -15,7 +15,8 @@
 import UserProduct from '@/models/UserProduct';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
-import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
+import { getProductCapabilities } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { resolveProductTitle } from '@/lib/services/product-title';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { resolveEntitlement } from '@/lib/services/capability-access';
@@ -25,7 +26,6 @@ import {
   resolveReviewSettings,
 } from '@/lib/services/review-settings-resolver';
 import {
-  isGoogleReviewStandeeSlug,
   resolveStandeeEffectiveReviewSettings,
   resolveStandeeGoogleReviewUrl,
   resolveStandeeSettingsSource,
@@ -35,6 +35,11 @@ import {
 import type { ReviewProductOverridesInput } from '@/lib/validation/review-settings';
 import type { CapabilityId } from '@/config/capabilities';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
+import {
+  isCentralPublicIntegrationEnabledForTenant,
+  isLocalCentralReviewForceAllEnabled,
+  resolveEffectiveReviewSettingsSource,
+} from '@/lib/services/review-rollout';
 
 export type ReviewSettingsSource = 'legacy' | 'central' | 'hybrid';
 
@@ -50,8 +55,26 @@ export interface EligibleReviewProduct {
   settingsRevision: number;
   /** Known saved overrides; unknown/legacy keys stay server-side. */
   reviewOverrides: ReviewProductOverridesInput;
+  /** Raw legacy Card settings for the individual Configure editor. */
+  legacySettings?: {
+    enabled: boolean;
+    googleReviewUrl: string;
+    welcomeMessage: string;
+    category: string;
+    languages: string[];
+    writingStyle: string;
+    preferredLength: string;
+    styleMode: string;
+    lengthMode: string;
+    feedbackTopics: string[];
+    services: string[];
+    employees: string[];
+    keywords: string[];
+  };
   reviewAssistantEnabled: boolean;
   googleDestinationConfigured: boolean;
+  /** Effective saved destination, used to prefill product setup. */
+  effectiveGoogleReviewUrl: string;
   /** Standee's own Google destination (never central's by default). */
   standeeGoogleReviewUrl?: string;
   productGrantsReview: boolean;
@@ -87,6 +110,8 @@ interface CardLike {
   cardLabel?: string;
   kind?: string;
   urlAlias?: string;
+  /** Legacy printed identity; the public review resolver accepts it too. */
+  slug?: string;
   isActive?: boolean;
   status?: string;
   userId?: unknown;
@@ -107,9 +132,9 @@ function normalizedCardSource(value: unknown): ReviewSettingsSource {
 
 function productGrantsReview(catalogSlug: string | undefined): boolean {
   if (!catalogSlug) return false;
-  const productId = catalogSlug.toUpperCase().replace(/-/g, '_');
-  if (!isProductId(productId)) return false;
-  return getProductCapabilities(productId as ProductId).includes('review_ai_suggestions');
+  const productId = resolveCanonicalProductId(catalogSlug);
+  if (!productId) return false;
+  return getProductCapabilities(productId).includes('review_ai_suggestions');
 }
 
 function isCardOwnedBy(card: { userId?: unknown; assignedUserId?: unknown }, userId: string): boolean {
@@ -132,14 +157,30 @@ function projectCard(input: {
   const slug = (catalog?.slug ?? '').trim().toLowerCase();
   const grants = productGrantsReview(slug);
   const cardActive = card.isActive !== false && card.status !== 'suspended';
-  const alias = (card.urlAlias ?? '').trim();
+  // Public review pages resolve `urlAlias` OR the legacy printed `slug`
+  // (see getPublicCardByAlias). Use the same precedence here so historical
+  // cards that only carry a slug are not silently denied review setup.
+  const alias = (card.urlAlias || card.slug || '').trim();
   const eligible = accountReviewEntitled && grants && cardActive && Boolean(alias);
-  const source = normalizedCardSource(card.reviewSettingsSource);
+  const storedSource = normalizedCardSource(card.reviewSettingsSource);
+  const rolloutEnabled = isCentralPublicIntegrationEnabledForTenant(userId);
+  // Dashboard readiness must match what the public review page will actually
+  // serve. Central ON makes central authoritative for eligible products;
+  // Central OFF keeps the historical stored-source display and strict legacy
+  // public resolution.
+  const effectiveSource = resolveEffectiveReviewSettingsSource(storedSource, rolloutEnabled, {
+    forceAll: isLocalCentralReviewForceAllEnabled(),
+  });
+  const displaySource: ReviewSettingsSource = rolloutEnabled ? effectiveSource : storedSource;
   const resolved = resolveReviewSettings({
     card: { reviewAssistant: card.reviewAssistant },
-    centralSettings: source === 'legacy' ? undefined : input.centralSettings,
-    source,
+    centralSettings: effectiveSource === 'legacy' ? undefined : input.centralSettings,
+    source: effectiveSource,
     overrides: card.reviewOverrides,
+  });
+  const legacy = resolveReviewSettings({
+    card: { reviewAssistant: card.reviewAssistant },
+    source: 'legacy',
   });
 
   return {
@@ -154,19 +195,35 @@ function projectCard(input: {
     catalogProductSlug: slug,
     cardId: String(card._id),
     cardKind: (card.kind ?? 'profile').trim() || 'profile',
-    settingsSource: source,
+    settingsSource: displaySource,
     settingsRevision:
       typeof card.reviewSettingsVersion === 'number' ? card.reviewSettingsVersion : 0,
     reviewOverrides: normalizeReviewOverrides(card.reviewOverrides),
+    legacySettings: {
+      enabled: legacy.enabled,
+      googleReviewUrl: legacy.googleReviewUrl ?? '',
+      welcomeMessage: legacy.welcomeMessage ?? '',
+      category: legacy.category ?? '',
+      languages: legacy.languages ?? [],
+      writingStyle: legacy.writingStyle ?? 'friendly',
+      preferredLength: legacy.preferredLength ?? 'medium',
+      styleMode: legacy.styleMode ?? 'fixed',
+      lengthMode: legacy.lengthMode ?? 'fixed',
+      feedbackTopics: legacy.feedbackTopics ?? [],
+      services: legacy.services ?? [],
+      employees: legacy.employees ?? [],
+      keywords: legacy.keywords ?? [],
+    },
     reviewAssistantEnabled: resolved.enabled,
     googleDestinationConfigured: isSafeExternalUrl(resolved.googleReviewUrl),
+    effectiveGoogleReviewUrl: resolved.googleReviewUrl,
     productGrantsReview: grants,
     accountReviewEntitled,
     eligible,
     previewAvailable: eligible,
     previewUrl: alias ? `/review/${encodeURIComponent(alias)}` : null,
     hostingEnabled: true,
-    futureCentralOptInEligible: eligible && source === 'legacy',
+    futureCentralOptInEligible: eligible && displaySource === 'legacy',
   };
 }
 
@@ -183,19 +240,27 @@ async function projectStandee(input: {
 
   const catalog = assignment.catalogProductId ?? null;
   const slug = (catalog?.slug ?? '').trim().toLowerCase();
-  const grants = productGrantsReview(slug) && isGoogleReviewStandeeSlug(slug);
+  // Standee review hosts are capability-based. This intentionally includes
+  // All In One 3/4 as well as the dedicated Google Review Standee; products
+  // without the capability (e.g. Business Profile Standee) remain excluded.
+  const grants = productGrantsReview(slug);
   const googleReviewUrl = await resolveStandeeGoogleReviewUrl(standee);
   const eligible =
     accountReviewEntitled && grants && Boolean(googleReviewUrl);
-  const source = resolveStandeeSettingsSource(
+  const storedSource = resolveStandeeSettingsSource(
     standee.reviewSettingsSource,
     input.hasCentralSettings
   );
+  const rolloutEnabled = isCentralPublicIntegrationEnabledForTenant(userId);
+  const effectiveSource = resolveEffectiveReviewSettingsSource(storedSource, rolloutEnabled, {
+    forceAll: isLocalCentralReviewForceAllEnabled(),
+  });
+  const displaySource: ReviewSettingsSource = rolloutEnabled ? effectiveSource : storedSource;
   const resolved = resolveStandeeEffectiveReviewSettings({
     standee,
     googleReviewUrl: googleReviewUrl ?? '',
-    source,
-    centralSettings: input.centralSettings,
+    source: effectiveSource,
+    centralSettings: effectiveSource === 'legacy' ? undefined : input.centralSettings,
   });
   const routeSlug = (standee.routeSlug ?? standee.uid ?? '').trim();
 
@@ -212,7 +277,7 @@ async function projectStandee(input: {
     cardId: '',
     standeeId: String(standee._id),
     cardKind: 'standee',
-    settingsSource: source,
+    settingsSource: displaySource,
     settingsRevision:
       typeof standee.reviewSettingsVersion === 'number'
         ? standee.reviewSettingsVersion
@@ -220,6 +285,7 @@ async function projectStandee(input: {
     reviewOverrides: normalizeReviewOverrides(standee.reviewOverrides),
     reviewAssistantEnabled: resolved.enabled,
     googleDestinationConfigured: Boolean(googleReviewUrl),
+    effectiveGoogleReviewUrl: resolved.googleReviewUrl,
     standeeGoogleReviewUrl: googleReviewUrl ?? undefined,
     productGrantsReview: grants,
     accountReviewEntitled,
@@ -229,7 +295,7 @@ async function projectStandee(input: {
     previewAvailable: eligible,
     previewUrl: routeSlug ? standeeReviewPath(routeSlug) : null,
     hostingEnabled: STANDEE_REVIEW_ASSISTANT_ENABLED,
-    futureCentralOptInEligible: eligible && source === 'legacy',
+    futureCentralOptInEligible: eligible && displaySource === 'legacy',
   };
 }
 
@@ -263,7 +329,7 @@ export async function listEligibleReviewProducts(
     cardIds.length
       ? (Card.find({ _id: { $in: cardIds } })
           .select(
-            '_id name cardLabel kind urlAlias isActive status userId assignedUserId reviewAssistant reviewSettingsSource reviewSettingsVersion reviewOverrides'
+            '_id name cardLabel kind urlAlias slug isActive status userId assignedUserId reviewAssistant reviewSettingsSource reviewSettingsVersion reviewOverrides'
           )
           .lean()
           .exec() as unknown as Promise<CardLike[]>)
@@ -344,7 +410,7 @@ export async function getReviewProductForUser(
     assignment.cardId
       ? (Card.findById(assignment.cardId)
           .select(
-            '_id name cardLabel kind urlAlias isActive status userId assignedUserId reviewAssistant reviewSettingsSource reviewSettingsVersion reviewOverrides'
+            '_id name cardLabel kind urlAlias slug isActive status userId assignedUserId reviewAssistant reviewSettingsSource reviewSettingsVersion reviewOverrides'
           )
           .lean()
           .exec() as unknown as Promise<CardLike | null>)

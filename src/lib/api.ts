@@ -15,6 +15,8 @@ export type ErrorCode =
   | 'LIMIT_REACHED'
   | 'PAYLOAD_TOO_LARGE'
   | 'UNAVAILABLE'
+  | 'AI_NOT_CONFIGURED'
+  | 'NO_MATCHING_REVIEW_TEMPLATE'
   | 'INTERNAL_ERROR';
 
 export interface ApiErrorBody {

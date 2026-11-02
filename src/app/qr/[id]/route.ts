@@ -8,6 +8,7 @@ import { isSafeExternalUrl } from '@/lib/safe-url';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { clientIp } from '@/lib/request-ip';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
   isStandeeReviewHostEligible,
   standeeHasGoogleReviewSlot,
@@ -136,7 +137,7 @@ export async function GET(
     const panel = (await Standee.findOne({
       $or: [{ 'panelQr.qrId': id }, { routeSlug: key }, { uid: key }],
     })
-      .select('_id userId routeSlug uid socialQrs productKey')
+      .select('_id userId routeSlug uid socialQrs productKey maxProfiles fixedProfiles')
       .lean()) as {
       _id: unknown;
       userId: unknown;
@@ -144,11 +145,16 @@ export async function GET(
       uid?: string;
       socialQrs?: Array<{ platform?: string }>;
       productKey?: string;
+      maxProfiles?: number;
+      fixedProfiles?: string[];
     } | null;
     if (panel) {
       await recordPanelTap(id, request);
       const reviewRoute = (panel.routeSlug ?? panel.uid ?? '').trim();
+      const multiProfileStandee =
+        (panel.maxProfiles ?? 0) > 1 || (panel.fixedProfiles?.length ?? 0) > 1;
       if (
+        !multiProfileStandee &&
         STANDEE_REVIEW_ASSISTANT_ENABLED &&
         reviewRoute &&
         standeeHasGoogleReviewSlot({
@@ -195,6 +201,7 @@ export async function GET(
 
     return new Response('Not found', { status: 404 });
   } catch (error) {
+    emitReviewEvent({ event: 'review.routing.error', errorCategory: 'routing', reasonCategory: 'qr_redirect' });
     console.error('QR redirect error:', error);
     return new Response('Internal server error', { status: 500 });
   }

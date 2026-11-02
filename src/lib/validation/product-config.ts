@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GOOGLE_REVIEW_URL_MESSAGE, isSupportedGoogleReviewUrl } from './google-review-url';
 
 // ─── URL validation helper ─────────────────────────────────────────────────
 
@@ -22,6 +23,19 @@ const optionalSafeUrl = z
   .max(2048)
   .refine((v) => v === '' || isSafeUrl(v), 'Must be a valid http(s) URL');
 
+const requiredGoogleReviewUrl = z
+  .string()
+  .max(2048)
+  .refine(isSupportedGoogleReviewUrl, GOOGLE_REVIEW_URL_MESSAGE);
+
+const optionalGoogleReviewUrl = z
+  .string()
+  .max(2048)
+  .refine(
+    (v) => v === '' || isSupportedGoogleReviewUrl(v),
+    GOOGLE_REVIEW_URL_MESSAGE
+  );
+
 // ─── Social Card Config ────────────────────────────────────────────────────
 
 export const socialCardConfigSchema = z.object({
@@ -42,7 +56,7 @@ export const instagramConfigSchema = z.object({
 // ─── Google Review Config ──────────────────────────────────────────────────
 
 export const googleReviewConfigSchema = z.object({
-  googleReviewUrl: safeUrl,
+  googleReviewUrl: requiredGoogleReviewUrl,
   businessName: z.string().min(1, 'Business name is required').max(200).optional(),
   mapsUrl: optionalSafeUrl.default(''),
 });
@@ -106,14 +120,23 @@ export const updateProductConfigSchema = z.object({
 
   // For Google Review cards
   googleReview: z.object({
-    googleReviewUrl: optionalSafeUrl.optional(),
+    googleReviewUrl: optionalGoogleReviewUrl.optional(),
     businessName: z.string().max(200).optional(),
     mapsUrl: optionalSafeUrl.optional(),
   }).optional(),
 
-  // For WhatsApp cards
+  // For WhatsApp cards. Empty string is a valid clear operation for profile
+  // configuration; non-empty values must still be a valid phone number.
   whatsapp: z.object({
-    phoneNumber: z.string().min(10).max(20).optional(),
+    phoneNumber: z
+      .string()
+      .trim()
+      .max(20)
+      .refine(
+        (value) => value === '' || /^\+?[0-9]{10,20}$/.test(value),
+        'Phone number must contain only digits and an optional + prefix'
+      )
+      .optional(),
     defaultMessage: z.string().max(500).optional(),
   }).optional(),
 

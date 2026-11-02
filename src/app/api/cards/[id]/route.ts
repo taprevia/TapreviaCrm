@@ -167,6 +167,22 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const card = result.card;
 
     const body = await request.json().catch(() => null);
+    // Grandfather an unchanged stored review URL: a legacy destination must
+    // remain editable even though new writes are restricted to supported
+    // Google hosts. Only a CHANGED value is subject to the new policy.
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      const incomingReview = (body as { reviewAssistant?: { googleReviewUrl?: unknown } })
+        .reviewAssistant;
+      const storedUrl = result.card.reviewAssistant?.googleReviewUrl;
+      if (
+        incomingReview &&
+        typeof incomingReview.googleReviewUrl === 'string' &&
+        storedUrl &&
+        incomingReview.googleReviewUrl === storedUrl
+      ) {
+        delete incomingReview.googleReviewUrl;
+      }
+    }
     const parsed = updateCardSchema.safeParse(body);
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid input', parsed.error.flatten().fieldErrors);

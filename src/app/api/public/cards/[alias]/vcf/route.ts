@@ -9,6 +9,7 @@ import { check } from '@/lib/rate-limit';
 import { fail, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias, isPublicProfileCard } from '@/lib/services/card-access';
 import { toPublicCardDto } from '@/lib/dto/card.dto';
+import { normalizeVcfContact } from '@/lib/validation/vcf-contact';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,12 +64,23 @@ export async function GET(request: NextRequest, { params }: Params) {
         });
       }
 
+      const normalized = normalizeVcfContact({
+        name,
+        email,
+        phone: request.nextUrl.searchParams.get('p') ?? '',
+      });
+      if (!normalized.ok) {
+        return fail(400, 'VALIDATION_ERROR', normalized.message, {
+          [normalized.field]: normalized.message,
+        });
+      }
+
       await Inquiry.create({
         cardId: card._id,
         userId: card.userId,
-        name: name.slice(0, 100),
-        email: email.slice(0, 255),
-        phone: request.nextUrl.searchParams.get('p')?.trim().slice(0, 20) ?? '',
+        name: normalized.contact.name,
+        email: normalized.contact.email,
+        phone: normalized.contact.phone,
         message: '',
         source: 'vcf_gate',
       });

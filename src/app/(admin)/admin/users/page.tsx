@@ -12,7 +12,6 @@ import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard,
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { getFixedStandeeProfiles } from '@/config/products';
 import { isPasswordCompliant, PASSWORD_POLICY_MESSAGE } from '@/lib/auth/password-policy';
-import { formatPriceMinor } from '@/lib/format';
 
 interface User {
   _id: string;
@@ -549,7 +548,7 @@ export default function AdminUsersPage() {
                               size="sm"
                               onClick={() => router.push(`/admin/users/${user._id}`)}
                               title="View details"
-                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                              className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                             >
                               <Eye className="h-3.5 w-3.5 text-accent-400" />
                             </Button>
@@ -558,7 +557,7 @@ export default function AdminUsersPage() {
                               size="sm"
                               onClick={() => openEditModal(user)}
                               title="Edit credentials"
-                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                              className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                             >
                               <Pencil className="h-3.5 w-3.5 text-ink-mute" />
                             </Button>
@@ -567,7 +566,7 @@ export default function AdminUsersPage() {
                               size="sm"
                               onClick={() => openResetModal(user)}
                               title="Reset password"
-                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                              className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                             >
                               <KeyRound className="h-3.5 w-3.5 text-ink-mute" />
                             </Button>
@@ -576,7 +575,7 @@ export default function AdminUsersPage() {
                               size="sm"
                               onClick={() => handleStatusToggle(user)}
                               title={user.status === 'active' ? 'Suspend' : 'Activate'}
-                              className="border-line-strong bg-transparent hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
+                              className="border-line-strong bg-transparent text-ink hover:bg-white/5 hover:border-line-strong focus:ring-accent-500"
                             >
                               {user.status === 'active' ? (
                                 <ShieldOff className="h-3.5 w-3.5 text-warn" />
@@ -589,7 +588,7 @@ export default function AdminUsersPage() {
                               size="sm"
                               onClick={() => handleDelete(user)}
                               title="Delete user"
-                              className="border-line-strong bg-transparent hover:bg-bad/10 hover:border-bad/40 focus:ring-accent-500"
+                              className="border-line-strong bg-transparent text-ink hover:bg-bad/10 hover:border-bad/40 focus:ring-accent-500"
                             >
                               <Trash2 className="h-3.5 w-3.5 text-bad" />
                             </Button>
@@ -601,25 +600,22 @@ export default function AdminUsersPage() {
                           <td colSpan={7} className="px-5 pb-4 pt-1" onClick={(e) => e.stopPropagation()}>
                             <div className="grid gap-2 sm:grid-cols-2">
                               {userCards.map((c) => (
-                                <a
+                                <div
                                   key={c._id || c.slug}
-                                  href={`/c/${c.slug}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-line-subtle bg-surface px-3 py-2 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+                                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-line-subtle bg-surface px-3 py-2"
                                 >
                                   <span className="min-w-0">
                                     <span className="block truncate text-sm font-medium text-ink" title={c.templateKey || 'Card'}>
                                       {c.templateKey || 'Card'}
                                     </span>
-                                    <span className="block truncate font-mono text-xs text-accent-400" title={`/c/${c.slug}`}>
-                                      /c/{c.slug}
+                                    <span className="block text-xs text-ink-faint">
+                                      Open the customer to view public and permanent links.
                                     </span>
                                   </span>
                                   <span className="shrink-0 rounded-full bg-field px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-mute">
                                     {c.status}
                                   </span>
-                                </a>
+                                </div>
                               ))}
                             </div>
                           </td>
@@ -701,9 +697,6 @@ export default function AdminUsersPage() {
                         />
                         <ProductIcon className={`h-4 w-4 ${checked ? 'text-accent-400' : 'text-ink-faint'}`} />
                         <span className="flex-1">{product.name || 'Unnamed product'}</span>
-                        <span className="text-xs text-ink-faint tabular-nums">
-                          {formatPriceMinor(product.priceMinor, product.currency)}
-                        </span>
                       </label>
 
                       {checked && product.category === 'card' && (

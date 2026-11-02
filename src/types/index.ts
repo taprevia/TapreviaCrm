@@ -132,6 +132,8 @@ export interface IReviewAssistantConfig {
   welcomeMessage?: string;
   /** Business personalization for the template-based suggestions mode. */
   category?: string;
+  /** Central/template business display name; Card.name remains fallback. */
+  businessName?: string;
   employees?: string[];
   services?: string[];
   keywords?: string[];

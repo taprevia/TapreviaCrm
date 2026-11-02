@@ -391,7 +391,6 @@ async function main(): Promise<void> {
         quantity: 1,
         cardUid: uid(),
         assignedBy: ADMIN_ID,
-        material: 'pvc',
       });
       check('second assignment succeeds with a fresh UID', soldAgain.ok, soldAgain.ok ? undefined : soldAgain);
       const bounced = await assignUserProduct({
@@ -400,7 +399,6 @@ async function main(): Promise<void> {
         quantity: 1,
         cardUid: (await Card.findOne({ assignedUserId: { $ne: null } }))?.cardUid ?? '',
         assignedBy: ADMIN_ID,
-        material: 'pvc',
       });
       check('a UID owned by another user is rejected (409)', !bounced.ok && bounced.status === 409, bounced);
     } else {

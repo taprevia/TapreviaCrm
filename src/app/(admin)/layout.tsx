@@ -23,6 +23,13 @@ export default async function AdminLayoutWrapper({
     redirect('/login');
   }
 
+  // Defense in depth: middleware and every admin API already enforce the role,
+  // but the server-rendered admin shell must not render for a customer if the
+  // middleware path is ever bypassed or misconfigured.
+  if (user.role !== 'admin') {
+    redirect('/dashboard');
+  }
+
   const entitlement = await resolveEntitlement(user._id);
   const capabilities =
     user.role === 'admin'

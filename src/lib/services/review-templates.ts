@@ -120,6 +120,7 @@ export interface ReviewTemplateInput {
       employees?: string[];
       services?: string[];
       keywords?: string[];
+      businessName?: string;
     } | null;
   };
   language?: string;
@@ -392,7 +393,7 @@ export async function getReviewTemplateSuggestions(
   const { default: ReviewTemplate } = await import('@/models/ReviewTemplate');
 
   const cfg = input.card?.reviewAssistant ?? {};
-  const categoryKey = (cfg.category ?? '').trim();
+  const categoryKey = (cfg.category ?? '').trim().toLowerCase();
   if (!categoryKey || cfg.enabled === false) return [];
 
   // Inactive categories must stop serving suggestions for existing cards.
@@ -410,7 +411,8 @@ export async function getReviewTemplateSuggestions(
   const writingStyle = selectVariedStyle(cfg.writingStyle, cfg.styleMode, input.now);
   const now = input.now ?? new Date();
 
-  const businessName = (input.card?.name ?? '').trim();
+  const businessName =
+    (cfg.businessName ?? '').trim() || (input.card?.name ?? '').trim();
   const employees = cleanTags(cfg.employees);
   const services = cleanTags(cfg.services);
   const keywords = cleanTags(cfg.keywords);

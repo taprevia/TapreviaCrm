@@ -58,25 +58,27 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
 
   return (
     <>
-      <nav className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-line-subtle bg-bg/80 backdrop-blur px-4 md:px-6">
+      <nav aria-label="Primary navigation" className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-line-subtle bg-bg/80 px-3 backdrop-blur sm:gap-4 sm:px-4 md:px-6">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="rounded-lg p-2 text-ink-mute hover:bg-surface hover:text-ink transition-colors lg:hidden"
+          aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={sidebarOpen}
+          className="shrink-0 rounded-lg p-1.5 text-ink-mute transition-colors hover:bg-surface hover:text-ink sm:p-2 lg:hidden"
         >
           {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
 
-        <Link href={isInAdminSection ? '/admin' : '/dashboard'} className="flex items-center gap-2.5 group">
+        <Link href={isInAdminSection ? '/admin' : '/dashboard'} className="flex min-w-0 items-center gap-2 group">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-600 shadow-e1 group-hover:shadow-e2 transition-shadow">
             <CreditCard className="h-4 w-4 text-white" />
           </div>
-          <span className="text-lg font-bold text-ink tracking-tight">Taprevia</span>
+          <span className="truncate text-base font-bold tracking-tight text-ink sm:text-lg">Taprevia</span>
         </Link>
 
         <div className="flex-1" />
 
         {user && (
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <Link
               href="/"
               className="hidden md:flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-ink-mute hover:bg-surface hover:text-ink transition-colors"
@@ -105,7 +107,7 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
             <div className="hidden md:block h-6 w-px bg-line-subtle" />
             <button
               onClick={handleLogout}
-              className="rounded-lg p-2 text-ink-mute hover:bg-surface hover:text-ink transition-colors"
+              className="shrink-0 rounded-lg p-1.5 text-ink-mute transition-colors hover:bg-surface hover:text-ink sm:p-2"
               title="Logout"
             >
               <LogOut className="h-4 w-4" />
@@ -122,6 +124,7 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
       )}
 
       <aside
+        aria-label="Section sidebar"
         className={cn(
           'fixed left-0 top-16 z-30 h-[calc(100vh-4rem)] w-64 border-r border-line-subtle bg-bg-raised transition-transform duration-300 ease-out lg:translate-x-0',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -130,12 +133,13 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
         <div className="flex h-full flex-col">
           <button
             onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation"
             className="absolute right-2 top-2 rounded-lg p-1 text-ink-faint hover:bg-surface hover:text-ink lg:hidden transition-colors"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
 
-          <nav className="flex-1 space-y-1 p-3 mt-1 overflow-y-auto">
+          <nav aria-label="Section navigation" className="flex-1 space-y-1 p-3 mt-1 overflow-y-auto">
             {links.map((link, index) => {
               // Active-state follows the row's RESOLVED DESTINATION when the row
               // is a platform row (P1-3): platform rows carry a static href

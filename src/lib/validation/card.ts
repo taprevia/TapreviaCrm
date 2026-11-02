@@ -7,6 +7,7 @@ import {
   timeOrEmptySchema,
   urlOrMediaPathSchema,
 } from './common';
+import { GOOGLE_REVIEW_URL_MESSAGE, isSupportedGoogleReviewUrl } from './google-review-url';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -121,8 +122,16 @@ export const externalUrlOrEmptySchema = z
     'URL must start with http(s)://'
   );
 
-/** Google review URLs are external http(s) links only — never media paths. */
-export const googleReviewUrlSchema = externalUrlOrEmptySchema;
+/** Google review URLs must be supported Google destinations for new writes. */
+export const googleReviewUrlSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .optional()
+  .refine(
+    (value) => value === undefined || value === '' || isSupportedGoogleReviewUrl(value),
+    GOOGLE_REVIEW_URL_MESSAGE
+  );
 
 export const reviewAssistantPartialSchema = z.object({
   enabled: z.boolean().optional(),

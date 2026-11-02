@@ -91,6 +91,12 @@ const ReviewSettingsSchema = new Schema(
         default: '',
         maxlength: MAX_WELCOME_LENGTH,
       },
+      businessName: {
+        type: String,
+        default: '',
+        trim: true,
+        maxlength: 120,
+      },
     },
     content: {
       category: {

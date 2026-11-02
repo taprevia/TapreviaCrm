@@ -23,8 +23,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onView, onAdd
     }
     openWhatsAppOrder({
       productName: product.name,
-      price: product.price,
-      customMessage: `Hi Taprevia! 🚀 I'd like to order the *${product.name}* (priced at ₹${product.price}). Please confirm my order!`,
+      customMessage: `Hi Taprevia! 🚀 I'd like to order the *${product.name}*. Please confirm my order!`,
     });
   };
 
@@ -34,15 +33,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onView, onAdd
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className="group cursor-pointer relative bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between"
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onView(product);
-        }
-      }}
-      aria-label={`View ${product.name} details`}
     >
       {/* Image & Badges Container */}
       <div className="relative w-full aspect-[4/3] bg-gray-50 overflow-hidden flex items-center justify-center p-4">
@@ -132,15 +122,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onView, onAdd
         </div>
 
         <div className="mt-4 pt-3 border-t border-gray-100 flex items-end justify-between">
-          <div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold text-brand-navy">₹{product.price}</span>
-              {product.originalPrice && (
-                <span className="text-xs text-gray-400 line-through">₹{product.originalPrice}</span>
-              )}
-            </div>
-            <p className="text-[11px] text-gray-400 font-medium mt-0.5">Order via WhatsApp</p>
-          </div>
+          <p className="text-[11px] text-gray-500 font-medium">Order via WhatsApp</p>
 
           <button
             onClick={handleOrder}

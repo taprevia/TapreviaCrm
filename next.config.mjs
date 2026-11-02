@@ -1,5 +1,16 @@
 /** @type {import('next').NextConfig} */
+// Build-output isolation: production builds and the local dev server must never
+// share one `.next` directory. `next build` keeps the default `.next` (Vercel's
+// expected output); `npm run dev` sets NEXT_DIST_DIR=.next-dev. This prevents a
+// production rebuild from replacing chunks the running dev server still expects.
+const distDir = process.env.NEXT_DIST_DIR?.trim() || '.next';
+
 const nextConfig = {
+  distDir,
+  experimental: {
+    // Node server-start configuration gate (src/instrumentation.ts).
+    instrumentationHook: true,
+  },
   images: {
     // The app renders media through plain <img> (uploaded via the storage
     // layer), so no remote hosts are needed today. Open remotePatterns is an

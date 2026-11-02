@@ -12,6 +12,7 @@ import UserProduct from '@/models/UserProduct';
 import Media from '@/models/Media';
 import { getStorage } from '@/lib/storage';
 import { updateCustomerCredentialsSchema } from '@/lib/validation/catalog';
+import { resolveProductUrls } from '@/lib/services/product-preview';
 
 interface CardLean {
   _id: string;
@@ -43,10 +44,22 @@ export async function GET(
     }
 
     const profile = await Profile.findOne({ userId: id }).lean();
-    const cards = (await Card.find({ assignedUserId: id }).sort({ createdAt: -1 }).lean()) as unknown as CardLean[];
+    const rawCards = (await Card.find({ assignedUserId: id }).sort({ createdAt: -1 }).lean()) as unknown as CardLean[];
+    const cards = await Promise.all(
+      rawCards.map(async (row) => ({
+        ...row,
+        ...(await resolveProductUrls({ instanceType: 'card', instance: row as never })),
+      }))
+    );
     const card = cards[0] ?? null;
     const leads = await Lead.find({ cardOwnerId: id }).sort({ createdAt: -1 }).limit(50).lean();
-    const standees = await Standee.find({ userId: id }).sort({ createdAt: -1 }).lean();
+    const rawStandees = await Standee.find({ userId: id }).sort({ createdAt: -1 }).lean();
+    const standees = await Promise.all(
+      rawStandees.map(async (row) => ({
+        ...row,
+        ...(await resolveProductUrls({ instanceType: 'standee', instance: row as never })),
+      }))
+    );
 
     let analytics = null;
     if (card) {

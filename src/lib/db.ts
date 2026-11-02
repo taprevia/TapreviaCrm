@@ -63,15 +63,15 @@ function resolveBackupUri(): string {
 // with `NODE_ENV=production` on Vercel); locally we fall back to NODE_ENV.
 const VERCEL_ENV = envValue('VERCEL_ENV');
 
-const MONGODB_URI = resolvePrimaryUri();
-const MONGODB_BACKUP_URI = resolveBackupUri();
 // Preview/other deployed non-production environments require an explicit
 // MONGODB_DB; see resolvePrimaryDatabaseName(). Production behavior is unchanged.
-const PRIMARY_DB_NAME = resolvePrimaryDatabaseName({
-  explicit: envValue('MONGODB_DB'),
-  vercelEnv: VERCEL_ENV,
-  nodeEnv: process.env.NODE_ENV,
-});
+function resolvePrimaryDbName(): string {
+  return resolvePrimaryDatabaseName({
+    explicit: envValue('MONGODB_DB'),
+    vercelEnv: VERCEL_ENV,
+    nodeEnv: process.env.NODE_ENV,
+  });
+}
 const IS_PRODUCTION_TARGET =
   VERCEL_ENV === 'production' ||
   (!VERCEL_ENV && process.env.NODE_ENV === 'production');
@@ -79,11 +79,9 @@ const DEPLOYED_RUNTIME = isDeployedRuntime({
   vercelEnv: VERCEL_ENV,
   nodeEnv: process.env.NODE_ENV,
 });
-const BACKUP_DB_NAME = resolveBackupDbName(
-  PRIMARY_DB_NAME,
-  envValue('MONGODB_BACKUP_DB'),
-  IS_PRODUCTION_TARGET
-);
+function resolveBackupDbNameValue(primaryDbName: string): string {
+  return resolveBackupDbName(primaryDbName, envValue('MONGODB_BACKUP_DB'), IS_PRODUCTION_TARGET);
+}
 
 const BASE_OPTIONS = {
   bufferCommands: false,
@@ -122,13 +120,16 @@ function logConnection(label: string, connection: mongoose.Connection, expectedD
 export async function connectDB() {
   if (cached.conn) return cached.conn;
 
+  const primaryDbName = resolvePrimaryDbName();
+  const mongoUri = resolvePrimaryUri();
+
   if (!cached.promise) {
     // Small pools keep many serverless lambdas (each caching its own
     // connection) well under Atlas M0's connection budget.
     cached.promise = mongoose
-      .connect(MONGODB_URI, { ...BASE_OPTIONS, dbName: PRIMARY_DB_NAME })
+      .connect(mongoUri, { ...BASE_OPTIONS, dbName: primaryDbName })
       .then((mongooseInstance) => {
-        logConnection('primary', mongooseInstance.connection, PRIMARY_DB_NAME);
+        logConnection('primary', mongooseInstance.connection, primaryDbName);
         return mongooseInstance;
       });
   }
@@ -138,7 +139,7 @@ export async function connectDB() {
   } catch (e) {
     cached.promise = null;
     console.error(`${LOG_PREFIX} primary connection failed`, {
-      expectedDb: PRIMARY_DB_NAME,
+      expectedDb: primaryDbName,
       error: e instanceof Error ? e.message : String(e),
     });
     throw e;
@@ -156,12 +157,15 @@ export async function connectDB() {
 export async function connectBackupDB(): Promise<mongoose.Connection> {
   if (backupCached.conn) return backupCached.conn;
 
+  const backupDbName = resolveBackupDbNameValue(resolvePrimaryDbName());
+  const backupUri = resolveBackupUri();
+
   if (!backupCached.promise) {
     backupCached.promise = mongoose
-      .createConnection(MONGODB_BACKUP_URI, { ...BASE_OPTIONS, dbName: BACKUP_DB_NAME })
+      .createConnection(backupUri, { ...BASE_OPTIONS, dbName: backupDbName })
       .asPromise()
       .then((connection) => {
-        logConnection('backup', connection, BACKUP_DB_NAME);
+        logConnection('backup', connection, backupDbName);
         return connection;
       });
   }
@@ -171,7 +175,7 @@ export async function connectBackupDB(): Promise<mongoose.Connection> {
   } catch (e) {
     backupCached.promise = null;
     console.error(`${LOG_PREFIX} backup connection failed`, {
-      expectedDb: BACKUP_DB_NAME,
+      expectedDb: backupDbName,
       error: e instanceof Error ? e.message : String(e),
     });
     throw e;

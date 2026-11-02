@@ -27,7 +27,8 @@
  */
 
 import UserProduct from '@/models/UserProduct';
-import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
+import { getProductCapabilities } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { hasCapability } from '@/lib/services/capability-access';
 
 export type ReviewEntitlementSource =
@@ -51,11 +52,9 @@ interface CardLike {
 }
 
 function reviewCapabilityForProductSlug(slug: string | undefined): boolean {
-  const normalized = (slug ?? '').trim().toLowerCase();
-  if (!normalized) return false;
-  const productId = normalized.toUpperCase().replace(/-/g, '_');
-  if (!isProductId(productId)) return false;
-  return getProductCapabilities(productId as ProductId).includes('review_ai_suggestions');
+  const productId = resolveCanonicalProductId(slug);
+  if (!productId) return false;
+  return getProductCapabilities(productId).includes('review_ai_suggestions');
 }
 
 export async function getCardReviewEntitlement(
@@ -78,7 +77,7 @@ export async function getCardReviewEntitlement(
         return {
           entitled: true,
           source: 'product',
-          productId: slug?.toUpperCase().replace(/-/g, '_'),
+          productId: resolveCanonicalProductId(slug) ?? undefined,
         };
       }
     }

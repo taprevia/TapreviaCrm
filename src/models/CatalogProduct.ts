@@ -42,6 +42,11 @@ const CatalogProductSchema = new Schema(
     },
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
+    // Additive fields already used by seed/API/UI; strict mode previously
+    // dropped them silently. Existing documents remain valid without them.
+    priceMinor: { type: Number, default: 0, min: 0 },
+    currency: { type: String, default: 'INR', trim: true, maxlength: 8 },
+    imageUrl: { type: String, default: '' },
   },
   { timestamps: true }
 );

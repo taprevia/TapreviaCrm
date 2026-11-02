@@ -19,12 +19,18 @@ import Profile from '@/models/Profile';
 import User from '@/models/User';
 import UserProduct from '@/models/UserProduct';
 import ReviewSettings from '@/models/ReviewSettings';
-import { getProductCapabilities, isProductId, type ProductId } from '@/config/products';
+import { getProductCapabilities } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import {
-  CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED,
   STANDEE_REVIEW_ASSISTANT_ENABLED,
 } from '@/lib/review-feature-flags';
+import {
+  getCentralIntegrationRollout,
+  isLocalCentralReviewForceAllEnabled,
+  resolveEffectiveReviewSettingsSource,
+} from '@/lib/services/review-rollout';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
   resolveReviewSettings,
   type ResolvedReviewSettings,
@@ -77,11 +83,9 @@ export function isGoogleReviewStandeeSlug(slug: string | undefined): boolean {
 }
 
 export function standeeProductGrantsReview(slug: string | undefined): boolean {
-  const normalized = (slug ?? '').trim().toLowerCase();
-  if (!normalized) return false;
-  const productId = normalized.toUpperCase().replace(/-/g, '_');
-  if (!isProductId(productId)) return false;
-  return getProductCapabilities(productId as ProductId).includes('review_ai_suggestions');
+  const productId = resolveCanonicalProductId(slug);
+  if (!productId) return false;
+  return getProductCapabilities(productId).includes('review_ai_suggestions');
 }
 
 /** Public path for the Standee review host. Uses the opaque route/uid. */
@@ -233,7 +237,10 @@ export async function resolveStandeeReviewProduct(
   if (String(assignment.userId) !== String(standee.userId)) return null;
 
   const slug = (assignment.catalogProductId.slug ?? '').trim().toLowerCase();
-  if (!isGoogleReviewStandeeSlug(slug) || !standeeProductGrantsReview(slug)) {
+  // Capability-based host check: All In One 3/4 declare Google Review support
+  // and must be able to use the same assistant. A configured Google review
+  // slot is still required below.
+  if (!standeeProductGrantsReview(slug)) {
     return null;
   }
 
@@ -302,15 +309,34 @@ export async function resolveStandeeReviewHost(
   const product = await resolveStandeeReviewProduct(standee);
   if (!product) return null;
 
-  // Public central reads honor the independent central integration gate.
-  // Management/preview reads remain available regardless of the gate.
-  const central = CENTRAL_REVIEW_PUBLIC_INTEGRATION_ENABLED
+  // Public central reads honor the global gate AND the tenant rollout policy.
+  // Management/preview reads remain available regardless of the public gate.
+  const requestedCentralSource =
+    standee.reviewSettingsSource === 'central' || standee.reviewSettingsSource === 'hybrid';
+  const rollout = getCentralIntegrationRollout(product.ownerId);
+  // Central ON keeps an explicitly connected Standee on central/hybrid; an
+  // unconnected (legacy) Standee stays legacy. Central OFF keeps the
+  // historical stored-source/legacy fallback behavior.
+  const central = rollout.effective
     ? await loadCentralSettings(product.ownerId)
     : null;
-  const source = resolveStandeeSettingsSource(
+  const storedSource = resolveStandeeSettingsSource(
     standee.reviewSettingsSource,
     Boolean(central)
   );
+  const source = resolveEffectiveReviewSettingsSource(storedSource, rollout.effective, {
+    forceAll: isLocalCentralReviewForceAllEnabled(),
+  });
+  if (source !== 'legacy' || requestedCentralSource) {
+    const allowed = rollout.effective && source !== 'legacy';
+    emitReviewEvent({
+      event: allowed ? 'review.rollout.allowed' : 'review.rollout.denied',
+      hostType: 'standee',
+      tenantId: product.ownerId,
+      outcome: allowed ? 'allowed' : 'denied',
+      reasonCategory: rollout.reason,
+    });
+  }
   const config = resolveStandeeEffectiveReviewSettings({
     standee,
     googleReviewUrl: product.googleReviewUrl,

@@ -8,7 +8,7 @@ import Card from '@/models/Card';
 import Profile from '@/models/Profile';
 import UserProduct from '@/models/UserProduct';
 import { replaceCardForAssignment } from '@/lib/services/card-replacement';
-import { provisionCardForAssignment } from '@/lib/services/card-identity';
+import { provisionCardForAssignment, findCardByUid } from '@/lib/services/card-identity';
 import { deriveCardKind } from '@/lib/services/product-experience';
 import { ensureCardPublicSlug } from '@/lib/services/human-url';
 
@@ -51,6 +51,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!userProduct) {
       return fail(404, 'NOT_FOUND', 'User product not found');
     }
+    if (userProduct.status !== 'active') {
+      return fail(400, 'VALIDATION_ERROR', 'Removed assignments cannot be linked to a card');
+    }
 
     // ── Uninstantiated assignment → bind the physical card now ──────────────
     // If no cardId has been set yet, provision the card, apply any pending
@@ -64,6 +67,23 @@ export async function PUT(request: NextRequest, { params }: Params) {
       const derivedKind = deriveCardKind(catalog.kind ?? '');
       if (!derivedKind) {
         return fail(400, 'BAD_REQUEST', 'Product kind cannot be allocated to a Card');
+      }
+
+      // Reject before provisioning if this card already has another active
+      // assignment for the same customer.
+      const existingCard = await findCardByUid(parsed.data.cardUid);
+      if (existingCard) {
+        const duplicate = await UserProduct.findOne({
+          userId: user._id,
+          cardId: existingCard._id,
+          status: 'active',
+          _id: { $ne: userProduct._id },
+        })
+          .select('_id')
+          .lean<{ _id: unknown } | null>();
+        if (duplicate) {
+          return fail(409, 'CONFLICT', 'This card is already assigned to another active product');
+        }
       }
 
       const provisioned = await provisionCardForAssignment({

@@ -124,8 +124,12 @@ function appendHistory(current: string[], served: string[]): string[] {
   return next.slice(-HISTORY_CAP);
 }
 
-/** The AI only rewrites a meaningful amount of the customer's own words. */
-const AI_MIN_FEEDBACK_CHARS = 20;
+/**
+ * Minimum customer input before AI phrasing is attempted. Short but genuine
+ * descriptions (e.g. "good exp") are valid; the prompt forbids inventing
+ * details, so a modest draft is safer than blocking the customer.
+ */
+const AI_MIN_FEEDBACK_CHARS = 3;
 
 function newCopyId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -499,6 +503,10 @@ export function ReviewAssistantFlow({
   const hasGoogleUrl = isSafeExternalUrl(config.googleReviewUrl ?? '');
   const trimmedFeedback = feedback.trim();
   const aiGated = trimmedFeedback.length >= AI_MIN_FEEDBACK_CHARS;
+  const remainingFeedbackChars = Math.max(
+    0,
+    AI_MIN_FEEDBACK_CHARS - trimmedFeedback.length
+  );
   // In template mode the button stays usable from the start: as soon as sample
   // suggestions render, or once the customer has a draft, they can request
   // different suggestions without first typing feedback.
@@ -518,9 +526,11 @@ export function ReviewAssistantFlow({
   async function runGenerate(
     nextLength: ReviewPreferredLength,
     forceAi = false,
-    forceTemplate = false
+    forceTemplate = false,
+    languageOverride?: string
   ) {
     if (generating) return;
+    const targetLanguage = languageOverride ?? language;
     const aiMode = forceTemplate ? false : forceAi || mode === 'ai';
     setMode(aiMode ? 'ai' : 'template');
     setSelfWrite(false);
@@ -555,7 +565,7 @@ export function ReviewAssistantFlow({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               topics: selectedTopics,
-              language,
+              language: targetLanguage,
               ...lengthField,
               excludeTemplateIds: historyRef.current,
             }),
@@ -578,8 +588,8 @@ export function ReviewAssistantFlow({
           setSuggestions([]);
           setError(
             copyFlowEnabled
-              ? "We couldn't find another suggestion right now — add a sentence or two more and we can phrase it for you."
-              : "We couldn't find a template that fits — add a sentence or two more and we can phrase it for you."
+              ? `No further suggestion is available yet — add at least ${AI_MIN_FEEDBACK_CHARS} characters and we can phrase it for you.`
+              : `We couldn't find a template that fits — add at least ${AI_MIN_FEEDBACK_CHARS} characters and we can phrase it for you.`
           );
           setStatus('');
           return;
@@ -591,8 +601,8 @@ export function ReviewAssistantFlow({
         setSuggestions([]);
         setError(
           copyFlowEnabled
-            ? 'Please write at least a sentence or two so we can phrase your experience accurately — or use a suggestion above.'
-            : 'Please write at least a sentence or two so we can phrase your experience accurately — or pick a template above.'
+            ? `Add at least ${AI_MIN_FEEDBACK_CHARS} characters so we can phrase your experience — or use a suggestion above.`
+            : `Add at least ${AI_MIN_FEEDBACK_CHARS} characters so we can phrase your experience — or pick a template above.`
         );
         return;
       }
@@ -603,7 +613,7 @@ export function ReviewAssistantFlow({
         body: JSON.stringify({
           feedback: trimmedFeedback,
           topics: selectedTopics,
-          language,
+          language: targetLanguage,
           ...lengthField,
         }),
       });
@@ -612,7 +622,17 @@ export function ReviewAssistantFlow({
         | null;
       if (!res.ok || !data?.review) {
         setSuggestions([]);
-        if (data?.code === 'UNAVAILABLE') {
+        if (data?.code === 'NO_MATCHING_REVIEW_TEMPLATE') {
+          setError(
+            data?.error ??
+              'No matching review suggestion is currently available for these settings. You can still write your own review.'
+          );
+        } else if (data?.code === 'AI_NOT_CONFIGURED') {
+          setError(
+            data?.error ??
+              'AI writing is not configured for this business. You can still write or copy your review manually.'
+          );
+        } else if (data?.code === 'UNAVAILABLE') {
           setError(
             "AI review-writing isn't available for this business right now — you can still write your own review below."
           );
@@ -673,7 +693,7 @@ export function ReviewAssistantFlow({
 
   /** Progressive disclosure: reveal the manual composer, AI-first, without
       firing anything yet — the customer still writes their own words and the
-      20-character gate is enforced inside runGenerate. */
+      minimum-length gate is enforced inside runGenerate. */
   const openAiComposer = () => {
     setMode('ai');
     setError(null);
@@ -704,6 +724,17 @@ export function ReviewAssistantFlow({
     );
   };
 
+  const handleChangeLanguage = (next: string) => {
+    setLanguage(next);
+    setError(null);
+    // Refresh visible template suggestions for the newly selected language.
+    // AI drafts are not auto-regenerated (cost); the next Generate uses the
+    // new language. The explicit override avoids stale React state.
+    if (mode !== 'ai' && suggestions.length > 0 && !generating) {
+      void runGenerate(length, false, true, next);
+    }
+  };
+
   const handleChangeLength = (next: ReviewPreferredLength) => {
     lengthTouchedRef.current = true;
     setLength(next);
@@ -712,7 +743,11 @@ export function ReviewAssistantFlow({
     // never silently replaced; regenerating applies the new length instead.
     // (M14: initial suggestions can exist without feedback, so refresh whenever
     // suggestions are shown — the draft is only ever set by pick/AI/myself.)
-    if (suggestions.length > 0 && !generating) {
+    // In AI mode, changing the draft length must not silently switch the
+    // customer back to template mode. Keep the AI selection and let the next
+    // Generate Review use the new length. Template mode still refreshes its
+    // suggestions so the visible templates match the selected length.
+    if (mode !== 'ai' && suggestions.length > 0 && !generating) {
       void runGenerate(next, false, true);
     }
   };
@@ -745,28 +780,6 @@ export function ReviewAssistantFlow({
     }
   }
 
-  const handleGoogleClick = () => {
-    if (!hasGoogleUrl) return;
-    track(alias, 'review_google_clicked');
-    // Copy convenience — never blocks navigation, never claims success.
-    if (draft) {
-      void copyToClipboard(draft).then((ok) => {
-        if (ok) {
-          setCopied(true);
-          setStatus('Copied — paste it into Google (hold and tap the text box).');
-          if (shouldTrackCopy(draft)) {
-            track(
-              alias,
-              'review_copied',
-              draftSourceRef.current ? JSON.stringify({ source: draftSourceRef.current }) : undefined
-            );
-          }
-          window.setTimeout(() => setCopied(false), 8000);
-        }
-      });
-    }
-  };
-
   /** Open Google only after clipboard success; popup is pre-opened under the click gesture. */
   const openGoogleAfterCopy = (pendingWindow: Window | null) => {
     if (!hasGoogleUrl) return;
@@ -781,6 +794,9 @@ export function ReviewAssistantFlow({
     const opened = window.open(googleUrl, '_blank');
     if (!opened) {
       setGoogleBlocked(true);
+      // The clipboard write already succeeded. A same-tab navigation is not
+      // subject to popup blocking and is the most reliable way to continue.
+      window.location.assign(googleUrl);
       return;
     }
     try {
@@ -898,6 +914,14 @@ export function ReviewAssistantFlow({
     }
   }
 
+  /** Keep analytics/template attribution accurate when the draft is edited. */
+  const copySource = (): 'ai' | 'manual' => {
+    if (draftAttribution) {
+      return isAiDraftAttributable(draftAttribution.originalText, draft) ? 'ai' : 'manual';
+    }
+    return draftSourceRef.current === 'ai' ? 'ai' : 'manual';
+  };
+
   /** Copy a suggestion straight from the card, with a temporary check state. */
   const handleCardCopy = async (text: string) => {
     if (copyBusyRef.current) return;
@@ -926,7 +950,7 @@ export function ReviewAssistantFlow({
   }, [suggestions]);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col space-y-6 px-4 pb-10 pt-6 text-center sm:my-8 sm:rounded-2xl sm:border sm:border-[var(--v-border)] sm:bg-[var(--v-surface)] sm:p-6">
+    <main className="mx-auto flex w-full max-w-md flex-col space-y-6 bg-[var(--v-bg)] px-4 pb-10 pt-6 text-center sm:my-8 sm:rounded-2xl sm:border sm:border-[var(--v-border)] sm:bg-[var(--v-surface)] sm:p-6">
       {/* Screen-reader announcements for async outcomes. */}
       <p aria-live="polite" role="status" className="sr-only">
         {status}
@@ -1116,8 +1140,8 @@ export function ReviewAssistantFlow({
               {aiGated
                 ? 'Thanks — we’ll only use your own words.'
                 : trimmedFeedback.length > 0
-                  ? 'A little more detail helps us phrase it accurately.'
-                  : 'Anything you share stays your own — we only help you phrase it.'}
+                  ? `Add ${remainingFeedbackChars} more character${remainingFeedbackChars === 1 ? '' : 's'} to generate a review — or continue with your own words.`
+                  : `Write at least ${AI_MIN_FEEDBACK_CHARS} characters so we can phrase your experience.`}
             </p>
           </div>
 
@@ -1137,7 +1161,7 @@ export function ReviewAssistantFlow({
                   <select
                     id="ra-language"
                     value={language}
-                    onChange={(event) => setLanguage(event.target.value)}
+                    onChange={(event) => handleChangeLanguage(event.target.value)}
                     className={cn(inputClass, 'appearance-none pr-9')}
                   >
                     {config.languages.map((lang) => (
@@ -1192,7 +1216,7 @@ export function ReviewAssistantFlow({
           <button
             type="button"
             disabled={!canGenerate}
-            onClick={() => void runGenerate(length, mode === 'ai')}
+            onClick={() => void runGenerate(length, aiGated ? true : mode === 'ai')}
             className={cn(primaryButtonClass, generating && 'opacity-70')}
           >
             {generating ? (
@@ -1207,6 +1231,14 @@ export function ReviewAssistantFlow({
               </>
             )}
           </button>
+
+          {!canGenerate && !generating && (
+            <p role="status" className="text-center text-xs leading-relaxed text-[var(--v-muted)]">
+              {trimmedFeedback.length === 0
+                ? `Write at least ${AI_MIN_FEEDBACK_CHARS} characters about your experience to generate a review.`
+                : `Add ${remainingFeedbackChars} more character${remainingFeedbackChars === 1 ? '' : 's'} to generate a review, or use “Use my words as my review”.`}
+            </p>
+          )}
 
           {/* Own-words path — the customer's words are the review, never AI. */}
           <button
@@ -1256,49 +1288,27 @@ export function ReviewAssistantFlow({
               <p className="text-xs font-medium text-red-600">Couldn’t copy automatically — select the text and copy it manually.</p>
             )}
 
-            {copyFlowEnabled ? (
-              <div className="space-y-2.5">
+            <div className="space-y-2.5">
+              {hasGoogleUrl ? (
                 <button
                   type="button"
-                  onClick={() => void copyAndContinue('ai')}
+                  onClick={() => void copyAndContinue(copySource())}
                   disabled={!draft || navigationBusy}
                   className={cn(primaryButtonClass, 'disabled:cursor-not-allowed disabled:opacity-50')}
                 >
                   <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
-                  Copy AI Review &amp; Continue to Google
+                  Copy &amp; Continue to Google Reviews
                 </button>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => void copyAndContinue('manual')}
-                  disabled={!draft || navigationBusy}
+                  onClick={() => void handleCopy()}
+                  disabled={!draft}
                   className={cn(primaryButtonClass, 'disabled:cursor-not-allowed disabled:opacity-50')}
                 >
-                  <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
-                  Copy My Review &amp; Continue to Google
-                </button>
-                {!hasGoogleUrl && (
-                  <p className="text-center text-[11px] leading-relaxed text-[var(--v-muted)]">
-                    {businessName} hasn&apos;t added a Google Reviews link yet. Copy your review and post it on Google your way.
-                  </p>
-                )}
-                {googleBlocked && (
-                  <a
-                    href={googleUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-center text-xs font-medium text-[var(--v-accent)] underline underline-offset-2"
-                  >
-                    Open Google Reviews
-                  </a>
-                )}
-              </div>
-            ) : (
-              <>
-                {/* Copy — secondary to the Google CTA. */}
-                <button type="button" onClick={() => void handleCopy()} className={secondaryButtonClass}>
                   {copied ? (
                     <>
-                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      <Check className="h-4 w-4" aria-hidden="true" />
                       Copied
                     </>
                   ) : (
@@ -1308,32 +1318,52 @@ export function ReviewAssistantFlow({
                     </>
                   )}
                 </button>
+              )}
 
-                {/* Google CTA — the dominant action, full width. */}
-                {hasGoogleUrl ? (
-                  <a
-                    href={googleUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={handleGoogleClick}
-                    className={primaryButtonClass}
-                  >
+              {hasGoogleUrl && (
+                <button
+                  type="button"
+                  onClick={() => void handleCopy()}
+                  disabled={!draft || navigationBusy}
+                  className={cn(secondaryButtonClass, 'disabled:cursor-not-allowed disabled:opacity-50')}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
+                      Copy review only
+                    </>
+                  )}
+                </button>
+              )}
+
+              {!hasGoogleUrl && (
+                <div className="rounded-xl bg-[var(--v-surface)] px-3.5 py-3 ring-1 ring-[var(--v-border)]">
+                  <p className="flex min-h-12 items-center justify-center gap-2 text-sm font-semibold text-[var(--v-muted)]">
                     <ExternalLink className="h-4 w-4" aria-hidden="true" />
                     Continue to Google Reviews →
-                  </a>
-                ) : (
-                  <div className="rounded-xl bg-[var(--v-surface)] px-3.5 py-3 ring-1 ring-[var(--v-border)]">
-                    <p className="flex min-h-12 items-center justify-center gap-2 text-sm font-semibold text-[var(--v-muted)]">
-                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                      Continue to Google Reviews →
-                    </p>
-                    <p className="mt-1 text-center text-[11px] leading-relaxed text-[var(--v-muted)]">
-                      {businessName} hasn’t added a Google Reviews link yet — copy your review and post it on Google your way.
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
+                  </p>
+                  <p className="mt-1 text-center text-[11px] leading-relaxed text-[var(--v-muted)]">
+                    {businessName} hasn’t added a Google Reviews link yet — copy your review and post it on Google your way.
+                  </p>
+                </div>
+              )}
+
+              {googleBlocked && hasGoogleUrl && (
+                <a
+                  href={googleUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-center text-xs font-medium text-[var(--v-accent)] underline underline-offset-2"
+                >
+                  Open Google Reviews
+                </a>
+              )}
+            </div>
           </div>
         </section>
       )}

@@ -19,6 +19,7 @@ import './Lead';
 import './Media';
 import './NewsletterSubscriber';
 import './PasswordResetToken';
+import './PasswordResetOtp';
 import './Product';
 import './ProductEnquiry';
 import './ProductTitleLog';

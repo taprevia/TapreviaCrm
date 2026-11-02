@@ -15,6 +15,8 @@ export interface ReviewSettingsValues {
     enabled: boolean;
     googleReviewUrl: string;
     welcomeMessage: string;
+    /** Optional AI/template display name; Card.name remains the legacy fallback. */
+    businessName: string;
   };
   content: {
     category: string;
@@ -37,6 +39,7 @@ export function createDefaultReviewSettings(): ReviewSettingsValues {
       enabled: false,
       googleReviewUrl: '',
       welcomeMessage: '',
+      businessName: '',
     },
     content: {
       category: '',

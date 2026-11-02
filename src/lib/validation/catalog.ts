@@ -69,7 +69,9 @@ export const assignProductSchema = z.object({
   ),
   platforms: z.array(z.string()).optional(),
   notes: z.string().max(500).optional(),
-  material: cardMaterialSchema.default('pvc'),
+  // PVC is legacy-only: existing records remain readable, but it cannot be
+  // selected for a new assignment. Omitted material stays unset.
+  material: z.enum(['metal', 'wooden']).optional(),
 });
 
 export type CreateCatalogInput = z.infer<typeof createCatalogSchema>;

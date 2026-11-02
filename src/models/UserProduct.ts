@@ -61,7 +61,6 @@ const UserProductSchema = new Schema(
     material: {
       type: String,
       enum: ['pvc', 'metal', 'wooden'],
-      default: 'pvc',
     },
   },
   { timestamps: true }

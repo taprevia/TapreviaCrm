@@ -150,7 +150,7 @@ function LightSelect({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-gray-700">
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-ink-mute">
         {label}
       </label>
       <div className="relative">
@@ -330,7 +330,7 @@ export function HybridDialog({
     form.overrideLengthMode && !form.lengthMode ? 'Choose a length mode.' : null;
   const languageError =
     effectiveEnabled && effectiveLanguages.length === 0
-      ? 'Add at least one language before enabling Review Assistant.'
+      ? 'Add at least one language before enabling reviews.'
       : null;
   const validationError =
     urlError ??
@@ -420,7 +420,7 @@ export function HybridDialog({
         <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-gray-900">Review Assistant status</p>
+              <p className="text-sm font-medium text-gray-900">Review availability</p>
               <p className="mt-0.5 text-xs text-gray-500">
                 {form.enabled === 'inherit'
                   ? `Inherited: ${central.general.enabled ? 'Enabled' : 'Disabled'}`
@@ -480,7 +480,7 @@ export function HybridDialog({
           overridden={form.overrideWelcome}
           onToggle={() => toggle('overrideWelcome')}
         >
-          <label htmlFor="hybrid-welcome-message" className="mb-1.5 block text-sm font-medium text-gray-700">
+          <label htmlFor="hybrid-welcome-message" className="mb-1.5 block text-sm font-medium text-ink-mute">
             Welcome message for this product
           </label>
           <textarea

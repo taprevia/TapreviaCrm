@@ -10,7 +10,13 @@ export const dynamic = 'force-dynamic';
  * The page never creates a ReviewSettings document; it is read-only until the
  * customer explicitly saves.
  */
-export default async function ReviewManagementPage() {
+export default async function ReviewManagementPage({
+  searchParams,
+}: {
+  searchParams?: { cardId?: string | string[] };
+}) {
   await requirePageCapability('review_ai_suggestions');
-  return <ReviewManagementClient />;
+  const cardId =
+    typeof searchParams?.cardId === 'string' ? searchParams.cardId : undefined;
+  return <ReviewManagementClient initialCardId={cardId} />;
 }

@@ -8,6 +8,8 @@ import {
   reviewProductConnectionSchema,
 } from '@/lib/validation/review-settings';
 import { connectReviewProduct } from '@/lib/services/review-product-connection';
+import { getReviewProductForUser } from '@/lib/services/review-product-eligibility';
+import { emitReviewEvent } from '@/lib/services/review-observability';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,12 +46,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid product connection payload');
     }
 
+    await connectDB();
+    const existingLookup = await getReviewProductForUser(auth.user._id, params.assignmentId);
+    if (existingLookup.ok) {
+      const incomingOverrides = (body as { overrides?: { googleReviewUrl?: unknown } })
+        .overrides;
+      const storedUrl = existingLookup.product.reviewOverrides.googleReviewUrl;
+      if (
+        incomingOverrides &&
+        typeof incomingOverrides.googleReviewUrl === 'string' &&
+        storedUrl &&
+        incomingOverrides.googleReviewUrl === storedUrl
+      ) {
+        delete incomingOverrides.googleReviewUrl;
+      }
+    }
+
     const parsed = reviewProductConnectionSchema.safeParse(body);
     if (!parsed.success) {
       return fail(400, 'VALIDATION_ERROR', 'Invalid product connection', parsed.error.flatten().fieldErrors);
     }
 
-    await connectDB();
     const result = await connectReviewProduct({
       userId: auth.user._id,
       assignmentId: params.assignmentId,
@@ -58,7 +75,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     if (!result.ok) {
       if (result.status === 404) return fail(404, 'NOT_FOUND', result.message);
-      if (result.status === 403) return fail(403, 'FORBIDDEN', result.message);
+      if (result.status === 403) {
+        emitReviewEvent({
+          event: 'review.security.tenant_boundary_denied',
+          tenantId: auth.user._id,
+          errorCategory: 'tenant_boundary',
+          reasonCategory: 'product_assignment',
+        });
+        return fail(403, 'FORBIDDEN', result.message);
+      }
       if (result.status === 409) return fail(409, 'CONFLICT', result.message);
       return fail(400, 'VALIDATION_ERROR', result.message);
     }

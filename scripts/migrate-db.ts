@@ -1,38 +1,46 @@
 /**
- * migrate-db.ts — copy every collection and document from the `test` database
- * into `taprevia_V2` and `taprevia_backup` on the same Cluster0 deployment.
+ * migrate-db.ts — owner-controlled database copy utility.
+ *
+ * SAFETY MODEL:
+ *   - Dry-run is the default; nothing is written without --write.
+ *   - Source and target database names are REQUIRED arguments; there are no
+ *     implicit `test`, `taprevia_V2` or `taprevia_backup` defaults.
+ *   - The URI database path must agree with --source-db.
+ *   - Remote/Atlas clusters are refused unless both --allow-remote and
+ *     --confirm-remote are supplied.
+ *   - Unknown arguments and duplicate/conflicting targets are rejected.
+ *   - A sanitized summary is printed before any connection is opened.
+ *
+ * With --write, upserts by `_id` may create target databases/collections.
+ * The source is opened read-only.
  *
  * Usage:
+ *   MONGODB_URI=mongodb://localhost:27017/nfc-crm \
+ *     npx tsx scripts/migrate-db.ts \
+ *     --source-db=nfc-crm --target-db=nfc-crm_copy --write
  *
- *   MONGODB_URI='mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority' \
- *   npx tsx scripts/migrate-db.ts [--dry-run]
- *
- * Behaviour:
- *   - `MONGODB_URI` is the ONLY connection input (no localhost fallback).
- *   - Collection names are discovered dynamically from the source `test` DB.
- *   - `test` is treated strictly READ-ONLY: only listCollections/find/count are
- *     ever issued against it. Nothing is created, updated or deleted there.
- *   - Every document is upserted by `_id` into each target DB, so re-runs are
- *     idempotent and never duplicate existing rows.
- *   - `--dry-run` walks the source and reports counts without writing anything.
- *
- * Optional overrides: SOURCE_DB (default `test`), TARGET_DBS (comma-separated),
- * BATCH_SIZE (default 500).
+ * Remote (owner approval required):
+ *   MONGODB_URI=mongodb+srv://... npx tsx scripts/migrate-db.ts \
+ *     --source-db=<src> --target-db=<dst> \
+ *     --allow-remote --confirm-remote --write
  */
+
 import {
   MongoClient,
   type AnyBulkWriteOperation,
   type Db,
   type Document,
 } from 'mongodb';
+import {
+  OpsScriptSafetyError,
+  formatTargetSummary,
+  parseMigrationArgs,
+  parseMongoTarget,
+  type MigrationArgs,
+  type MongoScriptTarget,
+} from '../src/lib/ops-script-safety';
 
-const SOURCE_DB = (process.env.SOURCE_DB ?? 'test').trim();
-const TARGET_DB_NAMES = (process.env.TARGET_DBS ?? 'taprevia_V2,taprevia_backup')
-  .split(',')
-  .map((name) => name.trim())
-  .filter(Boolean);
 const BATCH_SIZE = Math.max(1, Number(process.env.BATCH_SIZE ?? 500));
-const DRY_RUN = process.argv.includes('--dry-run');
 
 const LOG_PREFIX = '[db-migrate]';
 
@@ -105,14 +113,47 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (TARGET_DB_NAMES.length === 0) {
-    error('No target databases configured (TARGET_DBS is empty).');
+  let args: MigrationArgs;
+  try {
+    args = parseMigrationArgs(process.argv.slice(2));
+  } catch (err) {
+    error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 
-  if (TARGET_DB_NAMES.includes(SOURCE_DB)) {
-    error(`Refusing to run: source "${SOURCE_DB}" is also listed as a target.`);
+  let target: MongoScriptTarget;
+  try {
+    // The explicit source is also checked against the URI path. A URI that
+    // silently points at another database is refused.
+    target = parseMongoTarget(uri, args.source);
+  } catch (err) {
+    error(err instanceof Error ? err.message : String(err));
     process.exit(1);
+  }
+
+  if (target.isRemote && !args.allowRemote) {
+    error(
+      'Refusing a remote MongoDB target. Re-run with --allow-remote only after owner approval.'
+    );
+    process.exit(1);
+  }
+  if (target.isRemote && !args.confirmRemote) {
+    error(
+      `Remote access to "${target.dbName}" is not confirmed. Pass --confirm-remote as a second explicit signal.`
+    );
+    process.exit(1);
+  }
+
+  const DRY_RUN = !args.write;
+  const SOURCE_DB = args.source;
+  const TARGET_DB_NAMES = args.targets;
+
+  log(
+    `operation=${DRY_RUN ? 'DRY-RUN (no writes)' : 'WRITE'} ` +
+      `source=${SOURCE_DB} targets=[${TARGET_DB_NAMES.join(', ')}] ${formatTargetSummary(target)}`
+  );
+  if (!DRY_RUN) {
+    log('Write confirmation received. This operation will upsert documents by _id.');
   }
 
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 15_000 });
@@ -230,6 +271,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('Migration crashed:', err);
+  if (err instanceof OpsScriptSafetyError) {
+    error(err.message);
+  } else {
+    console.error('Migration crashed:', err);
+  }
   process.exit(2);
 });

@@ -44,7 +44,7 @@ export const ForTeamsCTA: React.FC = () => {
                 variant="outline"
                 size="lg"
                 pill
-                className="w-full sm:w-auto bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold text-sm sm:text-base gap-2 px-6 sm:px-8 shadow-lg border-none"
+                className="w-full sm:w-auto bg-emerald-700 text-white hover:bg-emerald-700 font-extrabold text-sm sm:text-base gap-2 px-6 sm:px-8 shadow-lg border-none"
               >
                 <MessageCircle size={18} />
                 Get Bulk Pricing on WhatsApp

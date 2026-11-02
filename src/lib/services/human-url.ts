@@ -4,7 +4,8 @@ import Standee from '@/models/Standee';
 import User from '@/models/User';
 import UserProduct from '@/models/UserProduct';
 import { generateSlug } from '@/lib/utils';
-import { getProductDef, isProductId } from '@/config/products';
+import { getProductDef } from '@/config/products';
+import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { nextPermUniqueNumber } from '@/lib/services/customer-identity';
 
 const PUBLIC_SLUG_MAX_LENGTH = 100;
@@ -28,6 +29,13 @@ export const RESERVED_PUBLIC_SEGMENTS: ReadonlySet<string> = new Set([
   'r',
   'register',
   'review',
+  'standee-review',
+  'preview',
+  'contacts',
+  'privacy',
+  'terms',
+  'cookies',
+  'fonts',
   't',
 ]);
 
@@ -51,8 +59,8 @@ function escapeRegExp(value: string): string {
  */
 export function getPublicProductSlug(catalogSlug: string | null | undefined): string | null {
   if (!catalogSlug) return null;
-  const productId = catalogSlug.toUpperCase().replace(/-/g, '_');
-  if (!isProductId(productId)) return null;
+  const productId = resolveCanonicalProductId(catalogSlug);
+  if (!productId) return null;
   return getProductDef(productId).publicSlug ?? null;
 }
 
@@ -169,7 +177,7 @@ export async function ensureCardPublicSlug(
   if (!card || !userId) return { assigned: false };
   if (card.publicSlug) return { assigned: true, publicSlug: card.publicSlug };
 
-  const assignment = (await UserProduct.findOne({ cardId: card._id })
+  const assignment = (await UserProduct.findOne({ cardId: card._id, userId, status: 'active' })
     .select('catalogProductId')
     .populate('catalogProductId', 'slug')
     .lean()) as unknown as {

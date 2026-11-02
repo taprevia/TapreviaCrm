@@ -24,7 +24,6 @@ import {
   EmptyState,
   Input,
   Modal,
-  Select,
   Switch,
   useToast,
 } from '@/components/ui';
@@ -67,49 +66,11 @@ interface ApiErrorBody {
 
 type ProductMutationResponse = { product?: ProductRow } & ApiErrorBody;
 
-/* ─── Formatting helpers ────────────────────────────────────────────────────── */
-
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  INR: '₹',
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-};
-
-const CURRENCY_OPTIONS = [
-  { value: 'INR', label: 'INR (₹)' },
-  { value: 'USD', label: 'USD ($)' },
-  { value: 'EUR', label: 'EUR (€)' },
-  { value: 'GBP', label: 'GBP (£)' },
-];
-
-/**
- * '₹1,299' style price label. Integers stay decimal-free; fractional amounts
- * cap at two places. Unknown currencies fall back to the ₹ symbol.
- */
-function formatPrice(priceMinor: number, currency: string): string {
-  const major = (priceMinor ?? 0) / 100;
-  const symbol = CURRENCY_SYMBOLS[currency] ?? '₹';
-  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
-  return `${symbol}${major.toLocaleString(locale, {
-    maximumFractionDigits: Number.isInteger(major) ? 0 : 2,
-    minimumFractionDigits: 0,
-  })}`;
-}
-
-/** Major-units string for <input type="number"> prefill ('12', '12.5', …). */
-function minorToMajorInput(priceMinor: number): string {
-  return String((priceMinor ?? 0) / 100);
-}
-
 /* ─── Form model ────────────────────────────────────────────────────────────── */
 
 interface ProductFormState {
   title: string;
   description: string;
-  /** Price in MAJOR units as typed by the user ('' allowed); ×100 on save. */
-  priceMajor: string;
-  currency: string;
   category: string;
   imageUrl: string;
   sortOrder: string;
@@ -119,8 +80,6 @@ function emptyForm(nextSortOrder: number): ProductFormState {
   return {
     title: '',
     description: '',
-    priceMajor: '',
-    currency: 'INR',
     category: '',
     imageUrl: '',
     sortOrder: String(nextSortOrder),
@@ -201,8 +160,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
     setForm({
       title: product.title ?? '',
       description: product.description ?? '',
-      priceMajor: product.priceMinor ? minorToMajorInput(product.priceMinor) : '',
-      currency: product.currency || 'INR',
       category: product.category ?? '',
       imageUrl: product.imageUrl ?? '',
       sortOrder: String(product.sortOrder ?? 0),
@@ -306,17 +263,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
       const title = form.title.trim();
       if (!title) errors.title = 'Title is required.';
 
-      let priceMinor: number | undefined;
-      const rawPrice = form.priceMajor.trim();
-      if (rawPrice !== '') {
-        const major = Number(rawPrice);
-        if (!Number.isFinite(major) || major < 0) {
-          errors.priceMinor = 'Enter a valid non-negative amount.';
-        } else {
-          priceMinor = Math.round(major * 100);
-        }
-      }
-
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors);
         return;
@@ -324,8 +270,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
 
       const body: Record<string, unknown> = { title };
       if (form.description.trim()) body.description = form.description.trim();
-      if (priceMinor !== undefined) body.priceMinor = priceMinor;
-      body.currency = form.currency;
       if (form.category.trim()) body.category = form.category.trim();
       // Always send imageUrl — including '' — so removing a stored image is
       // persisted (the PATCH handler deletes the detached object).
@@ -482,7 +426,7 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
                   )}
                 </span>
 
-                {/* Title + price (+ enquiry badge) */}
+                {/* Title (+ enquiry badge) */}
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-medium text-ink">{product.title}</p>
@@ -496,9 +440,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
                       </Badge>
                     )}
                   </div>
-                  <p className="truncate text-xs text-ink-mute">
-                    {formatPrice(product.priceMinor, product.currency)}
-                  </p>
                 </div>
 
                 {/* Controls: visible switch + edit + delete */}
@@ -582,45 +523,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
             {fieldErrors.description && (
               <p className="mt-1.5 text-xs text-red-500">{fieldErrors.description}</p>
             )}
-          </div>
-
-          {/* Price + currency row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-gray-700">
-                Price
-              </label>
-              <Input
-                id="product-price"
-                type="number"
-                step="0.01"
-                min="0"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={form.priceMajor}
-                onChange={inputSetter('priceMajor')}
-                aria-invalid={Boolean(fieldErrors.priceMinor)}
-              />
-              {(fieldErrors.priceMinor || fieldErrors.price) && (
-                <p className="mt-1.5 text-xs text-red-500">
-                  {fieldErrors.priceMinor ?? fieldErrors.price}
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="product-currency" className="mb-1.5 block text-sm font-medium text-gray-700">
-                Currency
-              </label>
-              <Select
-                id="product-currency"
-                options={CURRENCY_OPTIONS}
-                value={form.currency}
-                onChange={(value) => setForm((prev) => ({ ...prev, currency: value }))}
-              />
-              {fieldErrors.currency && (
-                <p className="mt-1.5 text-xs text-red-500">{fieldErrors.currency}</p>
-              )}
-            </div>
           </div>
 
           {/* Category + sort order row */}

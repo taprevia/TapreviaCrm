@@ -306,7 +306,7 @@ export const PreBookingSection: React.FC = () => {
                   Order via WhatsApp — It&apos;s Free
                 </button>
 
-                <p className="text-[11px] text-center text-gray-500">
+                <p className="text-[11px] text-center text-gray-400">
                   No payment now · We confirm your order personally via WhatsApp
                 </p>
               </form>
