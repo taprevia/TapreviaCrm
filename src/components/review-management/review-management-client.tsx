@@ -24,13 +24,11 @@ import {
   ReviewTagInput,
 } from './fields';
 import { ReviewAnalyticsPanel } from './analytics-panel';
-import { HybridDialog } from './hybrid-dialog';
 import type {
   ReviewApiError,
   ReviewManagementOptions,
   ReviewPreviewResponse,
   ReviewProduct,
-  ReviewProductOverrides,
   ReviewSettingsDraft,
   ReviewSettingsResponse,
 } from './types';
@@ -161,10 +159,6 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
   const [providerLimit, setProviderLimit] = useState('50');
   const [providerModel, setProviderModel] = useState('gpt-4o-mini');
   const [providerError, setProviderError] = useState<string | null>(null);
-  const [sourceSavingId, setSourceSavingId] = useState<string | null>(null);
-  const [sourceError, setSourceError] = useState<string | null>(null);
-  const [hybridTarget, setHybridTarget] = useState<ReviewProduct | null>(null);
-  const [hybridBusy, setHybridBusy] = useState(false);
 
   const [preview, setPreview] = useState<ReviewPreviewResponse | null>(null);
   const [previewProductId, setPreviewProductId] = useState<string | null>(null);
@@ -531,102 +525,6 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
     }
   }
 
-  async function changeProductSource(
-    product: ReviewProduct,
-    source: 'central' | 'legacy'
-  ): Promise<void> {
-    if (source === 'central' && !saved) {
-      toast({
-        title: 'Save central settings first',
-        description: 'Save your Review Settings once before connecting a product to them.',
-        variant: 'info',
-      });
-      return;
-    }
-    const message =
-      source === 'central'
-        ? 'Use Central Review Management settings for this product? Existing product-specific values are preserved, but this product will follow central settings.'
-        : 'Stop using central settings for this product and use its existing product-specific settings?';
-    if (!window.confirm(message)) return;
-
-    setSourceSavingId(product.assignmentId);
-    setSourceError(null);
-    try {
-      const res = await fetch(
-        `/api/review-management/products/${encodeURIComponent(product.assignmentId)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source, revision: product.settingsRevision }),
-        }
-      );
-      const data = (await res.json().catch(() => null)) as ReviewApiError | null;
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('Your session has expired. Please sign in again.');
-        if (res.status === 403) throw new Error('Reviews are not included for this product.');
-        if (res.status === 409) throw new Error('This product changed elsewhere. Refresh and try again.');
-        throw new Error(errorMessage(data, 'Could not update the product settings source.'));
-      }
-      await refreshProducts();
-      if (previewProductId === product.assignmentId) {
-        void loadPreview(product.assignmentId);
-      }
-      toast({
-        title: 'Product connection updated',
-        description:
-          source === 'central'
-            ? 'This product now follows Central Review Management settings.'
-            : 'This product now uses its own settings.',
-        variant: 'success',
-      });
-    } catch (error) {
-      setSourceError(
-        error instanceof Error ? error.message : 'Could not update the product settings source.'
-      );
-    } finally {
-      setSourceSavingId(null);
-    }
-  }
-
-  async function connectHybrid(
-    product: ReviewProduct,
-    overrides: ReviewProductOverrides
-  ): Promise<{ ok: boolean; message?: string }> {
-    setHybridBusy(true);
-    try {
-      const res = await fetch(
-        `/api/review-management/products/${encodeURIComponent(product.assignmentId)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'hybrid', overrides, revision: product.settingsRevision }),
-        }
-      );
-      const data = (await res.json().catch(() => null)) as ReviewApiError | null;
-      if (!res.ok) {
-        return { ok: false, message: errorMessage(data, 'Could not save product overrides.') };
-      }
-      await refreshProducts();
-      if (previewProductId === product.assignmentId) {
-        void loadPreview(product.assignmentId);
-      }
-      setHybridTarget(null);
-      toast({
-        title: 'Product overrides saved',
-        description: 'This product now uses central settings with its explicit overrides.',
-        variant: 'success',
-      });
-      return { ok: true };
-    } catch (error) {
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : 'Could not save product overrides.',
-      };
-    } finally {
-      setHybridBusy(false);
-    }
-  }
-
   function openSetup(product: ReviewProduct) {
     setSetupTarget(product);
     setSetupUrl(
@@ -660,107 +558,33 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
       setSetupError('Enter the Google Review link for this product.');
       return;
     }
-    // A Card always stores its own legacy review settings. This is the
-    // compatibility path that works while central public integration is OFF.
-    // Cards already on central/hybrid also update their product override, so
-    // the same save remains correct when the central flag is ON.
-    const writeLegacyCard =
-      product.instanceType === 'card' && Boolean(product.cardId);
-    const writeCentralProduct =
-      !writeLegacyCard || product.settingsSource !== 'legacy';
-    if (writeCentralProduct && !saved && dirty) {
-      setSetupError('Save your Review Settings changes first, then add this product\'s link.');
-      return;
-    }
     setSetupSaving(true);
     setSetupError(null);
     try {
-      if (writeLegacyCard) {
-        const legacyRes = await fetch(
-          `/api/cards/${encodeURIComponent(product.cardId)}`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reviewAssistant: { enabled: true, googleReviewUrl: url },
-            }),
-          }
-        );
-        const legacyData = (await legacyRes.json().catch(() => null)) as
-          | { error?: string; code?: string }
-          | ReviewApiError
-          | null;
-        if (!legacyRes.ok) {
-          if (legacyRes.status === 401) throw new Error('Your session has expired. Please sign in again.');
-          if (legacyRes.status === 403) throw new Error('Reviews are not included for this product.');
-          if (legacyRes.status === 409) throw new Error('This product changed elsewhere. Refresh and try again.');
-          throw new Error(
-            errorMessage(legacyData as ReviewApiError | null, 'Could not save this product.')
-          );
+      // Destination-only write. Central Review Management remains the sole
+      // owner of content and publication; this never writes hybrid content
+      // overrides or enables publication.
+      const res = await fetch(
+        `/api/review-management/products/${encodeURIComponent(product.assignmentId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'destination',
+            destination: { googleReviewUrl: url },
+            revision: product.settingsRevision,
+          }),
         }
-      }
-
-      if (writeCentralProduct) {
-        // First-time activation: initialize the shared central settings without
-        // requiring a second page/save. This never overwrites saved settings
-        // and never runs while the customer has unsaved central edits.
-        if (!saved) {
-          if (!snapshot) throw new Error('Review Settings are still loading. Try again.');
-          const bootstrap = await fetch('/api/review-management', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              general: { ...snapshot.general, enabled: true },
-              content: {
-                ...snapshot.content,
-                languages:
-                  snapshot.content.languages.length > 0
-                    ? snapshot.content.languages
-                    : ['English'],
-              },
-              revision,
-            }),
-          });
-          const bootstrapData = (await bootstrap.json().catch(() => null)) as
-            | ReviewSettingsResponse
-            | ReviewApiError
-            | null;
-          if (!bootstrap.ok || !bootstrapData || !('settings' in bootstrapData)) {
-            throw new Error(
-              errorMessage(bootstrapData as ReviewApiError | null, 'Could not initialize Review Settings.')
-            );
-          }
-          setDraft(bootstrapData.settings);
-          setSnapshot(bootstrapData.settings);
-          setSaved(true);
-          setUpdatedAt(bootstrapData.updatedAt);
-          setRevision(bootstrapData.revision ?? revision);
-        }
-
-        const res = await fetch(
-          `/api/review-management/products/${encodeURIComponent(product.assignmentId)}`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              // Central preferences remain authoritative; only this product's
-              // Google destination is stored as an explicit override.
-              source: 'hybrid',
-              overrides: { ...product.reviewOverrides, googleReviewUrl: url },
-              revision: product.settingsRevision,
-            }),
-          }
-        );
-        const data = (await res.json().catch(() => null)) as
-          | { error?: string; code?: string }
-          | ReviewApiError
-          | null;
-        if (!res.ok) {
-          if (res.status === 401) throw new Error('Your session has expired. Please sign in again.');
-          if (res.status === 403) throw new Error('Reviews are not included for this product.');
-          if (res.status === 409) throw new Error('This product changed elsewhere. Refresh and try again.');
-          throw new Error(errorMessage(data as ReviewApiError | null, 'Could not save this product.'));
-        }
+      );
+      const data = (await res.json().catch(() => null)) as
+        | { error?: string; code?: string }
+        | ReviewApiError
+        | null;
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Your session has expired. Please sign in again.');
+        if (res.status === 403) throw new Error('Reviews are not included for this product.');
+        if (res.status === 409) throw new Error('This product changed elsewhere. Refresh and try again.');
+        throw new Error(errorMessage(data as ReviewApiError | null, 'Could not save this product.'));
       }
       setSetupTarget(null);
       setSetupUrl('');
@@ -769,8 +593,8 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
         void loadPreview(product.assignmentId);
       }
       toast({
-        title: 'Product updated',
-        description: 'The Google Review link was saved for this product only.',
+        title: 'Destination updated',
+        description: 'Only this product’s Google Review link was saved.',
         variant: 'success',
       });
     } catch (error) {
@@ -794,20 +618,44 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
         canPreview: false,
       };
     }
+    if (product.centralSettingsState === 'missing') {
+      return {
+        label: 'Setup Required',
+        message: 'Save central Review Settings before this product can be published.',
+        tone: 'warning',
+        canPreview: product.previewAvailable,
+      };
+    }
+    if (product.centralSettingsState === 'invalid') {
+      return {
+        label: 'Invalid Central Settings',
+        message: 'Central Review Settings are invalid. Correct and save them before publishing.',
+        tone: 'warning',
+        canPreview: product.previewAvailable,
+      };
+    }
     if (!product.googleDestinationConfigured) {
       return {
-        label: 'Needs setup',
+        label: 'Destination Missing',
         message: 'Add the Google Review link to finish setup.',
         tone: 'warning',
         canPreview: false,
       };
     }
+    if (!product.centralPublicActive) {
+      return {
+        label: 'Unpublished',
+        message: 'Unpublished — Central Review Disabled. Enable central public integration to publish.',
+        tone: 'warning',
+        canPreview: product.previewAvailable,
+      };
+    }
     if (!product.reviewAssistantEnabled) {
       return {
-        label: 'Needs attention',
-        message: 'Reviews are disabled in Review Settings.',
+        label: 'Unpublished',
+        message: 'Unpublished — Reviews Disabled. Enable Review availability in central settings.',
         tone: 'warning',
-        canPreview: false,
+        canPreview: product.previewAvailable,
       };
     }
     if (product.instanceType === 'standee' && !product.hostingEnabled) {
@@ -951,24 +799,13 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
         </div>
       </div>
 
-      {saved && aiConfigured === false && (
-        <div className="flex items-start gap-2 rounded-xl bg-warn/10 px-3.5 py-3 text-sm text-ink ring-1 ring-warn/25" role="status">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
-          <p className="leading-relaxed">
-            AI writing is not configured for this business. Add an OpenAI key in the AI provider
-            &amp; generation source section on this page to generate AI drafts. Template and manual
-            review guidance remain available.
-          </p>
-        </div>
-      )}
-
       {saved && centralPublicActive === false && (
         <div className="flex items-start gap-2 rounded-xl bg-warn/10 px-3.5 py-3 text-sm text-ink ring-1 ring-warn/25" role="status">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
           <p className="leading-relaxed">
             Central Review Settings are saved, but central public integration is currently OFF.
-            Products connected to central settings continue to use their existing legacy settings
-            publicly until the platform integration is enabled by the owner.
+            Public review pages remain unpublished. Stored legacy settings are preserved but
+            inactive until the platform integration is enabled by the owner.
           </p>
         </div>
       )}
@@ -977,9 +814,9 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
         <div className="flex items-start gap-2 rounded-xl bg-accent-600/10 px-3.5 py-3 text-sm text-ink ring-1 ring-accent-600/20" role="status">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent-400" aria-hidden="true" />
           <p className="leading-relaxed">
-            Connected review products use Central Review Management while Central Public Review
-            Integration is ON. Their existing product-specific review settings are preserved but
-            inactive until central integration is turned off.
+            Central Review Management is the single authority for review content and publication.
+            Each product keeps its own Google Review destination. Stored legacy settings are
+            preserved but inactive.
           </p>
         </div>
       )}
@@ -1031,7 +868,7 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
             <Card className="border-line-subtle bg-surface p-4 shadow-e1">
               <p className="text-xs font-medium uppercase tracking-wide text-ink-faint">Review products</p>
               <p className="mt-1 text-2xl font-semibold text-ink">{products.length}</p>
-              <p className="mt-0.5 text-xs text-ink-mute">{products.filter((p) => p.reviewAssistantEnabled).length} with reviews enabled</p>
+              <p className="mt-0.5 text-xs text-ink-mute">{products.filter((p) => p.reviewAssistantEnabled).length} published</p>
             </Card>
             <Card className="border-line-subtle bg-surface p-4 shadow-e1">
               <p className="text-xs font-medium uppercase tracking-wide text-ink-faint">Destinations</p>
@@ -1172,7 +1009,7 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
                   Connected review products
                 </h3>
                 <p className="mt-1 text-sm leading-relaxed text-ink-mute">
-                  Products currently eligible to use review management. Choose a settings source for each product. Nothing is published or activated automatically.
+                  Products currently eligible to use review management. Central Review Management controls content and publication. Add each product’s Google Review destination; nothing is published automatically.
                 </p>
               </div>
               {!productsLoading && !productsError && (
@@ -1200,12 +1037,6 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
                 </div>
               ) : (
                 <>
-                {sourceError && (
-                  <div className="mb-3 flex items-start gap-2 rounded-lg bg-bad/10 p-3 text-sm text-red-300 ring-1 ring-bad/25" role="alert">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    {sourceError}
-                  </div>
-                )}
                 <ul className="space-y-2.5" role="list">
                   {products.map((product) => {
                     const readiness = productReadiness(product);
@@ -1234,47 +1065,11 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
                               {product.settingsSource === 'central'
                                 ? 'Central Review Management'
                                 : product.settingsSource === 'hybrid'
-                                  ? 'Central settings + product overrides'
-                                  : 'Product-specific settings'}
+                                  ? 'Legacy hybrid settings (preserved, inactive)'
+                                  : 'Legacy settings (preserved, inactive)'}
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
-                            {product.settingsSource !== 'central' && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                disabled={!saved || sourceSavingId === product.assignmentId}
-                                isLoading={sourceSavingId === product.assignmentId}
-                                onClick={() => void changeProductSource(product, 'central')}
-                              >
-                                Use central settings
-                              </Button>
-                            )}
-                            {saved && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setHybridTarget(product)}
-                                disabled={hybridBusy}
-                              >
-                                Customize overrides
-                              </Button>
-                            )}
-                            {centralPublicActive === false &&
-                              (product.settingsSource === 'central' || product.settingsSource === 'hybrid') && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={sourceSavingId === product.assignmentId}
-                                  isLoading={sourceSavingId === product.assignmentId}
-                                  onClick={() => void changeProductSource(product, 'legacy')}
-                                >
-                                  Use product settings
-                                </Button>
-                              )}
                             {actionLabel && (
                               <Button
                                 type="button"
@@ -1322,14 +1117,9 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
                               className={FIELD_CLASS}
                             />
                             <p className="text-[11px] leading-relaxed text-ink-faint">
-                              This link is saved for this product only. Shared Review Settings stay unchanged.
-                              {setupTarget?.instanceType === 'card' && setupTarget?.settingsSource === 'legacy'
-                                ? ' It applies immediately using this card’s existing review settings.'
-                                : null}
-                              {!(setupTarget?.instanceType === 'card' && setupTarget?.settingsSource === 'legacy') &&
-                                !saved && !dirty && ' Saving also initializes the shared Review Settings.'}
-                              {!(setupTarget?.instanceType === 'card' && setupTarget?.settingsSource === 'legacy') &&
-                                !saved && dirty && ' Save your Review Settings changes first.'}
+                              This saves only this product’s Google Review destination. Review content and
+                              publication are controlled by Central Review Management.
+                              {!saved && ' Save central Review Settings to make this product publishable.'}
                             </p>
                             <div className="flex flex-wrap justify-end gap-2">
                               <Button type="button" variant="outline" size="sm" onClick={closeSetup} disabled={setupSaving}>
@@ -1342,7 +1132,7 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
                                 disabled={setupSaving || !setupUrl.trim()}
                                 isLoading={setupSaving}
                               >
-                                {needsLink ? 'Save & Activate' : 'Save Link'}
+                                {needsLink ? 'Save destination' : 'Update destination'}
                               </Button>
                             </div>
                           </div>
@@ -1789,17 +1579,6 @@ export function ReviewManagementClient({ initialCardId }: { initialCardId?: stri
         </div>
       ) : (
         <ReviewAnalyticsPanel />
-      )}
-
-      {hybridTarget && draft && (
-        <HybridDialog
-          product={hybridTarget}
-          central={draft}
-          busy={hybridBusy}
-          onClose={() => setHybridTarget(null)}
-          onConnect={connectHybrid}
-          loadOptions={async (category: string) => (await requestOptions(category)).options}
-        />
       )}
 
       <p className="pb-4 text-center text-[11px] leading-relaxed text-ink-faint">

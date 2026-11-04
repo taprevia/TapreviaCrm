@@ -13,13 +13,19 @@ import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { resolveCardDisplayName } from '@/lib/card-display';
 import { downloadQrPdf } from '@/lib/qr-pdf';
 import { canonicalPublicBase } from '@/lib/public-base';
+import { permanentCardUrl } from '@/lib/admin-card-view';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 
 interface Vcard {
   _id: string;
   name: string;
   cardLabel?: string | null;
   urlAlias: string;
+  slug?: string | null;
+  kind?: string | null;
   publicSlug?: string | null;
+  /** Permanent physical route (/r/{routeSlug}). Read-only; may be absent on legacy cards. */
+  routeSlug?: string | null;
   templateKey: string;
   isActive?: boolean;
   profileImageUrl?: string | null;
@@ -48,14 +54,48 @@ function templateNameOf(key: string, names: Record<string, string>): string {
   return names[key] ?? CARD_TEMPLATE_META.find((t) => t.key === key)?.name ?? key;
 }
 
-/** Human-friendly business public URL — the link customers scan/share. Falls
- *  back to the legacy /profile/{alias} route for cards without an allocated
- *  public slug so unbound cards still resolve. */
+/** Canonical Preview href (may be an external social destination). Preview is
+ *  deliberately separate from the customer-facing Public URL and the QR payload. */
 function resolveCardPublicUrl(vcard: Vcard, origin: string): string {
   if (!vcard.preview?.ok) return '';
   const href = vcard.preview.href;
   if (href.startsWith('http')) return href;
   return origin ? `${origin}${href}` : href;
+}
+
+/** Customer-facing Public URL for display/copy/share. Never the permanent
+ *  `/r/{routeSlug}` QR payload and never a raw external social destination. */
+function resolveCardDisplayUrl(vcard: Vcard, origin: string): string {
+  // Keep the existing /review/{alias} fallback while a review card is
+  // unpublished; the branded publicSlug route 404s until the review is enabled.
+  const source =
+    vcard.kind === 'review' && !vcard.preview?.ok
+      ? { kind: 'review', urlAlias: vcard.urlAlias, slug: vcard.slug ?? null }
+      : vcard;
+  const path = resolveCustomerPublicPath(source);
+  if (!path) return '';
+  return origin ? `${origin}${path}` : path;
+}
+
+/**
+ * Stable QR payload for a card.
+ *
+ * QR codes must encode a durable redirect identity, never a preview/external
+ * destination or the editable `urlAlias`. Passing only `routeSlug` and
+ * `publicSlug` makes `permanentCardUrl` resolve:
+ *   1. `/r/{routeSlug}` — permanent NFC/QR route.
+ *   2. `/{publicSlug}` — allocated-once, immutable legacy public path.
+ *
+ * Returns '' when neither identifier exists, so the caller shows an explicit
+ * unavailable state instead of printing a mutable fallback as "permanent".
+ * The base URL comes from canonicalPublicBase(), never from request/window
+ * origin, so a spoofed Host cannot become a printed QR destination.
+ */
+function resolveCardQrUrl(vcard: Vcard, baseUrl: string): string {
+  return permanentCardUrl(
+    { routeSlug: vcard.routeSlug, publicSlug: vcard.publicSlug },
+    baseUrl
+  );
 }
 
 export default function VcardsPage() {
@@ -106,9 +146,14 @@ export default function VcardsPage() {
   }, []);
 
   const openQr = async (vcard: Vcard) => {
-    const url = resolveCardPublicUrl(vcard, window.location.origin);
-    if (!origin || !url) {
-      toast({ title: 'QR unavailable', description: 'A canonical public URL is not configured for this product.', variant: 'error' });
+    const url = resolveCardQrUrl(vcard, origin);
+    if (!url) {
+      toast({
+        title: 'QR unavailable',
+        description:
+          'This card has no permanent route or public URL yet. Public preview is still available.',
+        variant: 'error',
+      });
       return;
     }
     setQrTarget(vcard);
@@ -126,7 +171,7 @@ export default function VcardsPage() {
     qrDownloadingRef.current = true;
     setQrDownloading(true);
     try {
-      const url = resolveCardPublicUrl(qrTarget, window.location.origin);
+      const url = resolveCardQrUrl(qrTarget, origin);
       await downloadQrPdf(
         [{ title: resolveCardDisplayName(qrTarget), url }],
         `${qrTarget.urlAlias}-qr.pdf`
@@ -282,7 +327,7 @@ export default function VcardsPage() {
                 <div className="p-5 space-y-1">
                   <h2 className="truncate text-base font-semibold text-ink">{resolveCardDisplayName(vcard)}</h2>
                   {(() => {
-                    const canonical = resolveCardPublicUrl(vcard, origin);
+                    const canonical = resolveCardDisplayUrl(vcard, origin);
                     if (!canonical) {
                       return (
                         <p className="text-xs text-ink-faint">Public URL available after setup.</p>
@@ -327,9 +372,14 @@ export default function VcardsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() =>
-                        window.open(vcard.preview && vcard.preview.ok ? vcard.preview.href : '', '_blank', 'noopener,noreferrer')
-                      }
+                      onClick={() => {
+                        const previewHref = vcard.preview && vcard.preview.ok ? vcard.preview.href : '';
+                        window.open(
+                          resolveCardPublicUrl(vcard, origin) || previewHref,
+                          '_blank',
+                          'noopener,noreferrer'
+                        );
+                      }}
                     >
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                       Preview
@@ -408,7 +458,10 @@ export default function VcardsPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qrDataUrl} alt={`QR code for ${qrTarget ? resolveCardDisplayName(qrTarget) : ''}`} className="rounded-lg ring-1 ring-line-subtle" />
             <p className="font-mono text-xs text-ink-mute break-all text-center">
-              {qrTarget ? resolveCardPublicUrl(qrTarget, window.location.origin) : ''}
+              {qrTarget ? resolveCardDisplayUrl(qrTarget, origin) || 'Public URL unavailable' : ''}
+            </p>
+            <p className="font-mono text-[11px] text-ink-faint break-all text-center">
+              QR/NFC link: {qrTarget ? resolveCardQrUrl(qrTarget, origin) : ''}
             </p>
             <p className="text-sm text-ink-mute text-center">
               Scan to visit this card&apos;s public page — it always reflects the latest content and template.

@@ -920,9 +920,19 @@ async function main() {
   });
 
   // ── W27 card update ────────────────────────────────────────────────────────
-  await test('W27', 'W27-N1', 'PATCH', `/api/cards/${C.grc}`, 'negative', 409, {
+  await test('W27', 'W27-N1', 'PATCH', `/api/cards/${C.grc}`, 'negative', 403, {
     token: TOKENS.owner,
+    note: 'urlAlias is immutable after creation and cannot be reassigned.',
     body: { urlAlias: 'p35-other' },
+  });
+  await test('W27', 'W27-P0', 'PATCH', `/api/cards/${C.grc}`, 'positive', 200, {
+    token: TOKENS.owner,
+    note: 'Idempotent same-value alias is tolerated for legacy clients.',
+    body: { urlAlias: 'p35-grc' },
+    verify: async () => {
+      const card = await Card.findById(C.grc).lean<any>();
+      return card?.urlAlias === 'p35-grc';
+    },
   });
   await test('W27', 'W27-N2', 'PATCH', `/api/cards/${C.grc}`, 'negative', 403, {
     token: TOKENS.owner,
@@ -966,7 +976,11 @@ async function main() {
   await test('W29', 'W29-P', 'POST', '/api/cards', 'positive', 201, {
     token: TOKENS.admin,
     body: { name: 'P35 Admin Card', urlAlias: 'p35-admin-card' },
-    verify: async () => (await Card.countDocuments({ urlAlias: 'p35-admin-card' })) === 1,
+    verify: async () => {
+      const card = await Card.findOne({ urlAlias: 'p35-admin-card' }).lean<any>();
+      // Permanent route must be minted at creation, never later.
+      return Boolean(card && card.routeSlug && card.uid === card.routeSlug);
+    },
   });
 
   // ── W30 customer settings ──────────────────────────────────────────────────

@@ -25,21 +25,17 @@ import {
   normalizeReviewOverrides,
   resolveReviewSettings,
 } from '@/lib/services/review-settings-resolver';
+import { applyCardProductDestination } from '@/lib/services/review-effective-settings';
 import {
   resolveStandeeEffectiveReviewSettings,
   resolveStandeeGoogleReviewUrl,
-  resolveStandeeSettingsSource,
   standeeReviewPath,
   type StandeeReviewRecord,
 } from '@/lib/services/review-standee-settings';
 import type { ReviewProductOverridesInput } from '@/lib/validation/review-settings';
 import type { CapabilityId } from '@/config/capabilities';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
-import {
-  isCentralPublicIntegrationEnabledForTenant,
-  isLocalCentralReviewForceAllEnabled,
-  resolveEffectiveReviewSettingsSource,
-} from '@/lib/services/review-rollout';
+import { isCentralPublicIntegrationEnabledForTenant } from '@/lib/services/review-rollout';
 
 export type ReviewSettingsSource = 'legacy' | 'central' | 'hybrid';
 
@@ -72,6 +68,10 @@ export interface EligibleReviewProduct {
     keywords: string[];
   };
   reviewAssistantEnabled: boolean;
+  /** Central-only publication state for UI status copy. */
+  centralSettingsState: 'valid' | 'invalid' | 'missing';
+  /** Whether the central public integration gate is active for this tenant. */
+  centralPublicActive: boolean;
   googleDestinationConfigured: boolean;
   /** Effective saved destination, used to prefill product setup. */
   effectiveGoogleReviewUrl: string;
@@ -126,10 +126,6 @@ type StandeeLike = StandeeReviewRecord & {
   reviewSettingsVersion?: number;
 };
 
-function normalizedCardSource(value: unknown): ReviewSettingsSource {
-  return value === 'central' || value === 'hybrid' ? value : 'legacy';
-}
-
 function productGrantsReview(catalogSlug: string | undefined): boolean {
   if (!catalogSlug) return false;
   const productId = resolveCanonicalProductId(catalogSlug);
@@ -162,22 +158,37 @@ function projectCard(input: {
   // cards that only carry a slug are not silently denied review setup.
   const alias = (card.urlAlias || card.slug || '').trim();
   const eligible = accountReviewEntitled && grants && cardActive && Boolean(alias);
-  const storedSource = normalizedCardSource(card.reviewSettingsSource);
   const rolloutEnabled = isCentralPublicIntegrationEnabledForTenant(userId);
-  // Dashboard readiness must match what the public review page will actually
-  // serve. Central ON makes central authoritative for eligible products;
-  // Central OFF keeps the historical stored-source display and strict legacy
-  // public resolution.
-  const effectiveSource = resolveEffectiveReviewSettingsSource(storedSource, rolloutEnabled, {
-    forceAll: isLocalCentralReviewForceAllEnabled(),
-  });
-  const displaySource: ReviewSettingsSource = rolloutEnabled ? effectiveSource : storedSource;
-  const resolved = resolveReviewSettings({
-    card: { reviewAssistant: card.reviewAssistant },
-    centralSettings: effectiveSource === 'legacy' ? undefined : input.centralSettings,
-    source: effectiveSource,
-    overrides: card.reviewOverrides,
-  });
+  // Central-only: valid saved central settings are the only content
+  // authority. Missing/invalid central settings keep legacy content available
+  // for management display but can never publish. The stored source selector
+  // and content overrides are ignored.
+  const centralResolved =
+    input.centralSettings !== undefined
+      ? resolveReviewSettings({
+          card: { reviewAssistant: card.reviewAssistant },
+          centralSettings: input.centralSettings,
+          source: 'central',
+        })
+      : null;
+  const authorityActive = centralResolved?.source === 'central';
+  const centralSettingsState: 'valid' | 'invalid' | 'missing' =
+    input.centralSettings === undefined
+      ? 'missing'
+      : authorityActive
+        ? 'valid'
+        : 'invalid';
+  const resolved = authorityActive
+    ? applyCardProductDestination(centralResolved!, card as CardLike)
+    : applyCardProductDestination(
+        resolveReviewSettings({
+          card: { reviewAssistant: card.reviewAssistant },
+          source: 'legacy',
+        }),
+        card as CardLike
+      );
+  const publicationEnabled = rolloutEnabled && authorityActive && resolved.enabled;
+  const displaySource: ReviewSettingsSource = authorityActive ? 'central' : 'legacy';
   const legacy = resolveReviewSettings({
     card: { reviewAssistant: card.reviewAssistant },
     source: 'legacy',
@@ -214,7 +225,9 @@ function projectCard(input: {
       employees: legacy.employees ?? [],
       keywords: legacy.keywords ?? [],
     },
-    reviewAssistantEnabled: resolved.enabled,
+    reviewAssistantEnabled: publicationEnabled,
+    centralSettingsState,
+    centralPublicActive: rolloutEnabled,
     googleDestinationConfigured: isSafeExternalUrl(resolved.googleReviewUrl),
     effectiveGoogleReviewUrl: resolved.googleReviewUrl,
     productGrantsReview: grants,
@@ -223,7 +236,7 @@ function projectCard(input: {
     previewAvailable: eligible,
     previewUrl: alias ? `/review/${encodeURIComponent(alias)}` : null,
     hostingEnabled: true,
-    futureCentralOptInEligible: eligible && displaySource === 'legacy',
+    futureCentralOptInEligible: eligible && !authorityActive,
   };
 }
 
@@ -245,23 +258,35 @@ async function projectStandee(input: {
   // without the capability (e.g. Business Profile Standee) remain excluded.
   const grants = productGrantsReview(slug);
   const googleReviewUrl = await resolveStandeeGoogleReviewUrl(standee);
-  const eligible =
-    accountReviewEntitled && grants && Boolean(googleReviewUrl);
-  const storedSource = resolveStandeeSettingsSource(
-    standee.reviewSettingsSource,
-    input.hasCentralSettings
-  );
+  // Connection/eligibility is capability-based. A missing Google destination
+  // is a setup state, not a lack of product entitlement: Review Management must
+  // list the standee so the customer can finish setup.
+  const connected = accountReviewEntitled && grants;
+  const previewReady = connected && Boolean(googleReviewUrl);
   const rolloutEnabled = isCentralPublicIntegrationEnabledForTenant(userId);
-  const effectiveSource = resolveEffectiveReviewSettingsSource(storedSource, rolloutEnabled, {
-    forceAll: isLocalCentralReviewForceAllEnabled(),
-  });
-  const displaySource: ReviewSettingsSource = rolloutEnabled ? effectiveSource : storedSource;
-  const resolved = resolveStandeeEffectiveReviewSettings({
-    standee,
-    googleReviewUrl: googleReviewUrl ?? '',
-    source: effectiveSource,
-    centralSettings: effectiveSource === 'legacy' ? undefined : input.centralSettings,
-  });
+  // Central-only: valid central settings are the only content authority. A
+  // missing/invalid document keeps legacy content for management display but
+  // can never publish; the stored source selector is ignored.
+  const centralResolved = input.hasCentralSettings
+    ? resolveStandeeEffectiveReviewSettings({
+        standee,
+        googleReviewUrl: googleReviewUrl ?? '',
+        source: 'central',
+        centralSettings: input.centralSettings,
+      })
+    : null;
+  const authorityActive = centralResolved?.source === 'central';
+  const centralSettingsState: 'valid' | 'invalid' | 'missing' =
+    !input.hasCentralSettings ? 'missing' : authorityActive ? 'valid' : 'invalid';
+  const resolved = authorityActive
+    ? centralResolved!
+    : resolveStandeeEffectiveReviewSettings({
+        standee,
+        googleReviewUrl: googleReviewUrl ?? '',
+        source: 'legacy',
+      });
+  const publicationEnabled = rolloutEnabled && authorityActive && resolved.enabled;
+  const displaySource: ReviewSettingsSource = authorityActive ? 'central' : 'legacy';
   const routeSlug = (standee.routeSlug ?? standee.uid ?? '').trim();
 
   return {
@@ -283,19 +308,21 @@ async function projectStandee(input: {
         ? standee.reviewSettingsVersion
         : 0,
     reviewOverrides: normalizeReviewOverrides(standee.reviewOverrides),
-    reviewAssistantEnabled: resolved.enabled,
+    reviewAssistantEnabled: publicationEnabled,
+    centralSettingsState,
+    centralPublicActive: rolloutEnabled,
     googleDestinationConfigured: Boolean(googleReviewUrl),
     effectiveGoogleReviewUrl: resolved.googleReviewUrl,
     standeeGoogleReviewUrl: googleReviewUrl ?? undefined,
     productGrantsReview: grants,
     accountReviewEntitled,
-    eligible,
-    // Settings preview is useful even while the public Standee gate is OFF;
-    // hostingEnabled distinguishes whether the public host can serve.
-    previewAvailable: eligible,
+    eligible: connected,
+    // Settings preview requires both a connected product and a configured
+    // Google destination. The row remains listed while setup is incomplete.
+    previewAvailable: previewReady,
     previewUrl: routeSlug ? standeeReviewPath(routeSlug) : null,
     hostingEnabled: STANDEE_REVIEW_ASSISTANT_ENABLED,
-    futureCentralOptInEligible: eligible && displaySource === 'legacy',
+    futureCentralOptInEligible: connected && !authorityActive,
   };
 }
 

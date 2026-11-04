@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
+import { noStoreRedirect, noStoreText } from '@/lib/no-store';
+import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import Profile from '@/models/Profile';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
@@ -39,12 +41,18 @@ async function recordPanelTap(qrId: string, request: NextRequest): Promise<void>
   }
 }
 
+async function profileDestination(userId: unknown): Promise<string> {
+  const alias = (await Card.findOne({ userId }).select('urlAlias').lean() as { urlAlias?: string } | null)
+    ?.urlAlias;
+  return alias ? `/c/${encodeURIComponent(alias)}` : '/';
+}
+
 async function redirectToProfilePage(request: NextRequest, userId: unknown) {
-  const path = `/c/${(await Card.findOne({ userId }).select('urlAlias').lean() as { urlAlias?: string } | null)?.urlAlias ?? ''}`;
-  return NextResponse.redirect(
-    new URL(path === '/c/' ? '/' : path, request.url),
-    302
-  );
+  const path = await profileDestination(userId);
+  if (await wouldRedirectLoop(request.nextUrl.pathname, path, request.nextUrl.origin)) {
+    return noStoreText('Redirect loop detected', 404);
+  }
+  return noStoreRedirect(new URL(path, request.url), 302);
 }
 
 export async function GET(
@@ -70,13 +78,17 @@ export async function GET(
 
     if (cardBySlug) {
       if (cardBySlug.kind === 'social' && isSafeExternalUrl(cardBySlug.redirectUrl)) {
-        return NextResponse.redirect(cardBySlug.redirectUrl, 302);
+        if (await wouldRedirectLoop(request.nextUrl.pathname, cardBySlug.redirectUrl, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        return noStoreRedirect(cardBySlug.redirectUrl, 302);
       }
       if (cardBySlug.urlAlias) {
-        return NextResponse.redirect(
-          new URL(`/profile/${cardBySlug.urlAlias}`, request.url),
-          302
-        );
+        const destination = `/profile/${encodeURIComponent(cardBySlug.urlAlias)}`;
+        if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        return noStoreRedirect(new URL(destination, request.url), 302);
       }
     }
 
@@ -108,10 +120,11 @@ export async function GET(
             socialQrs: standee.socialQrs,
           }))
         ) {
-          return NextResponse.redirect(
-            new URL(standeeReviewPath(reviewRoute), request.url),
-            307
-          );
+          const reviewDestination = standeeReviewPath(reviewRoute);
+          if (await wouldRedirectLoop(request.nextUrl.pathname, reviewDestination, request.nextUrl.origin)) {
+            return noStoreText('Redirect loop detected', 404);
+          }
+          return noStoreRedirect(new URL(reviewDestination, request.url), 307);
         }
       }
       if (socialQr) {
@@ -126,7 +139,12 @@ export async function GET(
             (link) => link.platform === socialQr.platform
           )?.url;
         }
-        if (url && isSafeExternalUrl(url)) return NextResponse.redirect(url, 302);
+        if (url && isSafeExternalUrl(url)) {
+          if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
+            return noStoreText('Redirect loop detected', 404);
+          }
+          return noStoreRedirect(url, 302);
+        }
       }
       return redirectToProfilePage(request, standee.userId);
     }
@@ -149,10 +167,11 @@ export async function GET(
       fixedProfiles?: string[];
     } | null;
     if (panel) {
-      await recordPanelTap(id, request);
       const reviewRoute = (panel.routeSlug ?? panel.uid ?? '').trim();
       const multiProfileStandee =
         (panel.maxProfiles ?? 0) > 1 || (panel.fixedProfiles?.length ?? 0) > 1;
+      let destination: string | null = null;
+      let status: 302 | 307 = 307;
       if (
         !multiProfileStandee &&
         STANDEE_REVIEW_ASSISTANT_ENABLED &&
@@ -171,21 +190,19 @@ export async function GET(
           socialQrs: panel.socialQrs ?? [],
         }))
       ) {
-        return NextResponse.redirect(
-          new URL(standeeReviewPath(reviewRoute), request.url),
-          307
-        );
+        destination = standeeReviewPath(reviewRoute);
+      } else if (panel.routeSlug) {
+        destination = `/panel/${encodeURIComponent(panel.routeSlug)}`;
+      } else {
+        destination = await profileDestination(panel.userId);
+        status = 302;
       }
-      // Canonical standees expose a permanent panel route; legacy printed panel
-      // QRs must reach the standee picker rather than the homepage when the
-      // customer has no profile card.
-      if (panel.routeSlug) {
-        return NextResponse.redirect(
-          new URL(`/panel/${panel.routeSlug}`, request.url),
-          307
-        );
+
+      if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
+        return noStoreText('Redirect loop detected', 404);
       }
-      return redirectToProfilePage(request, panel.userId);
+      await recordPanelTap(id, request);
+      return noStoreRedirect(new URL(destination, request.url), status);
     }
 
     // 3. Legacy embedded standeeQr (QRs printed before the Standee collection).
@@ -196,13 +213,16 @@ export async function GET(
     // Unsafe/malformed stored destinations fall through to 404 — never a
     // protocol-jumping redirect (java/script/file/…).
     if (legacyUrl && isSafeExternalUrl(legacyUrl)) {
-      return NextResponse.redirect(legacyUrl, 302);
+      if (await wouldRedirectLoop(request.nextUrl.pathname, legacyUrl, request.nextUrl.origin)) {
+        return noStoreText('Redirect loop detected', 404);
+      }
+      return noStoreRedirect(legacyUrl, 302);
     }
 
-    return new Response('Not found', { status: 404 });
+    return noStoreText('Not found', 404);
   } catch (error) {
     emitReviewEvent({ event: 'review.routing.error', errorCategory: 'routing', reasonCategory: 'qr_redirect' });
     console.error('QR redirect error:', error);
-    return new Response('Internal server error', { status: 500 });
+    return noStoreText('Internal server error', 500);
   }
 }

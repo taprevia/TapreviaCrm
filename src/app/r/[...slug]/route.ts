@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { clientIp } from '@/lib/request-ip';
+import { noStoreRedirect, noStoreText } from '@/lib/no-store';
+import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import { connectDB } from '@/lib/db';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
@@ -102,30 +104,23 @@ export async function GET(
     } | null;
 
     if (card) {
-      // Log analytics and increment tap count.
+      // Resolve + validate the destination BEFORE recording a successful tap.
+      // This prevents invalid/self-referential destinations from inflating
+      // analytics and stops bounded internal redirect cycles.
+      const destination = resolveCardDestination(card);
+      if (!destination) {
+        return noStoreText('Destination not configured', 404);
+      }
+      if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
+        return noStoreText('Redirect loop detected', 404);
+      }
       if (await allowCardTapWrite(card._id, request)) {
         await Promise.all([
           logRouteEvent(card._id, routeKey, slotParam, request),
           incrementTapCount(card._id),
         ]);
       }
-
-      // Centralized, product-aware destination resolution. Never substitutes a
-      // page that would 404 (e.g. a review human URL with the assistant off).
-      const destination = resolveCardDestination(card);
-      if (destination) {
-        const target = new URL(destination, request.url);
-        const loopsBack =
-          target.origin === request.nextUrl.origin &&
-          target.pathname === request.nextUrl.pathname;
-        if (!loopsBack) {
-          return NextResponse.redirect(target, 307);
-        }
-      }
-
-      // No valid product-specific destination — fail closed. Never redirect
-      // to an unrelated profile/human URL to hide missing configuration.
-      return new Response('Destination not configured', { status: 404 });
+      return noStoreRedirect(new URL(destination, request.url), 307);
     }
 
     // ── 2. Standee by routeSlug / uid ────────────────────────────────────
@@ -152,6 +147,18 @@ export async function GET(
     } | null;
 
     if (standee) {
+      const logPanelTap = async (metadata: string) => {
+        try {
+          await AnalyticsLog.create({
+            action: 'tap',
+            metadata,
+            ip: clientIp(request),
+            userAgent: request.headers.get('user-agent') ?? '',
+          });
+        } catch {
+          // Fail-open.
+        }
+      };
       const reviewRoute = (standee.routeSlug ?? standee.uid ?? '').trim();
       const reviewEligible =
         STANDEE_REVIEW_ASSISTANT_ENABLED && Boolean(reviewRoute)
@@ -175,6 +182,10 @@ export async function GET(
             reviewEligible &&
             (socialQr?.platform ?? '').trim().toLowerCase() === 'google_review'
           ) {
+            const reviewDestination = standeeReviewPath(reviewRoute);
+            if (await wouldRedirectLoop(request.nextUrl.pathname, reviewDestination, request.nextUrl.origin)) {
+              return noStoreText('Redirect loop detected', 404);
+            }
             try {
               await AnalyticsLog.create({
                 action: 'tap',
@@ -185,10 +196,7 @@ export async function GET(
             } catch {
               // Fail-open.
             }
-            return NextResponse.redirect(
-              new URL(standeeReviewPath(reviewRoute), request.url),
-              307
-            );
+            return noStoreRedirect(new URL(reviewDestination, request.url), 307);
           }
           const profile = await Profile.findOne({ userId: standee.userId })
             .select('socialLinks urlAlias')
@@ -203,6 +211,9 @@ export async function GET(
           }
 
           if (url && isSafeExternalUrl(url)) {
+            if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
+              return noStoreText('Redirect loop detected', 404);
+            }
             // Log analytics with slot + destination info.
             try {
               await AnalyticsLog.create({
@@ -214,20 +225,21 @@ export async function GET(
             } catch {
               // Fail-open.
             }
-            return NextResponse.redirect(url, 307);
+            return noStoreRedirect(url, 307);
           }
 
           // Fallback to profile page if link not configured.
           const alias = (profile as { urlAlias?: string } | null)?.urlAlias;
           if (alias) {
-            return NextResponse.redirect(
-              new URL(`/profile/${alias}`, request.url),
-              307
-            );
+            const profileDestination = `/profile/${alias}`;
+            if (await wouldRedirectLoop(request.nextUrl.pathname, profileDestination, request.nextUrl.origin)) {
+              return noStoreText('Redirect loop detected', 404);
+            }
+            return noStoreRedirect(new URL(profileDestination, request.url), 307);
           }
-          return new Response('Destination not configured', { status: 404 });
+          return noStoreText('Destination not configured', 404);
         }
-        return new Response('Invalid slot', { status: 404 });
+        return noStoreText('Invalid slot', 404);
       }
 
       // No slot → resolve the panel destination:
@@ -235,17 +247,6 @@ export async function GET(
       //   2. Multi-profile standeee (all-in-one 3/4) → platform picker page
       //   3. Sole configured slot destination (single-purpose standees)
       //   4. 404
-      try {
-        await AnalyticsLog.create({
-          action: 'tap',
-          metadata: `route:${routeKey}`,
-          ip: clientIp(request),
-          userAgent: request.headers.get('user-agent') ?? '',
-        });
-      } catch {
-        // Fail-open.
-      }
-
       const multiProfileStandee =
         (standee.maxProfiles ?? 0) > 1 || (standee.fixedProfiles?.length ?? 0) > 1;
 
@@ -261,10 +262,12 @@ export async function GET(
           socialQrs: standee.socialQrs,
         })
       ) {
-        return NextResponse.redirect(
-          new URL(standeeReviewPath(reviewRoute), request.url),
-          307
-        );
+        const reviewDestination = standeeReviewPath(reviewRoute);
+        if (await wouldRedirectLoop(request.nextUrl.pathname, reviewDestination, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        await logPanelTap(`route:${routeKey}`);
+        return noStoreRedirect(new URL(reviewDestination, request.url), 307);
       }
 
       const alias = await Profile.findOne({ userId: standee.userId })
@@ -282,17 +285,21 @@ export async function GET(
       // This must take precedence over a shared profile alias, otherwise a
       // standee owner who also has a profile never reaches the standee panel.
       if (profileCount >= 2) {
-        return NextResponse.redirect(
-          new URL(`/panel/${routeKey}`, request.url),
-          307
-        );
+        const panelDestination = `/panel/${routeKey}`;
+        if (await wouldRedirectLoop(request.nextUrl.pathname, panelDestination, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        await logPanelTap(`route:${routeKey}`);
+        return noStoreRedirect(new URL(panelDestination, request.url), 307);
       }
 
       if (alias?.urlAlias) {
-        return NextResponse.redirect(
-          new URL(`/profile/${alias.urlAlias}`, request.url),
-          307
-        );
+        const profileDestination = `/profile/${alias.urlAlias}`;
+        if (await wouldRedirectLoop(request.nextUrl.pathname, profileDestination, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        await logPanelTap(`route:${routeKey}`);
+        return noStoreRedirect(new URL(profileDestination, request.url), 307);
       }
 
       // A standee-only buyer has no profile page, so the panel QR resolves to
@@ -312,11 +319,15 @@ export async function GET(
           direct ||
           alias?.socialLinks?.find((link) => link.platform === qr.platform)?.url;
         if (url && isSafeExternalUrl(url)) {
-          return NextResponse.redirect(url, 307);
+          if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
+            return noStoreText('Redirect loop detected', 404);
+          }
+          await logPanelTap(`route:${routeKey}`);
+          return noStoreRedirect(url, 307);
         }
       }
 
-      return new Response('Panel not configured', { status: 404 });
+      return noStoreText('Panel not configured', 404);
     }
 
     // ── 3. Legacy fallback: cardUid, slug, or urlAlias ──────────────────
@@ -341,26 +352,29 @@ export async function GET(
     } | null;
 
     if (legacyCard) {
-      // Legacy-resolved taps count the same as routeSlug taps.
-      if (await allowCardTapWrite(legacyCard._id, request)) {
-        await Promise.all([
-          logRouteEvent(legacyCard._id, routeKey, null, request),
-          incrementTapCount(legacyCard._id),
-        ]);
-      }
       // Use the same product-aware resolver as the routeSlug branch so legacy
       // profile Cards with only a `slug` reach `/c/{slug}` instead of a 404.
       const destination = resolveCardDestination(legacyCard);
       if (destination) {
-        return NextResponse.redirect(new URL(destination, request.url), 307);
+        if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
+          return noStoreText('Redirect loop detected', 404);
+        }
+        // Legacy-resolved taps count the same as routeSlug taps.
+        if (await allowCardTapWrite(legacyCard._id, request)) {
+          await Promise.all([
+            logRouteEvent(legacyCard._id, routeKey, null, request),
+            incrementTapCount(legacyCard._id),
+          ]);
+        }
+        return noStoreRedirect(new URL(destination, request.url), 307);
       }
     }
 
     // ── 4. 404 ─────────────────────────────────────────────────────────
-    return new Response('Not found', { status: 404 });
+    return noStoreText('Not found', 404);
   } catch (error) {
     emitReviewEvent({ event: 'review.routing.error', errorCategory: 'routing', reasonCategory: 'dynamic_route' });
     console.error('Dynamic route resolver error:', error);
-    return new Response('Internal server error', { status: 500 });
+    return noStoreText('Internal server error', 500);
   }
 }

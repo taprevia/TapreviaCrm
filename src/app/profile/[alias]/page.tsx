@@ -47,5 +47,10 @@ export default async function ProfilePage({ params }: Params) {
 
   // Kind dispatch, feature gate, catalog + settings and themed rendering all
   // live in the shared PublicCardPage (also used by /{business}/{product}).
-  return <PublicCardPage card={card} />;
+  return (
+    <PublicCardPage
+      card={card}
+      currentPath={`/profile/${encodeURIComponent(params.alias)}`}
+    />
+  );
 }

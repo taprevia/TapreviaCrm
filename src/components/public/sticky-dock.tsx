@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Link2, Mail, MessageSquare, Phone, Share2, UserPlus } from 'lucide-react';
 import { requestVcfDownload } from '@/lib/vcf-download';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { resolveCustomerPublicUrl } from '@/lib/services/customer-public-url';
 import { BrandIcon } from './socials-row';
 import type { IVcard } from './types';
 
@@ -96,6 +98,8 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
   const phone = vcard.basic?.phone;
   const call = telHref(phone);
   const chat = waHref(phone);
+  /* Customer-facing Public URL — never the permanent /r/ QR payload. */
+  const shareUrl = resolveCustomerPublicUrl(vcard, canonicalPublicBase()) ?? '';
 
   async function handleAddToContact() {
     const result = await requestVcfDownload(vcard.urlAlias || '');
@@ -150,7 +154,8 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
       body: JSON.stringify({ alias: vcard.urlAlias, action: 'share' }),
     }).catch(() => {});
 
-    const url = `${window.location.origin}/profile/${vcard.urlAlias}`;
+    const url = shareUrl;
+    if (!url) return;
     if (typeof navigator.share === 'function') {
       navigator
         .share({
@@ -168,7 +173,8 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
   }
 
   function handleCopyLink() {
-    const url = `${window.location.origin}/profile/${vcard.urlAlias}`;
+    const url = shareUrl;
+    if (!url) return;
     navigator.clipboard
       .writeText(url)
       .then(() => {
@@ -187,8 +193,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
 
   const shareText = `Check out ${name}'s digital card`;
   const enc = encodeURIComponent;
-  /* Lazy: window exists only post-hydration — never during SSR render. */
-  const shareHref = () => `${window.location.origin}/profile/${vcard.urlAlias}`;
+  const shareHref = () => shareUrl;
   const rowClass =
     'flex h-12 w-full items-center gap-3 rounded-xl px-4 text-sm font-medium text-gray-900 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]';
 
@@ -230,7 +235,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
           )}
 
           {/* Share — ghost button mirroring Call */}
-          <button type="button" ref={shareButtonRef} onClick={handleShareClick} className={cellClass} aria-label={`Share ${name}`}>
+          <button type="button" ref={shareButtonRef} onClick={handleShareClick} disabled={!shareUrl} className={cellClass} aria-label={`Share ${name}`}>
             <Share2 size={22} className="text-gray-900" aria-hidden="true" />
             <span className={labelClass}>Share</span>
           </button>

@@ -6,6 +6,8 @@
 export interface SubscriberVcardRef {
   name: string;
   urlAlias: string;
+  kind?: string;
+  publicSlug?: string | null;
 }
 
 export interface Subscriber {

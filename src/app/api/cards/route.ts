@@ -9,6 +9,7 @@ import { fail, ok, parsePagination } from '@/lib/api';
 import { generateSlug } from '@/lib/utils';
 import { DEFAULT_TEMPLATE_KEY } from '@/lib/card-templates';
 import { resolveCardPreview } from '@/lib/services/product-preview';
+import { allocateCardRouteSlug } from '@/lib/services/card-identity';
 import { literalSearchRegExp, normalizeSearchInput } from '@/lib/search';
 
 export const dynamic = 'force-dynamic';
@@ -101,26 +102,45 @@ export async function POST(request: NextRequest) {
       return fail(403, 'FORBIDDEN', `You have reached the maximum of ${MAX_CARDS_PER_USER} cards`);
     }
 
-    let alias = parsed.data.urlAlias;
-    if (alias) {
-      const existing = await Card.findOne({ urlAlias: alias }).lean();
-      if (existing) return fail(409, 'CONFLICT', 'This alias is already taken');
-    } else {
+    let alias = parsed.data.urlAlias?.trim().toLowerCase();
+    if (!alias) {
       const base = generateSlug(parsed.data.name) || 'card';
-      alias = `${base}-${Math.random().toString(36).slice(2, 6)}`;
+      alias = `${base}-${crypto.randomBytes(3).toString('hex')}`;
     }
 
-    const card = await Card.create({
-      userId: user._id,
-      cardUid: `DIGITAL-${crypto.randomBytes(6).toString('hex').toUpperCase()}`,
-      slug: alias,
-      name: parsed.data.name,
-      urlAlias: alias,
-      templateKey: parsed.data.templateKey ?? DEFAULT_TEMPLATE_KEY,
-      businessHours: DEFAULT_BUSINESS_HOURS.map((d) => ({ ...d })),
-    });
+    // The public handle resolves through BOTH urlAlias and slug, so a new
+    // alias must not collide with either namespace. `slug` is unique-indexed,
+    // which also makes the create atomic against concurrent claims.
+    const existing = await Card.findOne({
+      $or: [{ urlAlias: alias }, { slug: alias }],
+    })
+      .select('_id')
+      .lean();
+    if (existing) return fail(409, 'CONFLICT', 'This alias is already taken');
 
-    return ok({ card }, 201);
+    // Permanent route identity is allocated at creation and never regenerated.
+    const routeSlug = await allocateCardRouteSlug();
+
+    try {
+      const card = await Card.create({
+        userId: user._id,
+        cardUid: `DIGITAL-${crypto.randomBytes(6).toString('hex').toUpperCase()}`,
+        slug: alias,
+        name: parsed.data.name,
+        urlAlias: alias,
+        routeSlug,
+        uid: routeSlug,
+        templateKey: parsed.data.templateKey ?? DEFAULT_TEMPLATE_KEY,
+        businessHours: DEFAULT_BUSINESS_HOURS.map((d) => ({ ...d })),
+      });
+
+      return ok({ card }, 201);
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        return fail(409, 'CONFLICT', 'This alias is already taken');
+      }
+      throw error;
+    }
   } catch (error) {
     console.error('Cards POST error:', error);
     return fail(500, 'INTERNAL_ERROR', 'Internal server error');

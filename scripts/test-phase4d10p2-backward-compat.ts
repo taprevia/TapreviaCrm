@@ -235,7 +235,7 @@ async function main() {
     const newCard = await resolveCardPreview(fx.cards['new-review'] as never);
     const profile = await resolveCardPreview(fx.cards['legacy-profile'] as never);
     assert.deepEqual(legacy, { ok: true, kind: 'review', href: '/review/legacy-review' });
-    assert.deepEqual(newCard, { ok: true, kind: 'review', href: '/review/new-review' });
+    assert.deepEqual(newCard, { ok: true, kind: 'review', href: '/acme/new-review' });
     assert.deepEqual(profile, { ok: true, kind: 'profile', href: '/profile/legacy-profile' });
   });
   await check('destination resolver preserves review/profile routing', () => {

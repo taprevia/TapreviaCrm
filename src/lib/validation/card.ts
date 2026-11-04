@@ -167,7 +167,8 @@ export const updateCardSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
     cardLabel: z.string().trim().max(80).optional(),
-    urlAlias: aliasSchema.optional(),
+    // urlAlias is immutable after creation; it is intentionally absent here.
+    // PATCH rejects changed identifiers before parsing.
     occupation: z.string().max(120).optional(),
     descriptionHtml: z
       .string()

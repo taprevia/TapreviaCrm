@@ -1196,35 +1196,39 @@ async function main() {
     });
     ok(legacy.status === 200, `legacy ${legacy.status}`);
     const legacyBody = legacy.json as { source?: string; settings?: { googleReviewUrl?: string } };
-    ok(legacyBody.source === 'legacy', `legacy source ${legacyBody.source}`);
-    ok(legacyBody.settings?.googleReviewUrl?.includes('legacy-api-review'), 'legacy URL missing');
+    // Central-only: a saved central document is authoritative even for a card
+    // whose stored source is legacy.
+    ok(legacyBody.source === 'central', `legacy source ${legacyBody.source}`);
+    ok(legacyBody.settings?.googleReviewUrl?.includes('legacy-api-review'), 'product destination missing');
 
     const central = await api('GET', `/api/review-management/preview?assignmentId=${assignments.centralProduct._id}`, {
       user: users.central,
     });
     const centralBody = central.json as { source?: string; settings?: { googleReviewUrl?: string; styleMode?: string } };
     ok(centralBody.source === 'central', `central source ${centralBody.source}`);
-    ok(centralBody.settings?.googleReviewUrl === 'https://example.test/central-central', 'central URL missing');
+    ok(centralBody.settings?.googleReviewUrl === 'https://example.test/legacy-central-review', 'product destination missing');
 
     const hybrid = await api('GET', `/api/review-management/preview?assignmentId=${assignments.hybridProduct._id}`, {
       user: users.hybrid,
     });
     const hybridBody = hybrid.json as { source?: string; settings?: { writingStyle?: string; styleMode?: string } };
-    ok(hybridBody.source === 'hybrid', `hybrid source ${hybridBody.source}`);
-    ok(hybridBody.settings?.writingStyle === 'casual' && hybridBody.settings?.styleMode === 'varied', 'hybrid override missing');
+    ok(hybridBody.source === 'central', `hybrid source ${hybridBody.source}`);
+    ok(hybridBody.settings?.writingStyle === 'friendly' && hybridBody.settings?.styleMode === 'fixed', 'hybrid content leaked');
 
     const fallback = await api('GET', `/api/review-management/preview?assignmentId=${assignments.fallbackProduct._id}`, {
       user: users.fallback,
     });
-    const fallbackBody = fallback.json as { source?: string; settings?: { googleReviewUrl?: string } };
-    ok(fallbackBody.source === 'legacy-fallback', `fallback source ${fallbackBody.source}`);
-    ok(fallbackBody.settings?.googleReviewUrl?.includes('legacy-fallback-review'), 'fallback did not use legacy');
+    const fallbackBody = fallback.json as { source?: string; published?: boolean; settings?: { googleReviewUrl?: string } };
+    ok(fallbackBody.source === 'legacy', `fallback source ${fallbackBody.source}`);
+    ok(fallbackBody.published === false, 'fallback unexpectedly published');
+    ok(fallbackBody.settings?.googleReviewUrl?.includes('legacy-fallback-review'), 'fallback did not preserve legacy destination');
 
     const invalid = await api('GET', `/api/review-management/preview?assignmentId=${assignments.invalidCentralProduct._id}`, {
       user: users.invalidcentral,
     });
-    const invalidBody = invalid.json as { source?: string };
-    ok(invalidBody.source === 'legacy-fallback', `invalid central source ${invalidBody.source}`);
+    const invalidBody = invalid.json as { source?: string; published?: boolean };
+    ok(invalidBody.source === 'legacy', `invalid central source ${invalidBody.source}`);
+    ok(invalidBody.published === false, 'invalid central unexpectedly published');
   });
   await check('preview API: cross-tenant and lower-tier are rejected', async () => {
     const cross = await api('GET', `/api/review-management/preview?assignmentId=${assignments.apiProduct._id}`, {
@@ -1261,7 +1265,8 @@ async function main() {
     assert.deepEqual(after?.reviewAssistant, before?.reviewAssistant);
     connectorRevision = 1;
   });
-  await check('connection: hybrid accepts the full supported override set', async () => {
+  await check('connection: hybrid content writes are rejected without mutation', async () => {
+    const before = await rawCard(cards.connectorCard._id);
     const response = await connectorPatch({
       source: 'hybrid',
       revision: connectorRevision,
@@ -1273,102 +1278,84 @@ async function main() {
         languages: ['English'],
         writingStyle: 'casual',
         styleMode: 'varied',
-        preferredLength: 'short',
-        lengthMode: 'fixed',
-        feedbackTopics: ['Service'],
-        services: ['Espresso'],
-        employees: ['Asha'],
-        keywords: ['cosy'],
       },
     });
-    ok(response.status === 200, `status ${response.status}: ${response.text}`);
-    const body = response.json as { source?: string; effective?: { styleMode?: string; lengthMode?: string } };
-    ok(body.source === 'hybrid' && body.effective?.styleMode === 'varied' && body.effective?.lengthMode === 'fixed', 'effective modes missing');
-    const preview = await api('GET', `/api/review-management/preview?assignmentId=${assignments.connectorProduct._id}`, {
-      user: connector,
-    });
-    const previewBody = preview.json as { settings?: Record<string, unknown> };
-    ok(previewBody.settings?.welcomeMessage === 'Connector welcome', 'welcome override missing');
-    ok(previewBody.settings?.writingStyle === 'casual', 'style override missing');
-    ok(previewBody.settings?.styleMode === 'varied', 'style mode override missing');
-    connectorRevision = 2;
+    ok(response.status === 400, `status ${response.status}: ${response.text}`);
+    const after = await rawCard(cards.connectorCard._id);
+    ok(after?.reviewSettingsSource === before?.reviewSettingsSource, 'source changed on rejected write');
+    ok(after?.reviewSettingsVersion === before?.reviewSettingsVersion, 'revision changed on rejected write');
+    assert.deepEqual(after?.reviewOverrides, before?.reviewOverrides);
+    assert.deepEqual(after?.reviewAssistant, before?.reviewAssistant);
   });
-  await check('connection: removing overrides returns to central values', async () => {
-    const response = await connectorPatch({
-      source: 'hybrid',
-      revision: connectorRevision,
-      overrides: { enabled: false },
-    });
-    ok(response.status === 200, `status ${response.status}`);
-    const card = await rawCard(cards.connectorCard._id);
-    ok(card?.reviewOverrides?.enabled === false, 'enabled override missing');
-    ok(card?.reviewOverrides?.welcomeMessage === undefined, 'removed welcome override persisted');
-    ok(card?.reviewOverrides?.googleReviewUrl === undefined, 'removed URL override persisted');
-    connectorRevision = 3;
-  });
-  await check('connection: unknown/legacy override keys are preserved', async () => {
+  await check('connection: destination-only update preserves central source/content', async () => {
     const db = database();
     await db.collection('cards').updateOne(
       { _id: new mongoose.Types.ObjectId(String(cards.connectorCard._id)) },
       { $set: { 'reviewOverrides.legacyCustomField': 'keep-me' } }
     );
+    const before = await rawCard(cards.connectorCard._id);
     const response = await connectorPatch({
-      source: 'hybrid',
+      source: 'destination',
       revision: connectorRevision,
-      overrides: { keywords: ['kept'] },
+      destination: { googleReviewUrl: 'https://example.test/connector-destination' },
     });
-    ok(response.status === 200, `status ${response.status}`);
-    const card = await rawCard(cards.connectorCard._id);
-    ok(card?.reviewOverrides?.legacyCustomField === 'keep-me', 'unknown override was silently deleted');
-    ok(card?.reviewOverrides?.enabled === undefined, 'known override was not removed');
-    connectorRevision = 4;
+    ok(response.status === 200, `status ${response.status}: ${response.text}`);
+    const after = await rawCard(cards.connectorCard._id);
+    ok(after?.reviewSettingsSource === 'central', 'central source lost');
+    ok(after?.reviewSettingsVersion === (before?.reviewSettingsVersion ?? 0) + 1, 'revision not advanced');
+    ok(after?.reviewOverrides?.googleReviewUrl === 'https://example.test/connector-destination', 'destination missing');
+    ok(after?.reviewOverrides?.legacyCustomField === 'keep-me', 'unknown override key deleted');
+    assert.deepEqual(after?.reviewAssistant, before?.reviewAssistant);
+    connectorRevision += 1;
   });
-  await check('connection: legacy rollback restores exact legacy state', async () => {
+  await check('connection: legacy content writes are rejected without mutation', async () => {
     const before = await rawCard(cards.connectorCard._id);
     const response = await connectorPatch({ source: 'legacy', revision: connectorRevision });
-    ok(response.status === 200, `status ${response.status}`);
+    ok(response.status === 400, `status ${response.status}`);
     const after = await rawCard(cards.connectorCard._id);
-    ok(after?.reviewSettingsSource === 'legacy', 'source not legacy');
-    ok(after?.reviewOverrides === undefined, 'overrides not cleared');
-    ok(after?.urlAlias === before?.urlAlias, 'alias changed');
+    ok(after?.reviewSettingsSource === before?.reviewSettingsSource, 'source changed on rejected legacy write');
+    ok(after?.reviewSettingsVersion === before?.reviewSettingsVersion, 'revision changed on rejected legacy write');
+    assert.deepEqual(after?.reviewOverrides, before?.reviewOverrides);
     assert.deepEqual(after?.reviewAssistant, before?.reviewAssistant);
-    connectorRevision = 5;
   });
-  await check('connection: repeated cycles remain reversible', async () => {
-    const central = await connectorPatch({ source: 'central', revision: connectorRevision });
-    ok(central.status === 200, `central ${central.status}`);
-    const legacy = await connectorPatch({ source: 'legacy', revision: connectorRevision + 1 });
-    ok(legacy.status === 200, `legacy ${legacy.status}`);
+  await check('connection: repeated central connections remain stable', async () => {
+    const first = await connectorPatch({ source: 'central', revision: connectorRevision });
+    ok(first.status === 200, `central ${first.status}`);
+    const second = await connectorPatch({ source: 'central', revision: connectorRevision + 1 });
+    ok(second.status === 200, `central retry ${second.status}`);
     const card = await rawCard(cards.connectorCard._id);
-    ok(card?.reviewSettingsSource === 'legacy' && card?.reviewSettingsVersion === connectorRevision + 2, 'cycle state inconsistent');
+    ok(
+      card?.reviewSettingsSource === 'central' &&
+        card?.reviewSettingsVersion === connectorRevision + 2,
+      'central cycle state inconsistent'
+    );
     connectorRevision += 2;
   });
-  await check('connection: inactive category / unsupported language are preserved', async () => {
-    const catCardBefore = await rawCard(cards.catCard._id);
+  await check('connection: central connection preserves stored legacy overrides', async () => {
+    const db = database();
+    await db.collection('cards').updateOne(
+      { _id: new mongoose.Types.ObjectId(String(cards.catCard._id)) },
+      { $set: { 'reviewOverrides.category': 'old-cat', 'reviewOverrides.keywords': ['keep'] } }
+    );
     const cat = await api('PATCH', `/api/review-management/products/${assignments.catProduct._id}`, {
       user: users.inactivecat,
-      body: { source: 'hybrid', revision: 0, overrides: { category: 'old-cat', keywords: ['keep'] } },
+      body: { source: 'central', revision: 0 },
     });
-    ok(cat.status === 200, `inactive category ${cat.status}: ${cat.text}`);
+    ok(cat.status === 200, `central cat ${cat.status}: ${cat.text}`);
     const catAfter = await rawCard(cards.catCard._id);
     ok(catAfter?.reviewOverrides?.category === 'old-cat', 'inactive category lost');
-    const catChange = await api('PATCH', `/api/review-management/products/${assignments.catProduct._id}`, {
-      user: users.inactivecat,
-      body: { source: 'hybrid', revision: 1, overrides: { category: 'missing-category' } },
-    });
-    ok(catChange.status === 400, `new inactive category ${catChange.status}`);
 
+    await db.collection('cards').updateOne(
+      { _id: new mongoose.Types.ObjectId(String(cards.langCard._id)) },
+      { $set: { 'reviewOverrides.languages': ['Klingon'], 'reviewOverrides.keywords': ['keep'] } }
+    );
     const lang = await api('PATCH', `/api/review-management/products/${assignments.langProduct._id}`, {
       user: users.oldlang,
-      body: { source: 'hybrid', revision: 0, overrides: { languages: ['Klingon'], keywords: ['keep'] } },
+      body: { source: 'central', revision: 0 },
     });
-    ok(lang.status === 200, `legacy language ${lang.status}: ${lang.text}`);
-    const langAdd = await api('PATCH', `/api/review-management/products/${assignments.langProduct._id}`, {
-      user: users.oldlang,
-      body: { source: 'hybrid', revision: 1, overrides: { languages: ['Klingon', 'Elvish'] } },
-    });
-    ok(langAdd.status === 400, `new unsupported language ${langAdd.status}`);
-    void catCardBefore;
+    ok(lang.status === 200, `central lang ${lang.status}: ${lang.text}`);
+    const langAfter = await rawCard(cards.langCard._id);
+    ok(langAfter?.reviewOverrides?.languages?.[0] === 'Klingon', 'legacy language lost');
   });
   await check('connection: missing central settings and invalid hosts are rejected', async () => {
     const missing = await api('PATCH', `/api/review-management/products/${assignments.fallbackProduct._id}`, {
@@ -1442,7 +1429,7 @@ async function main() {
   await check('connection: stale revision returns 409 and retry succeeds', async () => {
     const stale = await connectorPatch({ source: 'central', revision: 0 });
     ok(stale.status === 409, `stale ${stale.status}`);
-    const fresh = await connectorPatch({ source: 'legacy', revision: connectorRevision });
+    const fresh = await connectorPatch({ source: 'central', revision: connectorRevision });
     ok(fresh.status === 200, `retry ${fresh.status}`);
     connectorRevision += 1;
   });
@@ -1454,9 +1441,9 @@ async function main() {
     const second = api('PATCH', `/api/review-management/products/${assignments.parallelProduct._id}`, {
       user: users.parallel,
       body: {
-        source: 'hybrid',
+        source: 'destination',
         revision: 0,
-        overrides: { keywords: ['parallel'] },
+        destination: { googleReviewUrl: 'https://example.test/parallel-destination' },
       },
     });
     const [a, b] = await Promise.all([first, second]);
@@ -1464,43 +1451,38 @@ async function main() {
     ok(statuses[0] === 200 && statuses[1] === 409, `statuses ${statuses.join(',')}`);
     const card = await rawCard(cards.parallelCard._id);
     ok(card?.reviewSettingsVersion === 1, `version ${card?.reviewSettingsVersion}`);
-    if (card?.reviewSettingsSource === 'central') {
-      ok(card?.reviewOverrides === undefined, 'central winner has partial overrides');
-    } else {
-      ok(card?.reviewSettingsSource === 'hybrid', 'unknown winner source');
-      ok(card?.reviewOverrides?.keywords?.length === 1, 'hybrid winner has partial overrides');
-    }
+    ok(
+      card?.reviewSettingsSource === 'central' || card?.reviewSettingsSource === 'legacy',
+      `parallel winner source inconsistent: ${card?.reviewSettingsSource}`
+    );
   });
-  await check('concurrency: simultaneous hybrid override updates do not merge', async () => {
+  await check('concurrency: simultaneous destination updates do not merge', async () => {
     const first = api('PATCH', `/api/review-management/products/${assignments.hybridParallelProduct._id}`, {
       user: users.hybridparallel,
       body: {
-        source: 'hybrid',
+        source: 'destination',
         revision: 0,
-        overrides: { keywords: ['first'], services: ['First'] },
+        destination: { googleReviewUrl: 'https://example.test/concurrent-first' },
       },
     });
     const second = api('PATCH', `/api/review-management/products/${assignments.hybridParallelProduct._id}`, {
       user: users.hybridparallel,
       body: {
-        source: 'hybrid',
+        source: 'destination',
         revision: 0,
-        overrides: { keywords: ['second'], employees: ['Second'] },
+        destination: { googleReviewUrl: 'https://example.test/concurrent-second' },
       },
     });
     const [a, b] = await Promise.all([first, second]);
     const statuses = [a.status, b.status].sort();
     ok(statuses[0] === 200 && statuses[1] === 409, `statuses ${statuses.join(',')}`);
     const card = await rawCard(cards.hybridParallelCard._id);
-    const overrides = card?.reviewOverrides ?? {};
-    const firstWon = Array.isArray(overrides.keywords) && overrides.keywords[0] === 'first';
-    const secondWon = Array.isArray(overrides.keywords) && overrides.keywords[0] === 'second';
-    ok(firstWon !== secondWon, 'winner unclear');
-    if (firstWon) {
-      ok(overrides.services?.[0] === 'First' && !overrides.employees, 'first request partially merged');
-    } else {
-      ok(overrides.employees?.[0] === 'Second' && !overrides.services, 'second request partially merged');
-    }
+    const url = card?.reviewOverrides?.googleReviewUrl;
+    ok(
+      url === 'https://example.test/concurrent-first' ||
+        url === 'https://example.test/concurrent-second',
+      `winner unclear ${url}`
+    );
   });
   await check('concurrency: settings update + product connection remain consistent', async () => {
     const read = await api('GET', '/api/review-management', { user: users.connector });
@@ -1519,12 +1501,17 @@ async function main() {
   });
 
   // ── 8. Card editor authorization ─────────────────────────────────────────
-  await check('card editor: Premium can edit, lower-tier cannot enable', async () => {
+  await check('card editor: legacy content writes rejected, lower-tier cannot enable', async () => {
     const premium = await api('PATCH', `/api/cards/${cards.premiumCard._id}`, {
       user: users.premium,
       body: { reviewAssistant: { enabled: true } },
     });
-    ok(premium.status === 200, `premium ${premium.status}: ${premium.text}`);
+    ok(premium.status === 400, `premium content ${premium.status}: ${premium.text}`);
+    const premiumDestination = await api('PATCH', `/api/cards/${cards.premiumCard._id}`, {
+      user: users.premium,
+      body: { reviewAssistant: { googleReviewUrl: 'https://example.test/premium-destination' } },
+    });
+    ok(premiumDestination.status === 200, `premium destination ${premiumDestination.status}: ${premiumDestination.text}`);
     const lower = await api('PATCH', `/api/cards/${cards.mixedLower._id}`, {
       user: users.mixed,
       body: { reviewAssistant: { enabled: true } },
@@ -1539,20 +1526,21 @@ async function main() {
       user: users.zeroenabled,
       body: { reviewAssistant: { enabled: true } },
     });
-    ok(preserved.status === 200, `zero-assignment enabled ${preserved.status}`);
+    ok(preserved.status === 400, `zero-assignment content ${preserved.status}`);
   });
-  await check('card settings editor: one Card save does not change another Card', async () => {
+  await check('card settings editor: destination save changes only the target Card', async () => {
     const before = await rawCard(cards.premiumNew._id);
     const patched = await api('PATCH', `/api/cards/${cards.premiumCard._id}`, {
       user: users.premium,
-      body: { reviewAssistant: { welcomeMessage: 'Only this card', enabled: true } },
+      body: { reviewAssistant: { googleReviewUrl: 'https://example.test/only-this-card' } },
     });
     ok(patched.status === 200, `patch ${patched.status}: ${patched.text}`);
     const changed = await rawCard(cards.premiumCard._id);
     const untouched = await rawCard(cards.premiumNew._id);
     ok(
-      (changed?.reviewAssistant as { welcomeMessage?: string } | undefined)?.welcomeMessage === 'Only this card',
-      'target Card was not updated'
+      (changed?.reviewAssistant as { googleReviewUrl?: string } | undefined)?.googleReviewUrl ===
+        'https://example.test/only-this-card',
+      'target Card destination was not updated'
     );
     ok(
       JSON.stringify((untouched?.reviewAssistant as unknown) ?? null) ===
@@ -1592,16 +1580,16 @@ async function main() {
   });
 
   // ── 9. Public review + backward compatibility ────────────────────────────
-  await check('public: legacy Premium/GRC/Plate pages and suggestions work', async () => {
+  await check('public: legacy review routes remain reachable but fail closed', async () => {
     for (const alias of ['premium-review', 'grc-review', 'plate-review']) {
       const page = await api('GET', `/review/${alias}`);
       ok(page.status === 200, `${alias} page ${page.status}`);
-      ok(!unavailablePage(page.text), `${alias} unavailable`);
+      ok(unavailablePage(page.text), `${alias} unexpectedly published`);
     }
     const suggestions = await api('POST', '/api/public/reviews/premium-review/suggestions', {
       body: { language: 'English', length: 'short' },
     });
-    ok(suggestions.status === 200, `suggestions ${suggestions.status}`);
+    ok(suggestions.status === 404, `legacy suggestions ${suggestions.status}`);
   });
   await check('public: lower-tier, removed and inactive hosts are denied', async () => {
     for (const alias of ['lower-review', 'mixed-lower-review', 'removed-review', 'inactive-review']) {
@@ -1639,16 +1627,25 @@ async function main() {
       ok(suggestions.status === 404, `gate OFF central suggestions ${suggestions.status}`);
     }
   });
-  await check('public: missing/invalid central settings fall back to legacy', async () => {
+  await check('public: missing/invalid central settings fail closed', async () => {
     const fallback = await api('GET', '/review/fallback-review');
     const invalid = await api('GET', '/review/invalid-central-review');
-    ok(fallback.status === 200 && !unavailablePage(fallback.text), 'fallback page unavailable');
-    ok(invalid.status === 200 && !unavailablePage(invalid.text), 'invalid central page unavailable');
-    ok(fallback.text.includes('Legacy welcome'), 'fallback did not use legacy welcome');
-    ok(invalid.text.includes('Legacy welcome'), 'invalid central did not use legacy welcome');
+    ok(fallback.status === 200 && unavailablePage(fallback.text), 'fallback page published');
+    ok(invalid.status === 200 && unavailablePage(invalid.text), 'invalid central page published');
+    const fallbackSuggestions = await api('POST', '/api/public/reviews/fallback-review/suggestions', {
+      body: { language: 'English', length: 'short' },
+    });
+    ok(fallbackSuggestions.status === 404, `fallback suggestions ${fallbackSuggestions.status}`);
   });
-  await check('public: copy event records and is idempotent', async () => {
-    const suggestions = await api('POST', '/api/public/reviews/premium-review/suggestions', {
+  await check('public: copy event records and is idempotent when central is published', async () => {
+    if (!EXPECT_GATE) {
+      const closed = await api('POST', '/api/public/reviews/central-review/copied', {
+        body: { templateId: '000000000000000000000000', copyId: `suite-copy-closed-${Date.now()}` },
+      });
+      ok(closed.status === 404, `gate OFF copy ${closed.status}`);
+      return;
+    }
+    const suggestions = await api('POST', '/api/public/reviews/central-review/suggestions', {
       body: { language: 'English', length: 'short' },
     });
     const templateId = (suggestions.json as { suggestions?: Array<{ templateId?: string }> }).suggestions?.[0]?.templateId;
@@ -1656,11 +1653,11 @@ async function main() {
     const db = database();
     const before = await db.collection('reviewrotationevents').countDocuments({ copyId: /^suite-copy-/ });
     const copyId = `suite-copy-${Date.now()}`;
-    const first = await api('POST', '/api/public/reviews/premium-review/copied', {
+    const first = await api('POST', '/api/public/reviews/central-review/copied', {
       body: { templateId, copyId },
     });
     ok([200, 201].includes(first.status), `first copy ${first.status}`);
-    const second = await api('POST', '/api/public/reviews/premium-review/copied', {
+    const second = await api('POST', '/api/public/reviews/central-review/copied', {
       body: { templateId, copyId },
     });
     ok(second.status === 200, `duplicate copy ${second.status}`);

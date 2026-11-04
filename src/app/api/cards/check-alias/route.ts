@@ -5,25 +5,10 @@ import { connectDB } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { ok, fail, rateLimitFailure } from '@/lib/api';
 import { check } from '@/lib/rate-limit';
+import { validateAlias } from '@/lib/validation/common';
 import Card from '@/models/Card';
 
 export const dynamic = 'force-dynamic';
-
-const ALIAS_FORMAT_RE = /^[a-z0-9][a-z0-9-]{2,39}$/;
-
-const RESERVED_ALIASES = [
-  'admin',
-  'api',
-  'login',
-  'register',
-  'dashboard',
-  'profile',
-  'c',
-  't',
-  'media',
-  'assets',
-  'static',
-];
 
 // GET /api/cards/check-alias?alias=&excludeId= — availability probe
 export async function GET(request: NextRequest) {
@@ -36,19 +21,20 @@ export async function GET(request: NextRequest) {
     if (limited) return limited;
 
     const sp = new URL(request.url).searchParams;
-    const alias = (sp.get('alias') ?? '').trim().toLowerCase();
+    const validated = validateAlias(sp.get('alias') ?? '');
+    if (!validated.ok) {
+      return ok({ available: false, reason: validated.reason });
+    }
+    const alias = validated.value;
     const excludeIdRaw = (sp.get('excludeId') ?? '').trim();
-
-    if (!ALIAS_FORMAT_RE.test(alias)) {
-      return ok({ available: false, reason: 'INVALID' });
-    }
-    if (RESERVED_ALIASES.includes(alias)) {
-      return ok({ available: false, reason: 'RESERVED' });
-    }
 
     await connectDB();
 
-    const query: Record<string, unknown> = { urlAlias: alias };
+    // Public handles resolve through BOTH `urlAlias` and `slug` (see
+    // getPublicCardByAlias / /c), so availability must check both namespaces.
+    const query: Record<string, unknown> = {
+      $or: [{ urlAlias: alias }, { slug: alias }],
+    };
     if (/^[0-9a-fA-F]{24}$/.test(excludeIdRaw)) {
       query._id = { $ne: new mongoose.Types.ObjectId(excludeIdRaw) };
     }

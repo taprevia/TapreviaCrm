@@ -163,14 +163,47 @@ export const reviewProductOverridesSchema = z
   })
   .strict();
 
+export const reviewProductDestinationSchema = z
+  .object({
+    googleReviewUrl: urlSchema.refine((value) => value.trim().length > 0, {
+      message: 'A Google Review destination is required',
+    }),
+  })
+  .strict();
+
 export const reviewProductConnectionSchema = z
   .object({
-    source: z.enum(['legacy', 'central', 'hybrid']),
+    source: z.enum(['legacy', 'central', 'hybrid', 'destination']),
     overrides: reviewProductOverridesSchema.optional(),
+    destination: reviewProductDestinationSchema.optional(),
     revision: z.number().int().min(0).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.source === 'destination') {
+      if (!value.destination) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['destination'],
+          message: 'A destination is required for a destination-only update',
+        });
+      }
+      if (value.overrides !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['overrides'],
+          message: 'Destination-only updates cannot contain content overrides',
+        });
+      }
+      return;
+    }
+    if (value.destination !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['destination'],
+        message: 'Destination is only valid for destination-only updates',
+      });
+    }
     if (value.source !== 'hybrid' && value.overrides !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

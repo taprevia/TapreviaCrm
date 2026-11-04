@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic';
 interface PopulatedCard {
   urlAlias?: string;
   name?: string;
+  kind?: string;
+  publicSlug?: string | null;
 }
 
 interface SubscriberRow {
@@ -21,9 +23,19 @@ interface SubscriberRow {
   updatedAt: Date;
 }
 
-function toCardRef(populated: unknown): { urlAlias: string; name: string } {
+function toCardRef(populated: unknown): {
+  urlAlias: string;
+  name: string;
+  kind?: string;
+  publicSlug?: string | null;
+} {
   const c = populated as PopulatedCard | null | undefined;
-  return { urlAlias: c?.urlAlias ?? '', name: c?.name ?? '' };
+  return {
+    urlAlias: c?.urlAlias ?? '',
+    name: c?.name ?? '',
+    kind: c?.kind,
+    publicSlug: c?.publicSlug ?? null,
+  };
 }
 
 function toListItem(row: SubscriberRow) {
@@ -79,7 +91,7 @@ export async function GET(request: NextRequest) {
 
     const [docs, total] = await Promise.all([
       NewsletterSubscriber.find(filter)
-        .populate('cardId', 'urlAlias name')
+        .populate('cardId', 'urlAlias name kind publicSlug')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)

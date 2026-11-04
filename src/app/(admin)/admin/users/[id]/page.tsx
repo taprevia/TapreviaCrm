@@ -21,8 +21,9 @@ import { Modal } from '@/components/ui/modal';
 import { downloadQrPdf } from '@/lib/qr-pdf';
 import { canonicalPublicBase } from '@/lib/public-base';
 import {
-  permanentCardUrl,
+  legacyCardUrl,
   remainingCardCount,
+  strictPermanentCardUrl,
   visibleAdminCards,
 } from '@/lib/admin-card-view';
 
@@ -76,12 +77,14 @@ interface CardData {
   cardUid: string;
   slug: string;
   routeSlug?: string;
+  uid?: string;
   publicSlug?: string;
   urlAlias?: string;
   templateKey?: string;
   status: string;
   canonicalPublicUrl?: string | null;
   permanentEntryUrl?: string | null;
+  legacyEntryUrl?: string | null;
   configurationStatus?: string;
   routeSource?: string;
   stats?: { taps?: number };
@@ -111,10 +114,12 @@ interface StandeeData {
   /** Canonical title (mirrors Card.cardLabel); falls back to `name`. */
   displayName?: string;
   routeSlug?: string;
+  uid?: string;
   publicSlug?: string;
   productKey?: string;
   canonicalPublicUrl?: string | null;
   permanentEntryUrl?: string | null;
+  legacyEntryUrl?: string | null;
   configurationStatus?: string;
   maxProfiles?: number;
   fixedProfiles?: string[];
@@ -164,6 +169,27 @@ function catalogTypeLabel(item: CatalogProductLite): string {
 
 /** Configured public origin — never window.location/preview/localhost. */
 const PUBLIC_BASE_URL = canonicalPublicBase();
+
+/** Strict Permanent QR/URL: `/r/{routeSlug|uid}` only, else unavailable. */
+function cardPermanentUrl(card: CardData): string | null {
+  return strictPermanentCardUrl(
+    { routeSlug: card.routeSlug, uid: card.uid },
+    PUBLIC_BASE_URL
+  );
+}
+
+/** Explicitly labelled Legacy QR/URL for cards with no permanent identifier. */
+function cardLegacyUrl(card: CardData): string | null {
+  return legacyCardUrl(card, PUBLIC_BASE_URL);
+}
+
+function cardQrPayload(card: CardData): string {
+  return cardPermanentUrl(card) ?? cardLegacyUrl(card) ?? '';
+}
+
+function cardQrIsLegacy(card: CardData): boolean {
+  return !cardPermanentUrl(card) && Boolean(cardLegacyUrl(card));
+}
 
 interface AnalyticsData {  totalTaps: number;
   tapLogs: number;
@@ -276,7 +302,7 @@ export default function AdminUserDetailPage() {
     let cancelled = false;
     Promise.all(
       cards.map(async (c) => {
-        const url = permanentCardUrl(c, PUBLIC_BASE_URL);
+        const url = cardQrPayload(c);
         if (!url) return [c._id, ''] as const;
         const dataUrl = await QRCode.toDataURL(url, {
           width: 128,
@@ -320,10 +346,11 @@ export default function AdminUserDetailPage() {
   // legacy standees fall back to /qr/{qrId}.
   const standeeQrUrl = (s: StandeeData, kind: 'panel' | 'social', index = 0) => {
     if (!PUBLIC_BASE_URL) return '';
-    if (s.routeSlug) {
+    const route = (s.routeSlug || s.uid || '').trim();
+    if (route) {
       return kind === 'panel'
-        ? `${PUBLIC_BASE_URL}/r/${s.routeSlug}`
-        : `${PUBLIC_BASE_URL}/r/${s.routeSlug}/${index + 1}`;
+        ? `${PUBLIC_BASE_URL}/r/${encodeURIComponent(route)}`
+        : `${PUBLIC_BASE_URL}/r/${encodeURIComponent(route)}/${index + 1}`;
     }
     return kind === 'panel'
       ? `${PUBLIC_BASE_URL}/qr/${s.panelQr?.qrId ?? ''}`
@@ -364,17 +391,25 @@ export default function AdminUserDetailPage() {
     }
   };
 
-  const handleDownloadCardQr = async (c: { routeSlug?: string; slug: string; templateKey?: string }) => {
-    const url = permanentCardUrl(c, PUBLIC_BASE_URL);
+  const handleDownloadCardQr = async (c: CardData) => {
+    const url = cardQrPayload(c);
     if (!url || pdfBusyRef.current) return;
     pdfBusyRef.current = true;
     setPdfError('');
     const template = (c.templateKey && templateNames[c.templateKey]) || c.templateKey;
+    const legacy = cardQrIsLegacy(c);
     setPdfBusy(`card:${c.slug}`);
     try {
       await downloadQrPdf(
-        [{ title: template ? `NFC Card - ${template}` : `NFC Card - ${c.slug}`, url }],
-        `card-${c.slug}.pdf`
+        [{
+          title: legacy
+            ? `Legacy QR - ${template || c.slug}`
+            : template
+              ? `NFC Card - ${template}`
+              : `NFC Card - ${c.slug}`,
+          url,
+        }],
+        `${legacy ? 'legacy-' : ''}card-${c.slug}.pdf`
       );
     } catch (error) {
       console.error('Card QR PDF download failed:', error);
@@ -861,26 +896,46 @@ export default function AdminUserDetailPage() {
                   </div>
 
                   <div className="mt-3 flex gap-3">
-                    {qrDataUrls[c._id] ? (
-                      <div className="shrink-0 text-center">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={qrDataUrls[c._id]} alt={`QR code for card ${c.slug}`} className="h-24 w-24 rounded-lg bg-white p-1" />
-                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy) || !qrDataUrls[c._id]} onClick={() => handleDownloadCardQr(c)} className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink disabled:opacity-50">
-                          <Download className="h-3 w-3" /> PDF
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-lg border border-dashed border-line-subtle px-2 text-center">
-                        <QrCode className="h-5 w-5 text-ink-faint" aria-hidden="true" />
-                        <span className="mt-1 text-[10px] leading-tight text-ink-faint">
-                          {!PUBLIC_BASE_URL
-                            ? 'Public base URL not configured'
-                            : c.routeSlug || c.publicSlug || c.urlAlias || c.slug
-                              ? 'QR unavailable'
-                              : 'No public route'}
-                        </span>
-                      </div>
-                    )}
+                    {(() => {
+                      const permanent = cardPermanentUrl(c);
+                      const legacy = permanent ? null : cardLegacyUrl(c);
+                      const qr = qrDataUrls[c._id];
+                      if (qr) {
+                        return (
+                          <div className="shrink-0 text-center">
+                            {legacy && (
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-warn">
+                                Legacy QR
+                              </p>
+                            )}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={qr} alt={`${legacy ? 'Legacy ' : ''}QR code for card ${c.slug}`} className="h-24 w-24 rounded-lg bg-white p-1" />
+                            <button type="button" title="Download PDF" disabled={Boolean(pdfBusy) || !qr} onClick={() => handleDownloadCardQr(c)} className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink disabled:opacity-50">
+                              <Download className="h-3 w-3" /> PDF
+                            </button>
+                            {legacy && (
+                              <p className="mt-1 max-w-[96px] text-[10px] leading-tight text-ink-faint">
+                                Not the permanent /r URL
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-lg border border-dashed border-line-subtle px-2 text-center">
+                          <QrCode className="h-5 w-5 text-ink-faint" aria-hidden="true" />
+                          <span className="mt-1 text-[10px] leading-tight text-ink-faint">
+                            {!PUBLIC_BASE_URL
+                              ? 'Public base URL not configured'
+                              : permanent
+                                ? 'Permanent QR unavailable'
+                                : legacy
+                                  ? 'Legacy QR unavailable'
+                                  : 'Permanent URL unavailable — legacy card'}
+                          </span>
+                        </div>
+                      );
+                    })()}
                     <dl className="min-w-0 flex-1 space-y-1 text-xs">
                       <div className="flex items-center justify-between gap-2">
                         <dt className="text-ink-mute">UID</dt>
@@ -898,7 +953,7 @@ export default function AdminUserDetailPage() {
                           )}
                         </dd>
                       </div>
-                      {c.permanentEntryUrl && (
+                      {c.permanentEntryUrl ? (
                         <div className="flex items-center justify-between gap-2">
                           <dt className="text-ink-mute">Permanent</dt>
                           <dd className="flex min-w-0 items-center gap-1.5">
@@ -912,6 +967,29 @@ export default function AdminUserDetailPage() {
                               className="shrink-0 text-ink-mute transition-colors hover:text-ink"
                             >
                               {copiedQrId === `perm:${c._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
+                            </button>
+                          </dd>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="text-ink-mute">Permanent</dt>
+                          <dd className="truncate text-ink-faint">URL unavailable — legacy card</dd>
+                        </div>
+                      )}
+                      {!c.permanentEntryUrl && c.legacyEntryUrl && (
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="text-warn">Legacy URL</dt>
+                          <dd className="flex min-w-0 items-center gap-1.5">
+                            <a href={c.legacyEntryUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-warn hover:underline">
+                              {c.legacyEntryUrl}
+                            </a>
+                            <button
+                              type="button"
+                              title="Copy legacy URL"
+                              onClick={() => handleCopyQr(absolutePublicUrl(c.legacyEntryUrl), `legacy:${c._id}`)}
+                              className="shrink-0 text-ink-mute transition-colors hover:text-ink"
+                            >
+                              {copiedQrId === `legacy:${c._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                             </button>
                           </dd>
                         </div>
@@ -1020,7 +1098,7 @@ export default function AdminUserDetailPage() {
                   </button>
                 </div>
 
-                {standee.permanentEntryUrl && (
+                {standee.permanentEntryUrl ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="text-ink-mute uppercase tracking-wide">Permanent</span>
                     <a href={standee.permanentEntryUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-accent-400 hover:underline">
@@ -1033,6 +1111,27 @@ export default function AdminUserDetailPage() {
                       className="text-ink-mute transition-colors hover:text-ink"
                     >
                       {copiedQrId === `standee-perm:${standee._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-ink-mute uppercase tracking-wide">Permanent</span>
+                    <span className="text-ink-faint">URL unavailable — legacy standee</span>
+                  </div>
+                )}
+                {!standee.permanentEntryUrl && standee.legacyEntryUrl && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-warn uppercase tracking-wide">Legacy URL</span>
+                    <a href={standee.legacyEntryUrl} target="_blank" rel="noopener noreferrer" className="inline-block truncate py-1 font-mono text-warn hover:underline">
+                      {standee.legacyEntryUrl}
+                    </a>
+                    <button
+                      type="button"
+                      title="Copy legacy URL"
+                      onClick={() => handleCopyQr(absolutePublicUrl(standee.legacyEntryUrl), `standee-legacy:${standee._id}`)}
+                      className="text-ink-mute transition-colors hover:text-ink"
+                    >
+                      {copiedQrId === `standee-legacy:${standee._id}` ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                     </button>
                   </div>
                 )}
@@ -1055,6 +1154,9 @@ export default function AdminUserDetailPage() {
                 {standee.panelQr ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-ink-mute uppercase tracking-wide mr-1">Panel</span>
+                    {!standee.permanentEntryUrl && (
+                      <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-warn">Legacy QR</span>
+                    )}
                     <div className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
                       <span className="font-mono text-xs text-accent-400">{standee.panelQr.qrId}</span>
                       <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'panel'), standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
@@ -1072,6 +1174,9 @@ export default function AdminUserDetailPage() {
                 {standee.socialQrs && standee.socialQrs.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-ink-mute uppercase tracking-wide mr-1">Social</span>
+                    {!standee.permanentEntryUrl && (
+                      <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-warn">Legacy QR</span>
+                    )}
                     {standee.socialQrs.map((qr, index) => (
                       <div key={qr.qrId} className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
                         <span className="text-xs font-medium text-ink">{qr.label || qr.platform}</span>

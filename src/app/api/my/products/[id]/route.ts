@@ -204,6 +204,9 @@ async function buildProductPayloadWithUrls(loaded: LoadedProduct) {
     eligible: boolean;
     cardKind: string;
     url: string | null;
+    published: boolean;
+    centralSettingsState: 'valid' | 'invalid' | 'missing';
+    centralPublicActive: boolean;
     googleConfigured: boolean;
     aiConfigured: boolean;
     managementUrl: string;
@@ -231,6 +234,9 @@ async function buildProductPayloadWithUrls(loaded: LoadedProduct) {
           eligible: true,
           cardKind: lookup.product.cardKind,
           url: lookup.product.previewUrl,
+          published: lookup.product.reviewAssistantEnabled,
+          centralSettingsState: lookup.product.centralSettingsState,
+          centralPublicActive: lookup.product.centralPublicActive,
           googleConfigured: lookup.product.googleDestinationConfigured,
           aiConfigured,
           managementUrl: `/dashboard/review-management?cardId=${encodeURIComponent(String(loaded.assignment.cardId))}`,

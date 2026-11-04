@@ -24,6 +24,8 @@ export interface VcardSummary {
   _id: string;
   name: string;
   urlAlias: string;
+  kind?: string;
+  publicSlug?: string | null;
   templateKey: string;
   isActive?: boolean;
   profileImageUrl?: string | null;

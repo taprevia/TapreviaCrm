@@ -2,51 +2,20 @@ import type { Metadata } from 'next';
 import { cache } from 'react';
 import { connectDB } from '@/lib/db';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
-import { getInitials, vcardDisplayName } from '@/components/public/hero';
-import { ReviewAssistantFlow } from '@/components/review/review-assistant';
-import { COPY_FLOW_ACTIVE, REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
-import { getReviewLanguageOptions } from '@/lib/services/review-templates';
-import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
-import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
-import type { ResolvedReviewSettings } from '@/lib/services/review-settings-resolver';
-import type { ICard, IReviewAssistantConfig } from '@/types';
+import { vcardDisplayName } from '@/components/public/hero';
+import {
+  ReviewExperience,
+  resolveReviewAccess,
+  type ReviewAccess,
+} from '@/components/review/review-experience';
+import type { ICard } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 type Params = { params: { alias: string } };
 
-function luminance(hex: string): number {
-  const m = hex.replace('#', '');
-  if (m.length !== 6) return 1;
-  const r = parseInt(m.slice(0, 2), 16) / 255;
-  const g = parseInt(m.slice(2, 4), 16) / 255;
-  const b = parseInt(m.slice(4, 6), 16) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/**
- * Language options for the customer-side language selector, strictly derived
- * from the languages actually present on the selected category's active
- * templates (`getReviewLanguageOptions`). If the category has no templates to
- * back them, fall back to the business's configured languages, and only then
- * to 'English' — so the selector is never empty or stuck.
- */
-async function resolveReviewLanguages(config: IReviewAssistantConfig): Promise<string[]> {
-  if (config.category) {
-    const available = await getReviewLanguageOptions(config.category);
-    if (available.length > 0) return available;
-  }
-  const configured = (config.languages ?? [])
-    .map((lang) => lang.trim())
-    .filter((lang) => lang.length > 0);
-  if (configured.length > 0) return configured;
-  return ['English'];
-}
-
-interface OwnerAccess {
+interface OwnerAccess extends ReviewAccess {
   card: ICard;
-  config: ResolvedReviewSettings;
-  languages: string[];
 }
 
 /**
@@ -79,20 +48,9 @@ const resolveOwnerAccess = cache(async (alias: string): Promise<OwnerAccess | nu
   const card = (await getPublicCardByAlias(alias)) as unknown as ICard | null;
   if (!card) return null;
 
-  const ownerId = (card.userId ?? card.assignedUserId) ?? null;
-  if (!ownerId) return null;
-
-  // Product-aware entitlement and effective settings are independent reads.
-  // The public integration gate is handled inside the effective-settings
-  // resolver: while OFF, this is exactly the legacy configuration.
-  const [entitled, effective] = await Promise.all([
-    canUseReviewAssistantForCard(card),
-    resolveEffectiveReviewSettings(card),
-  ]);
-  if (!entitled || !effective.enabled) return null;
-
-  const languages = await resolveReviewLanguages(effective);
-  return { card, config: effective, languages };
+  const access = await resolveReviewAccess(card);
+  if (!access) return null;
+  return { card, ...access };
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -125,57 +83,12 @@ export default async function ReviewPage({ params }: Params) {
   const access = await resolveOwnerAccess(params.alias);
   if (!access) return <Unavailable />;
 
-  const { card, config, languages } = access;
-
-  const accent = /^#[0-9a-fA-F]{6}$/.test(card.themeConfig?.accentColor ?? '')
-    ? card.themeConfig.accentColor
-    : '#2563EB';
-  const bg = /^#[0-9a-fA-F]{6}$/.test(card.themeConfig?.bgColor ?? '')
-    ? card.themeConfig.bgColor
-    : '#FFFFFF';
-  const isDarkBg = luminance(bg) < 0.18;
-
-  const themeVars = {
-    '--v-bg': bg,
-    '--v-accent': accent,
-    // Accent buttons pick dark text on light accents and light text on dark
-    // accents — the same rule PublicCardPage uses.
-    '--v-on-accent': luminance(accent) > 0.45 ? '#0B0F19' : '#FFFFFF',
-    // A dark business background must not produce dark-on-dark text — match
-    // PublicCardPage's dark surface/text/border/border variables.
-    ...(isDarkBg
-      ? {
-          '--v-surface': '#1E293B',
-          '--v-text': '#F8FAFC',
-          '--v-muted': '#94A3B8',
-          '--v-border': '#334155',
-        }
-      : {}),
-  } as React.CSSProperties;
-
-  const name = vcardDisplayName(card);
-  const avatarUrl = card.profileImageUrl?.trim();
-
   return (
-    <div className="vcard-root min-h-screen" style={themeVars}>
-      <ReviewAssistantFlow
-        alias={params.alias.toLowerCase()}
-        businessName={name}
-        avatarUrl={avatarUrl}
-        initials={getInitials(card)}
-        copyFlowEnabled={COPY_FLOW_ACTIVE}
-        rotationEnabled={REVIEW_ROTATION_ACTIVE}
-        config={{
-          googleReviewUrl: config.googleReviewUrl ?? '',
-          welcomeMessage: config.welcomeMessage ?? '',
-          writingStyle: config.writingStyle,
-          preferredLength: config.preferredLength,
-          languages,
-          feedbackTopics: config.feedbackTopics ?? [],
-          styleMode: config.styleMode,
-          lengthMode: config.lengthMode,
-        }}
-      />
-    </div>
+    <ReviewExperience
+      card={access.card}
+      config={access.config}
+      languages={access.languages}
+      alias={params.alias}
+    />
   );
 }

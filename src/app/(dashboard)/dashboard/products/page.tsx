@@ -31,7 +31,9 @@ import {
   Tag,
 } from 'lucide-react';
 import { getStandeePlatformById } from '@/lib/constants';
+import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveProductManageHref } from '@/lib/product-route';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { standeeConfigured, standeeNeedsSetup, unboundCardNeedsSetup } from '@/lib/product-status';
 
 interface SocialQrEntry {
@@ -163,7 +165,7 @@ export default function MyProductsPage() {
   // initial render is identical during SSR and hydration.
   const [origin, setOrigin] = useState('');
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(canonicalPublicBase());
   }, []);
 
   useEffect(() => {
@@ -302,15 +304,26 @@ export default function MyProductsPage() {
               inst?.maxProfiles ??
               inst?.socialQrs?.length;
             const material = MATERIAL_LABEL[product.material ?? ''] ?? null;
-            // One canonical customer-facing URL from the authoritative preview
-            // resolver. Never the internal permanent /r/ (or legacy /c) route.
-            const canonicalHref = product.preview?.ok ? product.preview.href : null;
-            const publicUrlFull = canonicalHref
-              ? canonicalHref.startsWith('http')
-                ? canonicalHref
+            // Customer-facing Public URL only. Review products prefer the
+            // immutable publicSlug (which dispatches to /review/{alias}) and
+            // fall back to the existing review alias route. Everything else
+            // uses the immutable publicSlug (or legacy profile shim). Never the
+            // permanent /r/ route and never a raw external social destination.
+            const publicPath = inst
+              ? inst.kind === 'review'
+                ? product.preview?.ok
+                  ? product.publicUrl ??
+                    resolveCustomerPublicPath({ kind: 'review', urlAlias: inst.urlAlias })
+                  : null
+                : product.publicUrl ??
+                  resolveCustomerPublicPath({ kind: inst.kind, urlAlias: inst.urlAlias })
+              : null;
+            const publicUrlFull = publicPath
+              ? publicPath.startsWith('http')
+                ? publicPath
                 : origin
-                  ? `${origin}${canonicalHref}`
-                  : canonicalHref
+                  ? `${origin}${publicPath}`
+                  : publicPath
               : null;
             const destination = inst ? cardDestination(inst, publicUrlFull) : null;
             const manageHref = resolveProductManageHref(product);

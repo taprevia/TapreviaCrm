@@ -21,6 +21,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { safeExternalUrl } from '@/lib/safe-url';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { downloadVcfForCard } from '@/lib/vcf-download';
 import { brandLabelFromUrl } from '@/utils/get-link-icon';
 import { getBrandIcon } from '@/utils/getBrandIcon';
@@ -615,7 +617,7 @@ function buildData({
     phoneRaw,
     email,
     website,
-    cardUrl: `/profile/${vcard.urlAlias || ''}`,
+    cardUrl: resolveCustomerPublicPath(vcard) ?? '',
     bio: vcard.descriptionHtml?.trim() || null,
     avatarUrl,
     heroUrl,
@@ -655,7 +657,12 @@ export function PanthiEventTemplate({
     [vcard, products],
   );
   const WA_NUMBER = data.phoneRaw;
-  const cardUrl = typeof window !== 'undefined' ? `${window.location.origin}${data.cardUrl}` : data.cardUrl;
+  const publicBase = canonicalPublicBase().replace(/\/+$/, '');
+  const cardUrl = data.cardUrl
+    ? publicBase
+      ? `${publicBase}${data.cardUrl}`
+      : data.cardUrl
+    : '';
   const googleReviewUrl = safeExternalUrl(vcard.reviewAssistant?.googleReviewUrl);
 
   const buildWa = (message: string): string =>
@@ -838,6 +845,7 @@ export function PanthiEventTemplate({
   };
 
   const copyCardLink = async (): Promise<void> => {
+    if (!cardUrl) return;
     try {
       await navigator.clipboard.writeText(cardUrl);
     } catch {

@@ -14,6 +14,7 @@ import {
   resolveStandeePreview,
   resolveProductUrls,
   permanentEntryPath,
+  legacyEntryPath,
 } from '@/lib/services/product-preview';
 
 const DB_NAME = process.env.MONGODB_DB ?? '';
@@ -85,6 +86,11 @@ async function seed() {
   card('review-second', 'review', {
     reviewAssistant: { enabled: true, googleReviewUrl: 'https://example.test/second' },
   });
+  card('review-public', 'review', {
+    publicSlug: 'acme/google-review',
+    routeSlug: 'review-public-route',
+    reviewAssistant: { enabled: true, googleReviewUrl: 'https://example.test/public' },
+  });
 
   await db.collection('users').insertMany([
     { _id: premiumUser, name: 'Premium', email: 'premium@p24.test', role: 'customer', status: 'active', passwordHash: 'x'.repeat(32), createdAt: now, updatedAt: now },
@@ -108,6 +114,7 @@ async function seed() {
     assign('review-central', premiumUser, grcProduct),
     assign('review-disabled', premiumUser, grcProduct),
     assign('review-second', premiumUser, grcProduct),
+    assign('review-public', premiumUser, grcProduct),
     assign('review-lower', lowerUser, businessProduct),
   ]);
   await ReviewSettings.create({
@@ -141,6 +148,10 @@ async function main() {
   await check('legacy enabled review card → /review/{alias}', async () => {
     const r = await resolveCardPreview(cards['review-legacy'] as never);
     assert.deepEqual(r, { ok: true, kind: 'review', href: '/review/review-legacy' });
+  });
+  await check('enabled review card prefers publicSlug for preview', async () => {
+    const r = await resolveCardPreview(cards['review-public'] as never);
+    assert.deepEqual(r, { ok: true, kind: 'review', href: '/acme/google-review' });
   });
   await check('central card with the public integration gate OFF stays setup-required', async () => {
     // Public central reads are gated; with the gate OFF the effective public
@@ -189,19 +200,35 @@ async function main() {
     assert.deepEqual(r, { ok: true, kind: 'standee', href: '/acme/standee' });
   });
 
-  await check('permanent entry path preserves route identifiers', async () => {
+  await check('permanent entry path is strict /r only', async () => {
     assert.equal(permanentEntryPath('card', { routeSlug: 'route-a' }), '/r/route-a');
-    assert.equal(permanentEntryPath('card', { slug: 'legacy-slug' }), '/c/legacy-slug');
+    assert.equal(permanentEntryPath('card', { uid: 'uid-a' }), '/r/uid-a');
+    assert.equal(permanentEntryPath('card', { slug: 'legacy-slug' }), null);
     assert.equal(permanentEntryPath('standee', { routeSlug: 'standee-a' }), '/r/standee-a');
-    assert.equal(permanentEntryPath('standee', { panelQr: { qrId: 'panel-a' } }), '/qr/panel-a');
+    assert.equal(permanentEntryPath('standee', { panelQr: { qrId: 'panel-a' } }), null);
   });
-  await check('unified URL metadata separates canonical and permanent', async () => {
+  await check('review publicSlug changes display but not permanent entry', async () => {
+    const urls = await resolveProductUrls({
+      instanceType: 'card',
+      instance: cards['review-public'] as never,
+    });
+    assert.equal(urls.canonicalPublicUrl, '/acme/google-review');
+    assert.equal(urls.previewUrl, '/acme/google-review');
+    assert.equal(urls.permanentEntryUrl, '/r/review-public-route');
+  });
+  await check('legacy entry path preserves legacy routes separately', async () => {
+    assert.equal(legacyEntryPath('card', { slug: 'legacy-slug' }), '/c/legacy-slug');
+    assert.equal(legacyEntryPath('card', { urlAlias: 'legacy-alias' }), '/profile/legacy-alias');
+    assert.equal(legacyEntryPath('standee', { panelQr: { qrId: 'panel-a' } }), '/qr/panel-a');
+  });
+  await check('unified URL metadata separates canonical, permanent and legacy', async () => {
     const review = await resolveProductUrls({
       instanceType: 'card',
       instance: cards['review-legacy'] as never,
     });
     assert.equal(review.canonicalPublicUrl, '/review/review-legacy');
-    assert.equal(review.permanentEntryUrl, '/c/review-legacy');
+    assert.equal(review.permanentEntryUrl, null);
+    assert.equal(review.legacyEntryUrl, '/c/review-legacy');
     assert.equal(review.previewUrl, '/review/review-legacy');
     assert.equal(review.routeSource, 'review');
     assert.equal(review.configurationStatus, 'ready');
@@ -210,10 +237,12 @@ async function main() {
       instance: cards['profile-slug'] as never,
     });
     assert.equal(profile.canonicalPublicUrl, '/c/profile-slug');
-    assert.equal(profile.permanentEntryUrl, '/c/profile-slug');
+    assert.equal(profile.permanentEntryUrl, null);
+    assert.equal(profile.legacyEntryUrl, '/c/profile-slug');
     const missing = await resolveProductUrls({ instanceType: null, instance: null });
     assert.equal(missing.configurationStatus, 'unassigned');
     assert.equal(missing.canonicalPublicUrl, null);
+    assert.equal(missing.legacyEntryUrl, null);
   });
 
   console.log(`\n${results.length}/${results.length + failed} checks passed`);

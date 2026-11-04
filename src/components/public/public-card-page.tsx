@@ -11,8 +11,9 @@ import { PublicVcardRenderer } from '@/components/public/template-registry';
 import { canUseFeature } from '@/lib/services/feature-access';
 import { getCardReviewEntitlement } from '@/lib/services/review-entitlement';
 import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
-import { isCentralPublicIntegrationEnabledForTenant } from '@/lib/services/review-rollout';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
 
@@ -20,9 +21,24 @@ import type { ICard, IProduct } from '@/types';
  * Social cards never render a profile: record the redirect server-side, then
  * 307 to the configured destination. Invalid/inactive destinations 404.
  */
-async function dispatchSocialCard(card: ICard): Promise<never> {
+function requestOrigin(): string {
+  const h = headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host');
+  const proto = h.get('x-forwarded-proto') ?? 'https';
+  // The request host is the actual redirect origin; the configured base is a
+  // fallback for environments without host headers.
+  return host ? `${proto}://${host}` : canonicalPublicBase();
+}
+
+async function dispatchSocialCard(card: ICard, currentPath?: string): Promise<never> {
   const dest = card.redirectUrl?.trim() ?? '';
   if (!isSafeExternalUrl(dest)) notFound();
+  if (
+    currentPath &&
+    (await wouldRedirectLoop(currentPath, dest, requestOrigin()))
+  ) {
+    notFound();
+  }
 
   // Best-effort analytics: a telemetry failure must never block the visitor's
   // external redirect (fail-open, like all public flows).
@@ -74,9 +90,15 @@ function luminance(hex: string): number {
  * the exact same experience as the legacy profile route (kind dispatch,
  * feature gate, catalog + settings, themed vcard).
  */
-export async function PublicCardPage({ card }: { card: ICard }) {
+export async function PublicCardPage({
+  card,
+  currentPath,
+}: {
+  card: ICard;
+  currentPath?: string;
+}) {
   if (card.kind === 'social') {
-    await dispatchSocialCard(card);
+    await dispatchSocialCard(card, currentPath);
   }
 
   if (card.kind === 'review') {
@@ -103,14 +125,10 @@ export async function PublicCardPage({ card }: { card: ICard }) {
   // to the existing review page. The public profile URL/NFC/QR destination is
   // deliberately unchanged.
   let premiumReviewUrl: string | null = null;
-  const centralRolloutEnabled = isCentralPublicIntegrationEnabledForTenant(ownerId);
-  const couldHostReview =
-    card.kind === 'profile' &&
-    Boolean(card.urlAlias) &&
-    (card.reviewAssistant?.enabled === true ||
-      (centralRolloutEnabled &&
-        (card.reviewSettingsSource === 'central' || card.reviewSettingsSource === 'hybrid')));
-  if (couldHostReview) {
+  // Central-only publication is the authority for the Premium review entry.
+  // The legacy `reviewAssistant.enabled` flag alone must not hide a published
+  // central review experience, and it must not expose an unpublished one.
+  if (card.kind === 'profile' && card.urlAlias) {
     const [entitlement, effectiveReview] = await Promise.all([
       getCardReviewEntitlement(card),
       resolveEffectiveReviewSettings(card),

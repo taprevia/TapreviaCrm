@@ -96,6 +96,10 @@ export interface ReviewProduct {
     keywords?: string[];
   };
   reviewAssistantEnabled: boolean;
+  /** Central settings validity for the owning business. */
+  centralSettingsState: 'valid' | 'invalid' | 'missing';
+  /** Whether the central public integration gate is active for this tenant. */
+  centralPublicActive: boolean;
   googleDestinationConfigured: boolean;
   effectiveGoogleReviewUrl: string;
   standeeGoogleReviewUrl?: string;
@@ -140,6 +144,8 @@ export interface ReviewPreviewResponse {
   hostingEnabled: boolean;
   published: boolean;
   source: ReviewSettingsSource | 'legacy-fallback';
+  centralSettingsState: 'valid' | 'invalid' | 'missing';
+  centralPublicActive: boolean;
   schemaVersion: number;
   entitlement: {
     accountReviewEntitled: boolean;

@@ -2,8 +2,10 @@
  * Authoritative product preview resolver.
  *
  * One place decides what "Preview" means for an assigned Card/Standee:
- *  - review Cards → the real `/review/{alias}` experience when entitlement and
- *    effective saved settings allow it;
+ *  - review Cards → the immutable `/{publicSlug}` branding route when allocated
+ *    (it dispatches to the real `/review/{alias}` experience), otherwise the
+ *    existing `/review/{alias}` route, when entitlement and effective saved
+ *    settings allow it;
  *  - profile Cards → the saved public profile URL (publicSlug → profile → /c/);
  *  - social Cards → their safe configured external destination;
  *  - Standees → the review host when the gate is on/eligible, otherwise the
@@ -61,7 +63,7 @@ const SETUP_MESSAGES: Record<PreviewSetupReason, string> = {
   'missing-alias': 'This Card needs a public alias before it can be previewed.',
   'missing-destination': 'Finish the destination setup before previewing this product.',
   'not-entitled': 'Reviews are not included in this product.',
-  disabled: 'Reviews are disabled for this Card. Enable them in Review Management.',
+  disabled: 'Reviews are not published. Check Review Management for central settings and publication.',
   unsupported: 'This product type does not have a preview.',
 };
 
@@ -92,6 +94,8 @@ export async function resolveCardPreview(
     if (!effective.enabled) {
       return { ok: false, kind: 'card', reason: 'disabled', message: SETUP_MESSAGES.disabled };
     }
+    const publicSlug = (card.publicSlug ?? '').trim().replace(/^\/+/, '');
+    if (publicSlug) return { ok: true, kind: 'review', href: `/${publicSlug}` };
     return { ok: true, kind: 'review', href: `/review/${encodeURIComponent(reviewAlias)}` };
   }
 
@@ -142,6 +146,7 @@ export async function resolveStandeePreview(
 export interface ProductUrlResolution {
   canonicalPublicUrl: string | null;
   permanentEntryUrl: string | null;
+  legacyEntryUrl: string | null;
   previewUrl: string | null;
   productType: 'card' | 'standee';
   routeSource: 'review' | 'profile' | 'social' | 'standee' | 'legacy' | 'none';
@@ -149,26 +154,36 @@ export interface ProductUrlResolution {
 }
 
 /**
- * Permanent physical-entry path. This is admin-only management metadata; it is
- * intentionally not added to customer-facing product APIs.
- *
- * Cards: /r/{routeSlug|uid} → /c/{slug}
- * Standees: /r/{routeSlug|uid} → /qr/{panelQr.qrId}
- * No identifier is generated or rewritten.
+ * Strict Permanent physical-entry path: ONLY the verified `/r` resolver
+ * identifier. `uid` is a supported `/r` identifier. Returns null rather than
+ * substituting a Public or legacy path as Permanent.
  */
 export function permanentEntryPath(
+  _instanceType: 'card' | 'standee',
+  instance: Record<string, unknown> | null | undefined
+): string | null {
+  if (!instance) return null;
+  const route = String(instance.routeSlug ?? instance.uid ?? '').trim();
+  return route ? `/r/${encodeURIComponent(route)}` : null;
+}
+
+/**
+ * Explicitly labelled Legacy path for records without a permanent identifier.
+ * Cards use the established `/c/{slug}` shim (or `/profile/{alias}` when no
+ * slug exists); standees use `/qr/{panelQr.qrId}`.
+ * Never presented as Permanent.
+ */
+export function legacyEntryPath(
   instanceType: 'card' | 'standee',
   instance: Record<string, unknown> | null | undefined
 ): string | null {
   if (!instance) return null;
   if (instanceType === 'card') {
-    const route = String(instance.routeSlug ?? instance.uid ?? '').trim();
-    if (route) return `/r/${encodeURIComponent(route)}`;
     const slug = String(instance.slug ?? '').trim();
-    return slug ? `/c/${encodeURIComponent(slug)}` : null;
+    if (slug) return `/c/${encodeURIComponent(slug)}`;
+    const alias = String(instance.urlAlias ?? '').trim();
+    return alias ? `/profile/${encodeURIComponent(alias)}` : null;
   }
-  const route = String(instance.routeSlug ?? instance.uid ?? '').trim();
-  if (route) return `/r/${encodeURIComponent(route)}`;
   const qrId = String(
     (instance.panelQr as { qrId?: string } | undefined)?.qrId ?? ''
   ).trim();
@@ -184,6 +199,7 @@ export async function resolveProductUrls(input: {
     return {
       canonicalPublicUrl: null,
       permanentEntryUrl: null,
+      legacyEntryUrl: null,
       previewUrl: null,
       productType: 'card',
       routeSource: 'none',
@@ -195,6 +211,7 @@ export async function resolveProductUrls(input: {
       ? await resolveCardPreview(input.instance as never)
       : await resolveStandeePreview(input.instance as never);
   const permanentEntryUrl = permanentEntryPath(input.instanceType, input.instance);
+  const legacyEntryUrl = legacyEntryPath(input.instanceType, input.instance);
   const canonicalPublicUrl = preview.ok ? preview.href : null;
   const kind = String(input.instance.kind ?? '').trim();
   const routeSource: ProductUrlResolution['routeSource'] =
@@ -217,6 +234,7 @@ export async function resolveProductUrls(input: {
   return {
     canonicalPublicUrl,
     permanentEntryUrl,
+    legacyEntryUrl,
     previewUrl: canonicalPublicUrl,
     productType: input.instanceType,
     routeSource,

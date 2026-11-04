@@ -236,27 +236,32 @@ async function main() {
   if (PHASE === 'off-baseline') {
     check('Central OFF: rollout disabled', !allowedCentral && !notAllowedCentral);
     const legacy = await resolved(IDS.legacyCard);
-    check('Central OFF: legacy source remains legacy', legacy.source === 'legacy', legacy.source);
+    check('Central OFF: central content remains authoritative', legacy.source === 'central', legacy.source);
+    check('Central OFF: publication fails closed', legacy.enabled === false, String(legacy.enabled));
     check('Central OFF: legacy URL preserved', legacy.googleReviewUrl.includes('legacy-review'), legacy.googleReviewUrl);
     const legacySuggestions = await suggestionsFor(legacy);
-    check('Central OFF: Engine A uses legacy category', legacySuggestions.some((s) => s.text.includes('Legacy review')), `${legacySuggestions.length} suggestion(s)`);
+    check('Central OFF: Engine A generation is blocked', legacySuggestions.length === 0, `${legacySuggestions.length} suggestion(s)`);
     const legacyPreview = await preview(IDS.legacyAssignment);
     check(
-      'Central OFF: preview shows legacy settings',
+      'Central OFF: preview shows central content but unpublished',
       legacyPreview.status === 200 &&
-        legacyPreview.json?.source === 'legacy' &&
+        legacyPreview.json?.source === 'central' &&
+        legacyPreview.json?.published === false &&
         String(legacyPreview.json?.settings?.googleReviewUrl ?? '').includes('legacy-review'),
-      `status=${legacyPreview.status} source=${legacyPreview.json?.source}`
+      `status=${legacyPreview.status} source=${legacyPreview.json?.source} published=${legacyPreview.json?.published}`
     );
 
     const central = await resolved(IDS.centralCard);
-    check('Central OFF: central source falls back to legacy', central.source === 'legacy', central.source);
+    check('Central OFF: connected central product stays central', central.source === 'central' && central.enabled === false, `${central.source}/${central.enabled}`);
     const hybrid = await resolved(IDS.hybridCard);
-    check('Central OFF: hybrid source falls back to legacy', hybrid.source === 'legacy', hybrid.source);
+    check('Central OFF: hybrid content ignored and publication closed', hybrid.source === 'central' && hybrid.enabled === false && hybrid.welcomeMessage === 'Central welcome', `${hybrid.source}/${hybrid.enabled}/${hybrid.welcomeMessage}`);
+    const notAllowed = await resolved(IDS.notAllowedCard);
+    check('Central OFF: missing central settings fail closed', notAllowed.source === 'legacy-fallback' && notAllowed.enabled === false, `${notAllowed.source}/${notAllowed.enabled}`);
 
     const products = await listEligibleReviewProducts(String(IDS.ownerAllowed));
     const legacyProduct = products.find((p) => p.cardId === String(IDS.legacyCard));
-    check('Central OFF: product list keeps stored legacy source', legacyProduct?.settingsSource === 'legacy', legacyProduct?.settingsSource);
+    check('Central OFF: product list uses central source', legacyProduct?.settingsSource === 'central', legacyProduct?.settingsSource);
+    check('Central OFF: product list is unpublished', legacyProduct?.reviewAssistantEnabled === false, String(legacyProduct?.reviewAssistantEnabled));
     check('Central OFF: ineligible product excluded', products.every((p) => p.cardId !== String(IDS.ineligibleCard)));
 
     const switchCard = await Card.findById(IDS.switchCard).lean<any>();
@@ -265,7 +270,7 @@ async function main() {
       assignmentId: String(IDS.switchAssignment),
       input: { source: 'legacy', revision: switchCard?.reviewSettingsVersion ?? 0 },
     });
-    check('Central OFF: legacy product workflow remains available', switched.ok, switched.ok ? 'ok' : switched.message);
+    check('Central OFF: legacy content workflow rejected', !switched.ok && switched.status === 400, switched.ok ? 'ok' : switched.message);
   }
 
   if (PHASE === 'on') {
@@ -273,15 +278,15 @@ async function main() {
     check('Central ON: non-allowlisted tenant unaffected', !notAllowedCentral);
 
     const legacy = await resolved(IDS.legacyCard);
-    check('Central ON: unconnected legacy product remains legacy', legacy.source === 'legacy', legacy.source);
-    check('Central ON: unconnected legacy URL unchanged', legacy.googleReviewUrl.includes('legacy-review'), legacy.googleReviewUrl);
+    check('Central ON: legacy product uses central content', legacy.source === 'central', legacy.source);
+    check('Central ON: legacy product destination retained', legacy.googleReviewUrl.includes('legacy-review'), legacy.googleReviewUrl);
     const legacySuggestions = await suggestionsFor(legacy);
-    check('Central ON: unconnected legacy Engine A unchanged', legacySuggestions.some((s) => s.text.includes('Legacy review')), `${legacySuggestions.length} suggestion(s)`);
+    check('Central ON: legacy product uses central category', legacySuggestions.some((s) => s.text.includes('Central review')) && !legacySuggestions.some((s) => s.text.includes('Legacy review')), `${legacySuggestions.length} suggestion(s)`);
     const legacyPreview = await preview(IDS.legacyAssignment);
     check(
-      'Central ON: unconnected legacy preview unchanged',
+      'Central ON: legacy preview uses central content and product destination',
       legacyPreview.status === 200 &&
-        legacyPreview.json?.source === 'legacy' &&
+        legacyPreview.json?.source === 'central' &&
         String(legacyPreview.json?.settings?.googleReviewUrl ?? '').includes('legacy-review'),
       `status=${legacyPreview.status} source=${legacyPreview.json?.source}`
     );
@@ -300,20 +305,21 @@ async function main() {
     );
 
     const hybrid = await resolved(IDS.hybridCard);
-    check('Central ON: hybrid overrides preserved', hybrid.source === 'hybrid' && hybrid.welcomeMessage === 'Hybrid override', `${hybrid.source}/${hybrid.welcomeMessage}`);
+    check('Central ON: hybrid content override ignored', hybrid.source === 'central' && hybrid.welcomeMessage === 'Central welcome', `${hybrid.source}/${hybrid.welcomeMessage}`);
+    check('Central ON: hybrid product destination retained', hybrid.googleReviewUrl === 'https://example.test/hybrid-review', hybrid.googleReviewUrl);
     const notAllowed = await resolved(IDS.notAllowedCard);
-    check('Central ON: non-allowlisted tenant stays legacy', notAllowed.source === 'legacy', notAllowed.source);
+    check('Central ON: non-allowlisted tenant fails closed', notAllowed.source === 'legacy-fallback' && notAllowed.enabled === false, `${notAllowed.source}/${notAllowed.enabled}`);
 
     const products = await listEligibleReviewProducts(String(IDS.ownerAllowed));
     const legacyProduct = products.find((p) => p.cardId === String(IDS.legacyCard));
     const centralProduct = products.find((p) => p.cardId === String(IDS.centralCard));
-    check('Central ON: unconnected product list source unchanged', legacyProduct?.settingsSource === 'legacy', legacyProduct?.settingsSource);
+    check('Central ON: legacy product list source is central', legacyProduct?.settingsSource === 'central', legacyProduct?.settingsSource);
     check('Central ON: connected product list source is central', centralProduct?.settingsSource === 'central', centralProduct?.settingsSource);
     check('Central ON: ineligible product remains excluded', products.every((p) => p.cardId !== String(IDS.ineligibleCard)));
 
     const legacyLookup = await getReviewProductForUser(String(IDS.ownerAllowed), String(IDS.legacyAssignment));
     const centralLookup = await getReviewProductForUser(String(IDS.ownerAllowed), String(IDS.centralAssignment));
-    check('Central ON: unconnected product settings unchanged', legacyLookup.ok && legacyLookup.product.settingsSource === 'legacy', legacyLookup.ok ? legacyLookup.product.settingsSource : legacyLookup.reason);
+    check('Central ON: legacy product settings use central', legacyLookup.ok && legacyLookup.product.settingsSource === 'central', legacyLookup.ok ? legacyLookup.product.settingsSource : legacyLookup.reason);
     check('Central ON: connected product settings use central', centralLookup.ok && centralLookup.product.settingsSource === 'central' && centralLookup.product.reviewAssistantEnabled, centralLookup.ok ? centralLookup.product.settingsSource : centralLookup.reason);
 
     const switchBefore = await Card.findById(IDS.centralCard).lean<any>();
@@ -344,22 +350,24 @@ async function main() {
   if (PHASE === 'off-final') {
     check('Central ON → OFF: rollout disabled again', !allowedCentral && !notAllowedCentral);
     const legacy = await resolved(IDS.legacyCard);
-    check('Central ON → OFF: legacy behavior restored', legacy.source === 'legacy' && legacy.googleReviewUrl.includes('legacy-review'), `${legacy.source}/${legacy.googleReviewUrl}`);
+    check('Central ON → OFF: content stays central', legacy.source === 'central' && legacy.googleReviewUrl.includes('legacy-review'), `${legacy.source}/${legacy.googleReviewUrl}`);
+    check('Central ON → OFF: publication fails closed', legacy.enabled === false, String(legacy.enabled));
     const legacySuggestions = await suggestionsFor(legacy);
-    check('Central ON → OFF: Engine A restored to legacy category', legacySuggestions.some((s) => s.text.includes('Legacy review')) && !legacySuggestions.some((s) => s.text.includes('Central review')), `${legacySuggestions.length} suggestion(s)`);
+    check('Central ON → OFF: Engine A generation is blocked', legacySuggestions.length === 0, `${legacySuggestions.length} suggestion(s)`);
     const legacyPreview = await preview(IDS.legacyAssignment);
     check(
-      'Central ON → OFF: preview restores legacy settings',
+      'Central ON → OFF: preview shows central content but unpublished',
       legacyPreview.status === 200 &&
-        legacyPreview.json?.source === 'legacy' &&
+        legacyPreview.json?.source === 'central' &&
+        legacyPreview.json?.published === false &&
         String(legacyPreview.json?.settings?.googleReviewUrl ?? '').includes('legacy-review'),
-      `status=${legacyPreview.status} source=${legacyPreview.json?.source}`
+      `status=${legacyPreview.status} source=${legacyPreview.json?.source} published=${legacyPreview.json?.published}`
     );
 
     const central = await resolved(IDS.centralCard);
-    check('Central ON → OFF: stored central product falls back to legacy', central.source === 'legacy', central.source);
+    check('Central ON → OFF: stored central product stays central and unpublished', central.source === 'central' && central.enabled === false, `${central.source}/${central.enabled}`);
     const hybrid = await resolved(IDS.hybridCard);
-    check('Central ON → OFF: stored hybrid product falls back to legacy', hybrid.source === 'legacy', hybrid.source);
+    check('Central ON → OFF: stored hybrid content ignored and unpublished', hybrid.source === 'central' && hybrid.enabled === false && hybrid.welcomeMessage === 'Central welcome', `${hybrid.source}/${hybrid.enabled}/${hybrid.welcomeMessage}`);
 
     const legacyCard = await Card.findById(IDS.legacyCard).lean<any>();
     check(
@@ -375,7 +383,7 @@ async function main() {
       assignmentId: String(IDS.centralAssignment),
       input: { source: 'legacy', revision: switchCard?.reviewSettingsVersion ?? 0 },
     });
-    check('Central ON → OFF: legacy product workflow re-enabled', switched.ok, switched.ok ? 'ok' : switched.message);
+    check('Central ON → OFF: legacy content workflow remains rejected', !switched.ok && switched.status === 400, switched.ok ? 'ok' : switched.message);
   }
 
   console.log(`\n=== CENTRAL REVIEW ${PHASE.toUpperCase()} ===`);

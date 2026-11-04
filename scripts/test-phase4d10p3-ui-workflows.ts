@@ -495,7 +495,7 @@ async function main() {
     })()`);
     record(
       { id: 'U13', role: 'customer', route: '/dashboard/products', action: 'Customer Google Review Destination link', expected: 'canonical /review/... destination' },
-      destHref === `${BASE}/review/p35-grc`,
+      destHref === `${BASE}/p35/grc`,
       `href=${destHref}`
     );
 

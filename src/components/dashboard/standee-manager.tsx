@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { canonicalPublicBase } from '@/lib/public-base';
 import {
   QrCode,
   Link2,
@@ -97,7 +98,7 @@ export default function StandeeManager({ assignmentId }: { assignmentId?: string
   // initial render is identical during SSR and hydration.
   const [origin, setOrigin] = useState('');
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(canonicalPublicBase());
   }, []);
 
   useEffect(() => {
@@ -289,15 +290,12 @@ export default function StandeeManager({ assignmentId }: { assignmentId?: string
           // pending destination.
           const configuredCount = slots.filter((s) => Boolean(s?.destinationUrl?.trim())).length;
           const allConfigured = slotCount > 0 && configuredCount >= slotCount;
-          // One canonical customer-facing URL from the resolver. The internal
-          // permanent /r/ route is never surfaced in customer management.
-          const canonicalPath = row.preview?.ok ? row.preview.href : row.publicUrl;
-          const publicPanelUrl = canonicalPath
-            ? canonicalPath.startsWith('http')
-              ? canonicalPath
-              : origin
-                ? `${origin}${canonicalPath}`
-                : canonicalPath
+          // Customer-facing Public URL is the immutable standee publicSlug.
+          // The internal permanent /r/ route is never surfaced here.
+          const publicPanelUrl = row.publicUrl
+            ? origin
+              ? `${origin}${row.publicUrl}`
+              : row.publicUrl
             : null;
 
           return (
@@ -394,7 +392,7 @@ export default function StandeeManager({ assignmentId }: { assignmentId?: string
                   </Button>
                 </div>
 
-                {publicPanelUrl && (
+                {publicPanelUrl ? (
                   <button
                     type="button"
 onClick={() => copy(publicPanelUrl, inst.id)}
@@ -408,6 +406,8 @@ onClick={() => copy(publicPanelUrl, inst.id)}
                       <Copy className="h-4 w-4 text-ink-mute" />
                     )}
                   </button>
+                ) : (
+                  <p className="text-xs text-ink-faint">Public URL unavailable</p>
                 )}
               </div>
 

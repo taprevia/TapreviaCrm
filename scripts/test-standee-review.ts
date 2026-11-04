@@ -608,38 +608,30 @@ async function main() {
     const lower = await resolveEntitlement(users.lowerowner._id);
     ok(!lower.capabilities.has('review_ai_suggestions'), 'lower-tier account gained review capability');
   });
-  await check('standee: source strategy uses saved central when public central gate is ON, else product settings', async () => {
+  await check('standee: central-only source strategy fails closed without publication', async () => {
     const host = await resolveStandeeReviewHost('standee-owner-1');
-    if (!EXPECT_STANDEE) {
+    if (!EXPECT_CENTRAL) {
       ok(host === null, 'gate OFF returned a host');
-      return;
-    }
-    ok(host, 'gate ON did not resolve host');
-    if (EXPECT_CENTRAL) {
+    } else {
+      ok(host, 'central ON did not resolve host');
       ok(host?.config.googleReviewUrl === 'https://example.test/standee-google', 'central URL replaced Standee URL');
       ok(host?.config.category === 'standee-cat', 'central category missing');
       ok(host?.config.writingStyle === 'professional', 'central style missing');
-    } else {
-      ok(host?.config.googleReviewUrl === 'https://example.test/standee-google', 'standee URL missing');
-      ok(host?.config.category === '', 'central category applied while central gate OFF');
     }
+    // This standee has no central settings; it must never fall back to legacy
+    // publication.
     const fresh = await resolveStandeeReviewHost('standee-new-1');
-    ok(fresh?.config.googleReviewUrl === 'https://example.test/new-standee-google', 'new standee URL missing');
-    ok(fresh?.config.category === '', 'new standee should use product defaults');
+    ok(fresh === null, 'standee without central settings published');
   });
-  await check('standee: invalid central settings fall back to Standee product settings', async () => {
+  await check('standee: invalid central settings fail closed', async () => {
     if (!EXPECT_STANDEE) return;
     const host = await resolveStandeeReviewHost('standee-invalid-1');
-    ok(host, 'invalid-central standee unavailable');
-    ok(host?.config.googleReviewUrl === 'https://example.test/invalid-standee-google', 'URL lost');
-    if (EXPECT_CENTRAL) {
-      ok(host?.config.category === '', 'invalid central was partially applied');
-    }
+    ok(host === null, 'invalid central settings published the standee host');
   });
 
   // ── Public redirects ──────────────────────────────────────────────────
-  await check('redirects: gate OFF preserves the exact Google destination', async () => {
-    if (EXPECT_STANDEE) return;
+  await check('redirects: without central publication the exact Google destination is preserved', async () => {
+    if (EXPECT_CENTRAL) return;
     const panel = await api('GET', '/r/standee-owner-1');
     const slot = await api('GET', '/r/standee-owner-1/1');
     const social = await api('GET', '/qr/google-standee-owner-1');
@@ -651,8 +643,8 @@ async function main() {
     const host = await api('GET', '/standee-review/standee-owner-1');
     ok(host.status === 200 && host.text.includes(UNAVAILABLE), 'gate OFF host was not unavailable');
   });
-  await check('redirects: gate ON routes existing QR/NFC URLs to the Standee host', async () => {
-    if (!EXPECT_STANDEE) return;
+  await check('redirects: central publication routes existing QR/NFC URLs to the Standee host', async () => {
+    if (!EXPECT_CENTRAL) return;
     for (const [path, label] of [
       ['/r/standee-owner-1', 'panel'],
       ['/r/standee-owner-1/1', 'slot'],
@@ -667,7 +659,7 @@ async function main() {
     ok(page.status === 200 && !page.text.includes(UNAVAILABLE), 'host unavailable');
     ok(page.text.includes('Standee Cafe'), 'business name missing');
     const created = await api('GET', '/standee-review/standee-new-1');
-    ok(created.status === 200 && !created.text.includes(UNAVAILABLE), 'new standee host unavailable');
+    ok(created.status === 200 && created.text.includes(UNAVAILABLE), 'standee without central settings published');
     for (const slug of ['standee-removed-1', 'standee-suspended-1', 'standee-unknown-1', 'standee-nourl-1']) {
       const res = await api('GET', `/standee-review/${slug}`);
       ok(res.status === 200 && res.text.includes(UNAVAILABLE), `${slug} was not blocked`);
@@ -675,8 +667,8 @@ async function main() {
     const human = await api('GET', '/standee-cafe/standee');
     ok(human.status === 200, `human standee URL ${human.status}`);
   });
-  await check('redirects: ineligible standees keep the old destination when gate ON', async () => {
-    if (!EXPECT_STANDEE) return;
+  await check('redirects: ineligible standees keep the old destination when central is ON', async () => {
+    if (!EXPECT_CENTRAL) return;
     const removed = await api('GET', '/r/standee-removed-1');
     ok(
       removed.status === 307 && removed.location === 'https://example.test/removed-standee-google',
@@ -692,11 +684,11 @@ async function main() {
   // ── Public APIs ───────────────────────────────────────────────────────
   let standeeTemplateId = '';
   await check('public API: suggestions respect the gate and settings source', async () => {
-    if (!EXPECT_STANDEE) {
+    if (!EXPECT_CENTRAL) {
       const res = await api('POST', '/api/public/standee-reviews/standee-owner-1/suggestions', {
         body: { language: 'English', length: 'short' },
       });
-      ok(res.status === 404, `gate OFF suggestions ${res.status}`);
+      ok(res.status === 404, `central OFF suggestions ${res.status}`);
       return;
     }
     const res = await api('POST', '/api/public/standee-reviews/standee-owner-1/suggestions', {
@@ -714,7 +706,7 @@ async function main() {
     const fresh = await api('POST', '/api/public/standee-reviews/standee-new-1/suggestions', {
       body: { language: 'English', length: 'short' },
     });
-    ok(fresh.status === 200, `new standee suggestions ${fresh.status}`);
+    ok(fresh.status === 404, `standee without central suggestions ${fresh.status}`);
     const unknown = await api('POST', '/api/public/standee-reviews/not-a-standee/suggestions', {
       body: { language: 'English' },
     });
@@ -873,7 +865,7 @@ async function main() {
     ok(body.settings?.category === 'standee-cat', 'central category missing');
     ok(body.settings?.writingStyle === 'professional', 'central style missing');
   });
-  await check('management: save central then connect Standee central/hybrid/legacy reversibly', async () => {
+  await check('management: central connect and destination-only update preserve the slot', async () => {
     const saved = await api('PATCH', '/api/review-management', {
       user: users.newowner,
       body: {
@@ -904,7 +896,7 @@ async function main() {
     ok(afterCentral.reviewSettingsSource === 'central', 'source not central');
     ok(
       JSON.stringify(afterCentral.socialQrs) === JSON.stringify(before.socialQrs),
-      'standee destinations changed'
+      'standee destinations changed by central connect'
     );
     ok(afterCentral.publicSlug === before.publicSlug, 'public slug changed');
 
@@ -913,11 +905,38 @@ async function main() {
       `/api/review-management/preview?assignmentId=${assignments.newStandee._id}`,
       { user: users.newowner }
     );
-    ok(
-      (previewCentral.json as { settings?: { googleReviewUrl?: string } }).settings?.googleReviewUrl ===
-        'https://example.test/new-standee-google',
-      'central URL replaced Standee URL'
+    const centralBody = previewCentral.json as {
+      published?: boolean;
+      settings?: { googleReviewUrl?: string; category?: string; writingStyle?: string };
+    };
+    ok(centralBody.published === EXPECT_CENTRAL, `central published ${centralBody.published}`);
+    ok(centralBody.settings?.googleReviewUrl === 'https://example.test/new-standee-google', 'central URL replaced Standee URL');
+    ok(centralBody.settings?.category === 'standee-cat', 'central category missing');
+    ok(centralBody.settings?.writingStyle === 'professional', 'central style missing');
+
+    const destination = await api(
+      'PATCH',
+      `/api/review-management/products/${assignments.newStandee._id}`,
+      {
+        user: users.newowner,
+        body: {
+          source: 'destination',
+          revision: 1,
+          destination: { googleReviewUrl: 'https://example.test/new-hybrid-url' },
+        },
+      }
     );
+    ok(destination.status === 200, `destination ${destination.status}: ${destination.text}`);
+    const afterDestination = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
+    ok(afterDestination.reviewSettingsSource === 'central', 'destination changed source');
+    const previewDestination = await api(
+      'GET',
+      `/api/review-management/preview?assignmentId=${assignments.newStandee._id}`,
+      { user: users.newowner }
+    );
+    const destinationSettings = (previewDestination.json as { settings?: Record<string, unknown> }).settings;
+    ok(destinationSettings?.googleReviewUrl === 'https://example.test/new-hybrid-url', 'destination not saved');
+    ok(destinationSettings?.styleMode === 'fixed', 'destination changed central content');
 
     const hybrid = await api(
       'PATCH',
@@ -926,55 +945,24 @@ async function main() {
         user: users.newowner,
         body: {
           source: 'hybrid',
-          revision: 1,
-          overrides: {
-            googleReviewUrl: 'https://example.test/new-hybrid-url',
-            styleMode: 'varied',
-            lengthMode: 'fixed',
-            keywords: ['standee'],
-          },
+          revision: 2,
+          overrides: { enabled: true, keywords: ['standee'] },
         },
       }
     );
-    ok(hybrid.status === 200, `hybrid ${hybrid.status}: ${hybrid.text}`);
-    const previewHybrid = await api(
-      'GET',
-      `/api/review-management/preview?assignmentId=${assignments.newStandee._id}`,
-      { user: users.newowner }
-    );
-    const hybridSettings = (previewHybrid.json as { settings?: Record<string, unknown> }).settings;
-    ok(hybridSettings?.googleReviewUrl === 'https://example.test/new-hybrid-url', 'hybrid URL override missing');
-    ok(hybridSettings?.styleMode === 'varied', 'hybrid style mode missing');
-
-    const hybridNoUrl = await api(
-      'PATCH',
-      `/api/review-management/products/${assignments.newStandee._id}`,
-      { user: users.newowner, body: { source: 'hybrid', revision: 2, overrides: { enabled: true } } }
-    );
-    ok(hybridNoUrl.status === 200, `hybrid no URL ${hybridNoUrl.status}`);
-    const previewNoUrl = await api(
-      'GET',
-      `/api/review-management/preview?assignmentId=${assignments.newStandee._id}`,
-      { user: users.newowner }
-    );
-    ok(
-      (previewNoUrl.json as { settings?: { googleReviewUrl?: string } }).settings?.googleReviewUrl ===
-        'https://example.test/new-standee-google',
-      'URL did not return to Standee destination'
-    );
+    ok(hybrid.status === 400, `hybrid content ${hybrid.status}: ${hybrid.text}`);
 
     const legacy = await api(
       'PATCH',
       `/api/review-management/products/${assignments.newStandee._id}`,
-      { user: users.newowner, body: { source: 'legacy', revision: 3 } }
+      { user: users.newowner, body: { source: 'legacy', revision: 2 } }
     );
-    ok(legacy.status === 200, `legacy ${legacy.status}`);
+    ok(legacy.status === 400, `legacy ${legacy.status}`);
     const afterLegacy = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
-    ok(afterLegacy.reviewSettingsSource === 'legacy', 'source not legacy');
-    ok(afterLegacy.reviewOverrides === undefined, 'overrides not cleared');
+    ok(afterLegacy.reviewSettingsSource === 'central', 'legacy rejected but source changed');
     ok(
-      JSON.stringify(afterLegacy.socialQrs) === JSON.stringify(before.socialQrs),
-      'rollback changed standee destinations'
+      JSON.stringify(afterLegacy.socialQrs) === JSON.stringify(afterDestination.socialQrs),
+      'rejected legacy changed standee destinations'
     );
   });
   await check('management: stale revision, parallel connection and security boundaries', async () => {
@@ -984,20 +972,31 @@ async function main() {
       { user: users.newowner, body: { source: 'central', revision: 0 } }
     );
     ok(stale.status === 409, `stale ${stale.status}`);
+    const current = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
+    const currentRevision =
+      typeof current.reviewSettingsVersion === 'number' ? current.reviewSettingsVersion : 0;
     const [a, b] = await Promise.all([
       api('PATCH', `/api/review-management/products/${assignments.newStandee._id}`, {
         user: users.newowner,
-        body: { source: 'central', revision: 4 },
+        body: {
+          source: 'destination',
+          revision: currentRevision,
+          destination: { googleReviewUrl: 'https://example.test/parallel-a' },
+        },
       }),
       api('PATCH', `/api/review-management/products/${assignments.newStandee._id}`, {
         user: users.newowner,
-        body: { source: 'hybrid', revision: 4, overrides: { keywords: ['parallel'] } },
+        body: {
+          source: 'destination',
+          revision: currentRevision,
+          destination: { googleReviewUrl: 'https://example.test/parallel-b' },
+        },
       }),
     ]);
     const statuses = [a.status, b.status].sort();
     ok(statuses[0] === 200 && statuses[1] === 409, `parallel statuses ${statuses.join(',')}`);
     const card = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
-    ok(card.reviewSettingsVersion === 5, `version ${card.reviewSettingsVersion}`);
+    ok(card.reviewSettingsVersion === currentRevision + 1, `version ${card.reviewSettingsVersion}`);
 
     const unauth = await api('PATCH', `/api/review-management/products/${assignments.newStandee._id}`, {
       body: { source: 'central' },
@@ -1052,24 +1051,32 @@ async function main() {
       { _id: new mongoose.Types.ObjectId(String(standees.newStandee._id)) },
       { $set: { 'reviewOverrides.legacyCustomField': 'keep-standee' } }
     );
+    const standeeBefore = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
+    const revision =
+      typeof standeeBefore.reviewSettingsVersion === 'number'
+        ? standeeBefore.reviewSettingsVersion
+        : 0;
     const res = await api(
       'PATCH',
       `/api/review-management/products/${assignments.newStandee._id}`,
       {
         user: users.newowner,
-        body: { source: 'hybrid', revision: 5, overrides: { keywords: ['kept-standee'] } },
+        body: {
+          source: 'destination',
+          revision,
+          destination: { googleReviewUrl: 'https://example.test/kept-standee-destination' },
+        },
       }
     );
-    ok(res.status === 200, `hybrid update ${res.status}`);
+    ok(res.status === 200, `destination update ${res.status}`);
     const standee = (await Standee.findById(standees.newStandee._id).lean()) as Record<string, unknown>;
     const overrides = standee.reviewOverrides as Record<string, unknown>;
     ok(overrides.legacyCustomField === 'keep-standee', 'unknown override deleted');
-    ok(Array.isArray(overrides.keywords) && overrides.keywords[0] === 'kept-standee', 'known override missing');
   });
 
   // ── AI orchestration (direct service, injected completion) ────────────
   await check('AI: Standee generation uses effective style/length and Standee attribution', async () => {
-    if (!EXPECT_STANDEE) return;
+    if (!EXPECT_STANDEE || !EXPECT_CENTRAL) return;
     const host = await resolveStandeeReviewHost('standee-owner-1');
     ok(host, 'host missing');
     let captured: { system?: string } = {};
@@ -1103,7 +1110,7 @@ async function main() {
   });
   await check('backward compatibility: existing Cards remain unchanged', async () => {
     const page = await api('GET', '/review/standee-cross-card');
-    ok(page.status === 200 && !page.text.includes(UNAVAILABLE), 'Card review page broke');
+    ok(page.status === 200 && page.text.includes(UNAVAILABLE), 'Card review page published without central');
     const lower = await api('GET', '/review/standee-lower-card');
     ok(lower.status === 200 && lower.text.includes(UNAVAILABLE), 'lower Card lost restriction');
     const card = (await Card.findById(cards.cardReview._id).lean()) as Record<string, unknown>;

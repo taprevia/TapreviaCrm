@@ -6,7 +6,7 @@ import UserProduct from '@/models/UserProduct';
 import CatalogProduct from '@/models/CatalogProduct';
 import { deriveCardKind } from '@/lib/services/product-experience';
 import { provisionCardForAssignment, allocateCardRouteSlug, allocateDigitalCardUid, findCardByUid } from '@/lib/services/card-identity';
-import { ensureCardPublicSlug, ensureStandeePublicSlug } from '@/lib/services/human-url';
+import { ensureCardPublicSlug, ensureStandeePublicSlug, getPublicProductSlug } from '@/lib/services/human-url';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { generateQrId } from '@/lib/utils';
 import { generateUniqueTimestampUid } from '@/lib/uid';
@@ -144,6 +144,25 @@ export async function assignUserProduct({
 
       const bindingUid = cardUid ?? (await allocateDigitalCardUid());
 
+      // Snapshot a pre-existing Card before provisioning. If this operation
+      // later fails (for example URL allocation), an already-owned card must
+      // be restored rather than unbound/deactivated.
+      const existingForUid = cardUid ? await findCardByUid(cardUid) : null;
+      const existingSnapshot = existingForUid
+        ? {
+            name: existingForUid.name,
+            cardLabel: existingForUid.cardLabel,
+            kind: existingForUid.kind,
+            setupComplete: existingForUid.setupComplete,
+            reviewSettingsSource: existingForUid.reviewSettingsSource,
+            reviewSettingsVersion: existingForUid.reviewSettingsVersion,
+            userId: existingForUid.userId,
+            assignedUserId: existingForUid.assignedUserId,
+            status: existingForUid.status,
+            isActive: existingForUid.isActive,
+          }
+        : null;
+
       // Provision + bind the card. A physical UID claims/binds directly (no
       // pre-registered inventory required); the synthetic digital UID does the
       // same for hardware-less sales.
@@ -179,6 +198,7 @@ export async function assignUserProduct({
         };
       }
 
+      let createdUserProduct: { _id: unknown } | null = null;
       try {
         // Generate routeSlug if not set (permanent dynamic route identifier).
         if (!assigned.routeSlug) {
@@ -211,6 +231,7 @@ export async function assignUserProduct({
           assignedBy,
           material,
         });
+        createdUserProduct = userProduct;
 
         // Phase 4D.9 concurrency reconciliation: the pre-insert guard above is
         // a read-then-write check, so two simultaneous requests can both pass
@@ -234,21 +255,42 @@ export async function assignUserProduct({
           };
         }
 
-        // Best-effort human-readable URL allocation ("{business}/{product}[-N]").
-        // Idempotent and backfillable — a URL allocation failure must never
-        // fail the product assignment itself.
-        try {
-          await ensureCardPublicSlug(assigned._id, user._id.toString());
-        } catch (error) {
-          console.error('ensureCardPublicSlug failed:', error);
+        // Branded public URL allocation is required for canonical card
+        // products. Never leave a new assignment without its public identity.
+        const allocation = await ensureCardPublicSlug(assigned._id, user._id.toString());
+        if (getPublicProductSlug(catalogItem.slug) && !allocation.assigned) {
+          throw new Error('Could not allocate a branded public URL for this card');
         }
 
         return { ok: true, status: 201, data: { userProduct, card: assigned, cardCreated: provisioned.created } };
       } catch (error) {
+        if (createdUserProduct) {
+          await UserProduct.deleteOne({ _id: createdUserProduct._id }).catch(() => undefined);
+        }
         // Roll back a card we provisioned fresh in this call; a card we only
         // claimed (idempotent path) is released back to the unbound pool.
         if (provisioned.created) {
           await Card.deleteOne({ _id: assigned._id }).catch(() => undefined);
+        } else if (provisioned.wasOwned && existingSnapshot) {
+          // Do not unbind/deactivate a pre-existing customer-owned card.
+          // Restore only the fields this operation may have changed.
+          await Card.updateOne(
+            { _id: assigned._id },
+            {
+              $set: {
+                name: existingSnapshot.name,
+                cardLabel: existingSnapshot.cardLabel,
+                kind: existingSnapshot.kind,
+                setupComplete: existingSnapshot.setupComplete,
+                reviewSettingsSource: existingSnapshot.reviewSettingsSource,
+                reviewSettingsVersion: existingSnapshot.reviewSettingsVersion,
+                userId: existingSnapshot.userId,
+                assignedUserId: existingSnapshot.assignedUserId,
+                status: existingSnapshot.status,
+                isActive: existingSnapshot.isActive,
+              },
+            }
+          ).catch(() => undefined);
         } else {
           await Card.updateOne(
             { _id: assigned._id, assignedUserId: user._id },
@@ -312,6 +354,7 @@ export async function assignUserProduct({
 
       const previousStandy = user.hasStandy;
       user.hasStandy = true;
+      let createdUserProduct: { _id: unknown } | null = null;
       try {
         await user.save();
 
@@ -324,18 +367,19 @@ export async function assignUserProduct({
           notes,
           assignedBy,
         });
+        createdUserProduct = userProduct;
 
-        // Best-effort human-readable URL allocation
-        // ("{business}/standee[-N]"). Idempotent and backfillable — a URL
-        // allocation failure must never fail the product assignment itself.
-        try {
-          await ensureStandeePublicSlug(standee._id, user._id.toString());
-        } catch (error) {
-          console.error('ensureStandeePublicSlug failed:', error);
+        // Branded public URL allocation is required for new standees.
+        const allocation = await ensureStandeePublicSlug(standee._id, user._id.toString());
+        if (!allocation.assigned) {
+          throw new Error('Could not allocate a branded public URL for this standee');
         }
 
         return { ok: true, status: 201, data: { userProduct, standee } };
       } catch (error) {
+        if (createdUserProduct) {
+          await UserProduct.deleteOne({ _id: createdUserProduct._id }).catch(() => undefined);
+        }
         // A standee with no linked UserProduct is an incorrectly claimed item —
         // remove it and restore the legacy hasStandy flag.
         user.hasStandy = previousStandy;

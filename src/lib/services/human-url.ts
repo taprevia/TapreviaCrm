@@ -9,6 +9,8 @@ import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { nextPermUniqueNumber } from '@/lib/services/customer-identity';
 
 const PUBLIC_SLUG_MAX_LENGTH = 100;
+/** Bounded retry budget for concurrent allocation of the same path base. */
+const PUBLIC_SLUG_ALLOCATION_ATTEMPTS = 50;
 
 /**
  * Root-level first segments that must never be produced as a business slug —
@@ -156,6 +158,21 @@ async function countStandeePathOccurrences(
   return Standee.countDocuments({ publicSlug: matcher });
 }
 
+/**
+ * Shared Card/Standee public namespace check. The two collections have
+ * separate sparse unique indexes, so this application-level guard prevents a
+ * new Card and Standee from claiming the same branded path. It does not replace
+ * an index; concurrent cross-collection allocation still needs the existing
+ * retry path.
+ */
+async function publicSlugTaken(publicSlug: string): Promise<boolean> {
+  const [card, standee] = await Promise.all([
+    Card.exists({ publicSlug }),
+    Standee.exists({ publicSlug }),
+  ]);
+  return Boolean(card || standee);
+}
+
 export interface EnsurePublicSlugResult {
   assigned: boolean;
   publicSlug?: string;
@@ -185,6 +202,11 @@ export async function ensureCardPublicSlug(
   } | null;
   const productSlug = getPublicProductSlug(assignment?.catalogProductId?.slug);
   if (!productSlug) return { assigned: false };
+  // Deterministic namespace: a card product segment must never occupy the
+  // reserved standee review namespace.
+  if (STANDEES_RESERVED_PUBLIC_SEGMENTS.has(productSlug)) {
+    throw new Error(`Reserved standee public segment cannot be used by a Card: ${productSlug}`);
+  }
 
   const [user, profile] = await Promise.all([
     User.findById(userId),
@@ -202,10 +224,16 @@ export async function ensureCardPublicSlug(
     resolveBusinessNameSource({ card, user, profile })
   );
 
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    const existing = await countProductPathOccurrences(productSlug, bizSlug);
+  let collisionOffset = 0;
+  for (let attempt = 1; attempt <= PUBLIC_SLUG_ALLOCATION_ATTEMPTS; attempt++) {
+    const existing =
+      (await countProductPathOccurrences(productSlug, bizSlug)) + collisionOffset;
     const productPath = existing === 0 ? productSlug : `${productSlug}-${existing + 1}`;
     const publicSlug = `${bizSlug}/${productPath}`;
+    if (await publicSlugTaken(publicSlug)) {
+      collisionOffset += 1;
+      continue;
+    }
 
     try {
       const result = await Card.updateOne(
@@ -213,11 +241,17 @@ export async function ensureCardPublicSlug(
         { $set: { publicSlug } }
       );
       if (result.modifiedCount === 1) return { assigned: true, publicSlug };
-      // Another request already assigned this card.
-      return { assigned: true, publicSlug: card.publicSlug || publicSlug };
+      // Another request already assigned this card. Return the actual
+      // persisted value, never a locally computed candidate.
+      const fresh = await Card.findById(card._id).select('publicSlug').lean<{
+        publicSlug?: string;
+      } | null>();
+      if (fresh?.publicSlug) return { assigned: true, publicSlug: fresh.publicSlug };
+      collisionOffset += 1;
     } catch (error) {
       if (!isDuplicateKeyError(error)) throw error;
-      // Another card claimed this path concurrently; recount and retry.
+      // Another card claimed this path concurrently; advance and retry.
+      collisionOffset += 1;
     }
   }
   throw new Error('Could not allocate a unique card public slug');
@@ -228,6 +262,12 @@ export async function ensureCardPublicSlug(
  * ("{business-slug}/standee[-N]").
  */
 export const STANDEES_PUBLIC_PRODUCT_SEGMENT = 'standee';
+/** Reserved for the future dedicated standee review URL (Stage E). */
+export const STANDEES_REVIEW_PUBLIC_PRODUCT_SEGMENT = 'review-standee';
+const STANDEES_RESERVED_PUBLIC_SEGMENTS = new Set([
+  STANDEES_PUBLIC_PRODUCT_SEGMENT,
+  STANDEES_REVIEW_PUBLIC_PRODUCT_SEGMENT,
+]);
 
 /**
  * Ensure a standee's public URL ("{business-slug}/standee[-N]") exists
@@ -259,16 +299,20 @@ export async function ensureStandeePublicSlug(
     resolveBusinessNameSource({ user, profile })
   );
 
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    const existing = await countStandeePathOccurrences(
-      STANDEES_PUBLIC_PRODUCT_SEGMENT,
-      bizSlug
-    );
+  let collisionOffset = 0;
+  for (let attempt = 1; attempt <= PUBLIC_SLUG_ALLOCATION_ATTEMPTS; attempt++) {
+    const existing =
+      (await countStandeePathOccurrences(STANDEES_PUBLIC_PRODUCT_SEGMENT, bizSlug)) +
+      collisionOffset;
     const productPath =
       existing === 0
         ? STANDEES_PUBLIC_PRODUCT_SEGMENT
         : `${STANDEES_PUBLIC_PRODUCT_SEGMENT}-${existing + 1}`;
     const publicSlug = `${bizSlug}/${productPath}`;
+    if (await publicSlugTaken(publicSlug)) {
+      collisionOffset += 1;
+      continue;
+    }
 
     try {
       const result = await Standee.updateOne(
@@ -276,11 +320,17 @@ export async function ensureStandeePublicSlug(
         { $set: { publicSlug } }
       );
       if (result.modifiedCount === 1) return { assigned: true, publicSlug };
-      // Another request already assigned this standee.
-      return { assigned: true, publicSlug: standee.publicSlug || publicSlug };
+      // Another request already assigned this standee. Return the actual
+      // persisted value, never a locally computed candidate.
+      const fresh = await Standee.findById(standee._id).select('publicSlug').lean<{
+        publicSlug?: string;
+      } | null>();
+      if (fresh?.publicSlug) return { assigned: true, publicSlug: fresh.publicSlug };
+      collisionOffset += 1;
     } catch (error) {
       if (!isDuplicateKeyError(error)) throw error;
-      // Another standee claimed this path concurrently; recount and retry.
+      // Another standee claimed this path concurrently; advance and retry.
+      collisionOffset += 1;
     }
   }
   throw new Error('Could not allocate a unique standee public slug');

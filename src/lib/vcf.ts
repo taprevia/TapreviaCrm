@@ -8,11 +8,15 @@
  * `userId`, physical serials or `basic.dateOfBirth`, even if this builder is
  * later extended by accident.
  */
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
+
 export interface VcfCardSource {
   _id?: unknown;
   name?: string;
   slug?: string;
   urlAlias?: string;
+  /** Immutable customer-facing public path when allocated. */
+  publicSlug?: string | null;
   occupation?: string;
   profileImageUrl?: string;
   /** Tolerated as absent so a legacy card without the block still exports. */
@@ -156,7 +160,14 @@ export function buildVcf(
   const website = socialLinks.find((l) => l.platform === 'website')?.url;
   if (website) lines.push(`URL:${esc(absoluteUrl(website, base))}`);
 
-  const publicUrl = absoluteUrl(`/profile/${card.urlAlias}`, base);
+  const publicPath =
+    resolveCustomerPublicPath({
+      kind: 'profile',
+      publicSlug: card.publicSlug,
+      urlAlias: card.urlAlias,
+      slug: card.slug,
+    }) ?? `/profile/${card.urlAlias}`;
+  const publicUrl = absoluteUrl(publicPath, base);
   lines.push(`URL;TYPE=profile:${esc(publicUrl)}`);
 
   if (card.profileImageUrl) {

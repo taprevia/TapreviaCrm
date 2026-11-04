@@ -54,6 +54,8 @@ import {
 } from 'react-icons/fa6';
 import { getBrandIcon } from '@/utils/getBrandIcon';
 import { safeExternalUrl } from '@/lib/safe-url';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
 import type { IProduct, IVcard } from '../types';
 import { SafeHtml } from '@/lib/sanitizer';
@@ -164,7 +166,7 @@ function buildData({ vcard, products }: { vcard: IVcard; products: IProduct[] })
     phone2Raw,
     email,
     website,
-    cardUrl: `/profile/${vcard.urlAlias || ''}`,
+    cardUrl: resolveCustomerPublicPath(vcard) ?? '',
     socials,
     products: productItems,
     services,
@@ -451,7 +453,9 @@ export function ProfessionalProfileTemplate({
   };
 
   const copyCardLink = async (): Promise<void> => {
-    const url = `${window.location.origin}${data.cardUrl}`;
+    if (!data.cardUrl) return;
+    const base = canonicalPublicBase().replace(/\/+$/, '');
+    const url = base ? `${base}${data.cardUrl}` : data.cardUrl;
     try {
       await navigator.clipboard.writeText(url);
     } catch {

@@ -9,6 +9,7 @@ import { check } from '@/lib/rate-limit';
 import { fail, rateLimitFailure } from '@/lib/api';
 import { getPublicCardByAlias, isPublicProfileCard } from '@/lib/services/card-access';
 import { toPublicCardDto } from '@/lib/dto/card.dto';
+import { canonicalPublicBase } from '@/lib/public-base';
 import { normalizeVcfContact } from '@/lib/validation/vcf-contact';
 
 export const dynamic = 'force-dynamic';
@@ -101,7 +102,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       });
     }
 
-    const base = request.nextUrl.origin;
+    // Trusted configured public base first; request origin is only a legacy
+    // fallback when no base URL is configured (e.g. local development).
+    const base = canonicalPublicBase() || request.nextUrl.origin;
     // Build the vCard from the public DTO rather than the raw document: this
     // endpoint is anonymous, so the serialised output must not be able to pick
     // up internal fields (userId, physical serials, basic.dateOfBirth) even

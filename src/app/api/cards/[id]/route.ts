@@ -18,6 +18,10 @@ import { getOwnedCard, canEditCardExperience } from '@/lib/services/card-access'
 import { availableTemplatesForUser } from '@/lib/services/template-access';
 import { canUseFeature, featureMax } from '@/lib/services/feature-access';
 import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
+import {
+  CARD_IMMUTABLE_URL_FIELDS,
+  findImmutableUrlChange,
+} from '@/lib/services/url-identity';
 
 type Params = { params: { id: string } };
 
@@ -167,6 +171,22 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const card = result.card;
 
     const body = await request.json().catch(() => null);
+
+    // Permanent/public URL identifiers are assigned once and never editable.
+    // Identical values are tolerated for legacy/idempotent clients.
+    const identityChange = findImmutableUrlChange(
+      body,
+      card as unknown as Record<string, unknown>,
+      CARD_IMMUTABLE_URL_FIELDS
+    );
+    if (identityChange) {
+      return fail(
+        403,
+        'FORBIDDEN',
+        `${identityChange.field} is a permanent URL identifier and cannot be changed.`
+      );
+    }
+
     // Grandfather an unchanged stored review URL: a legacy destination must
     // remain editable even though new writes are restricted to supported
     // Google hosts. Only a CHANGED value is subject to the new policy.
@@ -195,12 +215,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return fail(403, 'FORBIDDEN', 'Card kind is set by product allocation and cannot be changed.');
     }
 
-    if (data.urlAlias && data.urlAlias !== card.urlAlias) {
-      const alias = data.urlAlias;
-      const clash = await Card.findOne({ urlAlias: alias }).lean();
-      if (clash) return fail(409, 'CONFLICT', 'This alias is already taken');
-      card.urlAlias = alias;
-    }
+    // urlAlias is immutable after creation (guarded above and removed from
+    // updateCardSchema). Profile content and destinations remain editable.
 
     // Template switching is limited to the templates granted to the card owner.
     if (data.templateKey) {
@@ -239,6 +255,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       // Product-aware check: a Premium account must not unlock a lower-tier Card.
       if (!(await canUseReviewAssistantForCard(card))) {
         return fail(403, 'FORBIDDEN', 'The AI Review Assistant is not included for this product');
+      }
+      // Central-only: the Card editor may update only the product-specific
+      // Google destination. Legacy content fields are rejected so an old
+      // client cannot store dormant overrides.
+      const contentKeys = Object.keys(data.reviewAssistant).filter(
+        (key) => key !== 'googleReviewUrl'
+      );
+      if (contentKeys.length > 0) {
+        return fail(
+          400,
+          'VALIDATION_ERROR',
+          'Central Review Management controls review content. Only the Google Review destination can be changed here.'
+        );
       }
     }
 

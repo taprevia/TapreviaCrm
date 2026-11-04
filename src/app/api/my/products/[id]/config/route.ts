@@ -9,6 +9,11 @@ import UserProduct from '@/models/UserProduct';
 import { updateProductConfigSchema } from '@/lib/validation/product-config';
 import { isSupportedGoogleReviewUrl } from '@/lib/validation/google-review-url';
 import { hasCapability } from '@/lib/services/capability-access';
+import {
+  CARD_IMMUTABLE_URL_FIELDS,
+  findImmutableStandeeChange,
+  findImmutableUrlChange,
+} from '@/lib/services/url-identity';
 
 type Params = { params: { id: string } };
 
@@ -84,6 +89,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (category === 'card' && assignment.cardId) {
       const card = await Card.findById(assignment.cardId);
       if (!card) return fail(404, 'NOT_FOUND', 'Card not found');
+
+      const identityChange = findImmutableUrlChange(
+        body,
+        card as unknown as Record<string, unknown>,
+        CARD_IMMUTABLE_URL_FIELDS
+      );
+      if (identityChange) {
+        return fail(
+          403,
+          'FORBIDDEN',
+          `${identityChange.field} is a permanent URL identifier and cannot be changed.`
+        );
+      }
 
       // Capability check based on product kind.
       const capMap: Record<string, string> = {
@@ -210,6 +228,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       const standee = await Standee.findById(assignment.standeeId);
       if (!standee) return fail(404, 'NOT_FOUND', 'Standee not found');
 
+      const identityChange = findImmutableStandeeChange(
+        body,
+        standee as unknown as Record<string, unknown>
+      );
+      if (identityChange) {
+        return fail(
+          403,
+          'FORBIDDEN',
+          `${identityChange.field} is a permanent URL identifier and cannot be changed.`
+        );
+      }
+
       // Public display name for the panel/QR picker page.
       if (data.displayName !== undefined) {
         await Standee.updateOne(
@@ -326,6 +356,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // the Card/Standee. When the instance is later linked, pendingConfig is
     // applied to it and cleared (see the admin link flow).
     if (category === 'card' && !assignment.cardId) {
+      const identityChange = findImmutableUrlChange(body, {}, CARD_IMMUTABLE_URL_FIELDS);
+      if (identityChange) {
+        return fail(
+          403,
+          'FORBIDDEN',
+          `${identityChange.field} is assigned when the card is created and cannot be supplied here.`
+        );
+      }
+
       const capMap: Record<string, string> = {
         instagram: 'instagram',
         review: 'google_review',
@@ -409,6 +448,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     if (category === 'standee' && !assignment.standeeId) {
+      const identityChange = findImmutableStandeeChange(body, {});
+      if (identityChange) {
+        return fail(
+          403,
+          'FORBIDDEN',
+          `${identityChange.field} is assigned when the standee is created and cannot be supplied here.`
+        );
+      }
+
       const allowed = await hasCapability(user._id, 'standee');
       if (!allowed) {
         return fail(403, 'FORBIDDEN', 'Your products do not include standee capability');

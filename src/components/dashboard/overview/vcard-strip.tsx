@@ -14,6 +14,7 @@ import { initialsOf } from './helpers';
 import { SectionCard } from './section-card';
 import type { VcardStats, VcardSummary } from './types';
 import type { SectionState } from './use-overview-data';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 
 interface VcardStripCardProps {
   section: SectionState<VcardSummary[]>;
@@ -51,7 +52,9 @@ function VcardTile({ vcard, isNewest }: { vcard: VcardSummary; isNewest: boolean
       {/* Body */}
       <div className="space-y-1 p-3">
         <h3 className="truncate text-sm font-semibold text-ink">{vcard.name}</h3>
-        <p className="truncate font-mono text-xs text-accent-400">/{vcard.urlAlias}</p>
+        <p className="truncate font-mono text-xs text-accent-400">
+          {resolveCustomerPublicPath(vcard) ?? 'Public URL unavailable'}
+        </p>
         <div className="flex items-center gap-2 pt-0.5">
           <span className="flex items-center gap-1 text-xs tabular-nums text-ink-mute">
             <Eye className="h-3.5 w-3.5" aria-hidden="true" />

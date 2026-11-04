@@ -61,8 +61,12 @@ async function createUniqueCardSlug(uid: string): Promise<string> {
   const base = generateSlug(uid.toLowerCase().replace(/_/g, '-')) || `card-${generateQrId(6).toLowerCase()}`;
   let candidate = base;
   let n = 1;
+  // A card's public handle resolves through BOTH `slug` and `urlAlias`
+  // (getPublicCardByAlias / /c). Reserve against both namespaces so a new
+  // slug can never equal a legacy card's alias. The unique `slug` index
+  // remains the final atomic guard for concurrent new-card creation.
   // eslint-disable-next-line no-await-in-loop
-  while (await Card.exists({ slug: candidate })) {
+  while (await Card.exists({ $or: [{ slug: candidate }, { urlAlias: candidate }] })) {
     candidate = `${base}-${n}`;
     n += 1;
   }
@@ -130,7 +134,17 @@ export async function allocateDigitalCardUid(): Promise<string> {
  * customer and the caller must refuse (never silently reassign).
  */
 export type ProvisionCardResult =
-  | { ok: true; card: ReturnType<typeof Card.hydrate>; created: boolean }
+  | {
+      ok: true;
+      card: ReturnType<typeof Card.hydrate>;
+      created: boolean;
+      /**
+       * True when the matched card was already owned by this same customer
+       * before this operation. Callers must not unbind/deactivate it if a
+       * later allocation step fails.
+       */
+      wasOwned: boolean;
+    }
   | { ok: false; status: number; error: string };
 
 export async function provisionCardForAssignment(opts: {
@@ -148,12 +162,15 @@ export async function provisionCardForAssignment(opts: {
 
   let card = await findCardByUid(normalized);
   let created = false;
+  let wasOwned = false;
 
   if (card) {
     const { blocked } = uidConflictForUser(card, opts.userId);
     if (blocked) {
       return { ok: false, status: 409, error: 'This Card UID is already assigned' };
     }
+    const owner = card.assignedUserId ?? card.userId;
+    wasOwned = owner !== null && owner !== undefined && owner.toString() === opts.userId;
   } else {
     const timestampUid = await allocateCardRouteSlug();
     card = await Card.create({
@@ -191,5 +208,5 @@ export async function provisionCardForAssignment(opts: {
   }
   await card.save();
 
-  return { ok: true, card, created };
+  return { ok: true, card, created, wasOwned };
 }

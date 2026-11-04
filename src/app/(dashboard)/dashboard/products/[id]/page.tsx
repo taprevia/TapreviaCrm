@@ -34,6 +34,8 @@ import {
 } from 'lucide-react';
 import StandeeManager from '@/components/dashboard/standee-manager';
 import { isSafeExternalUrl } from '@/lib/safe-url';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { shouldShowPremiumReviewSection } from '@/lib/services/review-ui';
 
 interface ProductInstanceData {
@@ -104,6 +106,9 @@ interface ProductDetailResponse {
     eligible: boolean;
     cardKind: string;
     url: string | null;
+    published: boolean;
+    centralSettingsState: 'valid' | 'invalid' | 'missing';
+    centralPublicActive: boolean;
     googleConfigured: boolean;
     aiConfigured: boolean;
     managementUrl: string;
@@ -298,18 +303,32 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
   // initial render is identical during SSR and hydration.
   const [origin, setOrigin] = useState('');
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(canonicalPublicBase());
   }, []);
 
-  // Domain-qualified public link for the customer's product — the payload used
-  // when a card/QR is encoded or shared.
-  const canonicalPublicUrl = data?.canonicalPublicUrl ?? data?.publicUrl ?? null;
-  const publicUrlFull = canonicalPublicUrl
-    ? canonicalPublicUrl.startsWith('http')
-      ? canonicalPublicUrl
+  // Customer-facing Public URL only. Review products prefer the immutable
+  // publicSlug (which dispatches to /review/{alias}) and fall back to the
+  // existing review alias route. Everything else uses the immutable publicSlug
+  // (or legacy profile shim). The permanent /r/ route and raw external social
+  // destinations are never displayed or copied here.
+  const publicPath = data?.instance
+    ? data.instance.kind === 'review'
+      ? data.review?.published
+        ? data.canonicalPublicUrl ??
+          resolveCustomerPublicPath({ kind: 'review', urlAlias: data.instance.urlAlias })
+        : null
+      : data.publicUrl ??
+        resolveCustomerPublicPath({
+          kind: data.instance.kind,
+          urlAlias: data.instance.urlAlias,
+        })
+    : null;
+  const publicUrlFull = publicPath
+    ? publicPath.startsWith('http')
+      ? publicPath
       : origin
-        ? `${origin}${canonicalPublicUrl}`
-        : canonicalPublicUrl
+        ? `${origin}${publicPath}`
+        : publicPath
     : null;
 
   const reviewSection =
@@ -329,12 +348,21 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
   // need a valid external destination URL. Profile cards and standees always
   // render, so they remain live. Null = live; otherwise the neutral message
   // replacing the copyable link until the destination goes live.
-  const publicUrlPendingReason =
-    isReview && data?.instance?.reviewAssistant?.enabled !== true
-      ? 'This URL goes live once you enable reviews in Review Management.'
-      : isSocial && !isSafeExternalUrl(data?.instance?.redirectUrl ?? '')
-        ? 'This URL goes live once you set a destination link.'
-        : null;
+  const publicUrlPendingReason = isReview
+    ? !data?.review
+      ? 'Review Management is not available for this product.'
+      : data.review.centralSettingsState === 'missing'
+        ? 'Unpublished — Central Review Settings are not configured.'
+        : data.review.centralSettingsState === 'invalid'
+          ? 'Unpublished — Central Review Settings are invalid.'
+          : !data.review.centralPublicActive
+            ? 'Unpublished — Central Review Disabled.'
+            : !data.review.published
+              ? 'Unpublished — Reviews Disabled in Review Management.'
+              : null
+    : isSocial && !isSafeExternalUrl(data?.instance?.redirectUrl ?? '')
+      ? 'This URL goes live once you set a destination link.'
+      : null;
 
   // Instagram/Insta Card identity comes from the ASSIGNED PRODUCT (slug), never
   // from whether an instagramConfig already exists. Seeded slug is "insta-card"
@@ -474,6 +502,20 @@ export default function ProductConfigPage({ params }: { params: { id: string } }
           </Badge>
         )}
       </div>
+
+      {/* Publication status when a review page is intentionally not public. */}
+      {isReview && publicUrlPendingReason && !publicUrlFull && (
+        <Card className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-2">
+          <h2 className="text-base font-semibold text-ink flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-400" />
+            Publication Status
+          </h2>
+          <p className="text-sm text-ink-mute">{publicUrlPendingReason}</p>
+          <p className="text-xs text-ink-faint">
+            The legacy review route remains available internally for compatibility and preview.
+          </p>
+        </Card>
+      )}
 
       {/* Public URL display */}
       {publicUrlFull && (

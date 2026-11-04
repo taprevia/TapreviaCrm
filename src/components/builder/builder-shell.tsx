@@ -33,6 +33,7 @@ import { resolveActiveBuilderTab } from '@/lib/builder-tab-state';
 import { BuilderContext, type BuilderContextValue } from './context';
 import { PreviewPanel, vcardDisplayName } from './preview-panel';
 import { resolveCardDisplayName } from '@/lib/card-display';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { BasicTab } from './tabs/basic-tab';
 import { AboutTab } from './tabs/about-tab';
 import { CoverTab } from './tabs/cover-tab';
@@ -183,17 +184,9 @@ function cardPublicPath(draft: {
   urlAlias?: string;
   redirectUrl?: string | null;
 }): string {
-  const kind = (draft.kind ?? 'profile').trim();
-  const alias = (draft.urlAlias ?? '').trim();
-  const publicSlug = (draft.publicSlug ?? '').trim();
-  // One canonical customer-facing URL per product; never the permanent /r//c.
-  if (kind === 'review') return alias ? `/review/${alias}` : '/';
-  if (kind === 'social') {
-    const redirect = (draft.redirectUrl ?? '').trim();
-    return redirect ? redirect : '/';
-  }
-  if (publicSlug) return `/${publicSlug}`;
-  return alias ? `/profile/${alias}` : '/';
+  // One canonical customer-facing Public URL per product; never the permanent
+  // /r/ route and never a raw external social destination.
+  return resolveCustomerPublicPath(draft) ?? '/';
 }
 
 /* ─── Status chip ───────────────────────────────────────────────────────────── */
@@ -382,7 +375,7 @@ export function BuilderShell({ id }: BuilderShellProps) {
         return <SocialDestinationTab />;
       case 'basic':
       default:
-        return <BasicTab cardId={id} />;
+        return <BasicTab />;
     }
   };
 

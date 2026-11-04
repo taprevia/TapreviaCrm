@@ -1,24 +1,26 @@
 'use client';
 
 /**
- * Basic tab — identity fields, contact row and the public URL alias picker.
+ * Basic tab — identity fields, contact row and the immutable public URL.
  *
  * Note: `website` has no dedicated field on ICard.basic; publicly it is the
  * `socialLinks` row whose platform is website-ish (see public/template-registry.tsx
  * websiteHref). This tab therefore reads/writes that row so the builder matches
  * what actually renders.
+ *
+ * The public URL is assigned once during creation and is read-only here. No
+ * profile-content edit can change it.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
-import { Check, Loader2, X } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { useBuilder } from '../context';
 import { cn } from '@/lib/utils';
-
-/* Same rule as aliasSchema / check-alias ALIAS_FORMAT_RE — client-side
- * pre-validation avoids pointless network probes for obviously bad input. */
-const ALIAS_RE = /^[a-z0-9][a-z0-9-]{2,39}$/;
+import { canonicalPublicBase } from '@/lib/public-base';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 
 const WEBSITE_PLATFORMS = new Set(['website', 'site', 'web', 'blog', 'portfolio']);
 
@@ -45,79 +47,25 @@ function Field({
   );
 }
 
-type AliasStatus =
-  | { kind: 'idle' }
-  | { kind: 'checking' }
-  | { kind: 'available' }
-  | { kind: 'taken'; suggestion?: string }
-  | { kind: 'reserved' }
-  | { kind: 'invalid' };
-
-interface BasicTabProps {
-  cardId: string;
-}
-
-export function BasicTab({ cardId }: BasicTabProps) {
+export function BasicTab() {
   const { draft, setField } = useBuilder();
   const basic = draft.basic;
+  const publicPath = resolveCustomerPublicPath(draft);
+  const publicBase = canonicalPublicBase().replace(/\/+$/, '');
+  const publicUrl = publicPath ? (publicBase ? `${publicBase}${publicPath}` : publicPath) : '';
 
-  /* ── URL alias ── */
-  // null ⇒ untouched; render the persisted alias instead of an empty box.
-  const [aliasInput, setAliasInput] = useState<string | null>(null);
-  const [status, setStatus] = useState<AliasStatus>({ kind: 'idle' });
-  const loadedAliasRef = useRef(draft.urlAlias);
-
-  useEffect(() => {
-    loadedAliasRef.current = draft.urlAlias;
-  }, [draft.urlAlias]);
-
-  const aliasValue = aliasInput ?? loadedAliasRef.current ?? '';
-
-  useEffect(() => {
-    const candidate = aliasValue.trim().toLowerCase();
-    const baseline = (loadedAliasRef.current ?? '').trim().toLowerCase();
-
-    if (!candidate || candidate === baseline) {
-      setStatus({ kind: 'idle' });
-      return;
+  /* ── Immutable public URL ── */
+  const [copied, setCopied] = useState(false);
+  const copyPublicUrl = async () => {
+    if (!publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* Clipboard may be unavailable; the URL is still visible. */
     }
-    if (!ALIAS_RE.test(candidate)) {
-      setStatus({ kind: 'invalid' });
-      return;
-    }
-
-    setStatus({ kind: 'checking' });
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `/api/cards/check-alias?alias=${encodeURIComponent(candidate)}&excludeId=${encodeURIComponent(cardId)}`,
-          { signal: controller.signal }
-        );
-        const data = (await res.json().catch(() => null)) as
-          | { available?: boolean; suggestion?: string; reason?: string }
-          | null;
-        if (!res.ok || !data) throw new Error('alias check failed');
-        if (data.available) setStatus({ kind: 'available' });
-        else if (data.reason === 'RESERVED') setStatus({ kind: 'reserved' });
-        else setStatus({ kind: 'taken', suggestion: data.suggestion });
-      } catch (error) {
-        if ((error as Error)?.name !== 'AbortError') setStatus({ kind: 'idle' });
-      }
-    }, 500);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [aliasValue, cardId]);
-
-  // Persist only a valid, changed alias — autosave picks it up like any field.
-  useEffect(() => {
-    if (status.kind !== 'available') return;
-    const candidate = aliasValue.trim().toLowerCase();
-    if (candidate && candidate !== draft.urlAlias) setField('urlAlias', candidate);
-  }, [status.kind, aliasValue, draft.urlAlias, setField]);
+  };
 
   /* ── Website row inside socialLinks ── */
   const websiteRow = (draft.socialLinks ?? []).find((link) =>
@@ -224,70 +172,36 @@ export function BasicTab({ cardId }: BasicTabProps) {
         </Field>
       </div>
 
-      {/* ── Public URL alias ── */}
-      <div>
-        <label htmlFor="basic-urlAlias" className="mb-1.5 block text-sm font-medium text-ink-mute">
-          Profile URL
-        </label>
-        <div className="relative">
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm text-ink-faint"
-          >
-            /profile/
-          </span>
+      {/* ── Public URL (immutable) ── */}
+      <Field label="Public URL" htmlFor="basic-urlAlias">
+        <div className="flex items-center gap-2">
           <Input
             id="basic-urlAlias"
-            className={cn(darkInput, 'pl-[4.6rem] font-mono text-[13px]')}
+            className={cn(darkInput, 'min-w-0 flex-1 cursor-default font-mono text-[13px]')}
             spellCheck={false}
             autoComplete="off"
-            maxLength={40}
-            value={aliasValue}
-            onChange={(event) => setAliasInput(event.target.value)}
-            aria-describedby="basic-urlAlias-status"
+            value={publicUrl}
+            readOnly
+            aria-readonly="true"
+            aria-describedby="basic-urlAlias-help"
+            placeholder="Public URL unavailable"
           />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={copyPublicUrl}
+            disabled={!publicUrl}
+            title="Copy public URL"
+            aria-label="Copy public URL"
+          >
+            {copied ? <Check className="h-4 w-4 text-ok" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+          </Button>
         </div>
-        <p id="basic-urlAlias-status" className="mt-1.5 flex min-h-[1.25rem] items-center gap-1.5 text-xs" aria-live="polite">
-          {status.kind === 'checking' && (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
-              <span className="text-ink-faint">Checking availability…</span>
-            </>
-          )}
-          {status.kind === 'available' && (
-            <>
-              <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-              <span className="text-emerald-400">Available</span>
-            </>
-          )}
-          {status.kind === 'taken' && (
-            <>
-              <X className="h-3.5 w-3.5 text-red-400" aria-hidden="true" />
-              <span className="text-red-400">Taken</span>
-              {status.suggestion && (
-                <button
-                  type="button"
-                  onClick={() => setAliasInput(status.suggestion!)}
-                  className="ml-1 rounded-full border border-dashed border-line-strong px-2 py-0.5 font-mono text-[11px] text-ink-mute transition-colors hover:border-accent-500 hover:text-accent-400"
-                >
-                  Use “{status.suggestion}”
-                </button>
-              )}
-            </>
-          )}
-          {status.kind === 'reserved' && (
-            <>
-              <X className="h-3.5 w-3.5 text-red-400" aria-hidden="true" />
-              <span className="text-red-400">This alias is reserved</span>
-            </>
-          )}
-          {status.kind === 'invalid' && (
-            <span className="text-warn">
-              3–40 characters: lowercase letters, numbers, hyphens (no leading/trailing hyphen)
-            </span>
-          )}
+        <p id="basic-urlAlias-help" className="mt-1.5 text-xs text-ink-faint">
+          Assigned when this card was created. This public URL cannot be changed.
         </p>
-      </div>
+      </Field>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Search, Users } from 'lucide-react';
 import { Button, EmptyState, Input, Select } from '@/components/ui';
 import { relativeTime } from '@/lib/relative-time';
+import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import type {
   ApiErrorBody,
   ListMeta,
@@ -261,16 +262,24 @@ export default function SubscribersPage() {
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="block truncate text-ink-mute">{subscriber.card.name}</span>
-                      {subscriber.card.urlAlias && (
-                        <a
-                          href={`/profile/${subscriber.card.urlAlias}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block max-w-fit truncate font-mono text-xs text-accent-400 hover:underline"
-                        >
-                          /{subscriber.card.urlAlias}
-                        </a>
-                      )}
+                      {(() => {
+                        const publicPath = resolveCustomerPublicPath(subscriber.card);
+                        if (!publicPath) {
+                          return (
+                            <span className="block text-xs text-ink-faint">Public URL unavailable</span>
+                          );
+                        }
+                        return (
+                          <a
+                            href={publicPath}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block max-w-fit truncate font-mono text-xs text-accent-400 hover:underline"
+                          >
+                            {publicPath}
+                          </a>
+                        );
+                      })()}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3.5 text-xs text-ink-faint">
                       {relativeTime(subscriber.createdAt)}

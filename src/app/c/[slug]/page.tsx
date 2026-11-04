@@ -6,6 +6,8 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import { clientIpFromHeaders } from '@/lib/request-ip';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +50,13 @@ async function recordShimTap(
   }
 }
 
+function appOrigin(): string {
+  const h = headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host');
+  const proto = h.get('x-forwarded-proto') ?? 'https';
+  return host ? `${proto}://${host}` : canonicalPublicBase();
+}
+
 export default async function LegacyCardPage({ params }: Params) {
   await connectDB();
   const slug = params.slug.toLowerCase();
@@ -58,8 +67,12 @@ export default async function LegacyCardPage({ params }: Params) {
     .select('urlAlias slug status')
     .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
   if (direct) {
+    const destination = `/profile/${encodeURIComponent(direct.urlAlias || direct.slug)}`;
+    if (await wouldRedirectLoop(`/c/${encodeURIComponent(slug)}`, destination, appOrigin())) {
+      notFound();
+    }
     await recordShimTap(direct._id, slug, direct.status === 'active');
-    redirect(`/profile/${direct.urlAlias || direct.slug}`);
+    redirect(destination);
   }
 
   const card = await Card.findOne(
@@ -68,8 +81,12 @@ export default async function LegacyCardPage({ params }: Params) {
     .select('urlAlias slug status')
     .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
   if (card) {
+    const destination = `/profile/${encodeURIComponent(card.urlAlias || card.slug)}`;
+    if (await wouldRedirectLoop(`/c/${encodeURIComponent(slug)}`, destination, appOrigin())) {
+      notFound();
+    }
     await recordShimTap(card._id, slug.toUpperCase(), card.status === 'active');
-    redirect(`/profile/${card.urlAlias || card.slug}`);
+    redirect(destination);
   }
 
   notFound();

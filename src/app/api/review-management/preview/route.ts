@@ -93,15 +93,17 @@ export async function GET(request: NextRequest) {
         previewAvailable: product.previewAvailable,
         previewUrl: product.previewUrl,
         hostingEnabled: product.hostingEnabled,
-        published: resolved.enabled,
-        source: resolved.source,
+        published: product.reviewAssistantEnabled,
+        source: product.settingsSource,
+        centralSettingsState: product.centralSettingsState,
+        centralPublicActive: product.centralPublicActive,
         schemaVersion: resolved.schemaVersion,
         entitlement: {
           accountReviewEntitled: product.accountReviewEntitled,
           productGrantsReview: product.productGrantsReview,
         },
         settings: {
-          enabled: resolved.enabled,
+          enabled: product.reviewAssistantEnabled,
           googleReviewUrl: resolved.googleReviewUrl,
           welcomeMessage: resolved.welcomeMessage,
           category: resolved.category,
@@ -134,8 +136,12 @@ export async function GET(request: NextRequest) {
       card: { reviewAssistant: card.reviewAssistant },
       centralSettings: source === 'legacy' ? undefined : centralSettings,
       source,
-      overrides: card.reviewOverrides,
+      // Central-only: content overrides never affect the preview.
+      overrides: undefined,
     });
+    const effective = product.effectiveGoogleReviewUrl
+      ? { ...resolved, googleReviewUrl: product.effectiveGoogleReviewUrl }
+      : resolved;
 
     const alias = (card.urlAlias ?? '').trim();
 
@@ -148,27 +154,29 @@ export async function GET(request: NextRequest) {
       previewAvailable: product.previewAvailable,
       previewUrl: alias ? `/review/${encodeURIComponent(alias)}` : null,
       hostingEnabled: true,
-      published: resolved.enabled,
-      source: resolved.source,
-      schemaVersion: resolved.schemaVersion,
+      published: product.reviewAssistantEnabled,
+      source: product.settingsSource,
+      centralSettingsState: product.centralSettingsState,
+      centralPublicActive: product.centralPublicActive,
+      schemaVersion: effective.schemaVersion,
       entitlement: {
         accountReviewEntitled: product.accountReviewEntitled,
         productGrantsReview: product.productGrantsReview,
       },
       settings: {
-        enabled: resolved.enabled,
-        googleReviewUrl: resolved.googleReviewUrl,
-        welcomeMessage: resolved.welcomeMessage,
-        category: resolved.category,
-        languages: resolved.languages,
-        writingStyle: resolved.writingStyle,
-        preferredLength: resolved.preferredLength,
-        styleMode: resolved.styleMode,
-        lengthMode: resolved.lengthMode,
-        feedbackTopics: resolved.feedbackTopics,
-        services: resolved.services,
-        employees: resolved.employees,
-        keywords: resolved.keywords,
+        enabled: product.reviewAssistantEnabled,
+        googleReviewUrl: effective.googleReviewUrl,
+        welcomeMessage: effective.welcomeMessage,
+        category: effective.category,
+        languages: effective.languages,
+        writingStyle: effective.writingStyle,
+        preferredLength: effective.preferredLength,
+        styleMode: effective.styleMode,
+        lengthMode: effective.lengthMode,
+        feedbackTopics: effective.feedbackTopics,
+        services: effective.services,
+        employees: effective.employees,
+        keywords: effective.keywords,
       },
     });
   } catch (error) {

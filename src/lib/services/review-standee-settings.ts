@@ -324,9 +324,15 @@ export async function resolveStandeeReviewHost(
     standee.reviewSettingsSource,
     Boolean(central)
   );
-  const source = resolveEffectiveReviewSettingsSource(storedSource, rollout.effective, {
-    forceAll: isLocalCentralReviewForceAllEnabled(),
-  });
+  // Central authority: when integration is active and a central document
+  // exists, ignore the standee's stored source/overrides for content. The
+  // standee's Google slot remains the product-specific destination.
+  const centralAuthority = rollout.effective && Boolean(central);
+  const source = centralAuthority
+    ? 'central'
+    : resolveEffectiveReviewSettingsSource(storedSource, rollout.effective, {
+        forceAll: isLocalCentralReviewForceAllEnabled(),
+      });
   if (source !== 'legacy' || requestedCentralSource) {
     const allowed = rollout.effective && source !== 'legacy';
     emitReviewEvent({
@@ -343,7 +349,11 @@ export async function resolveStandeeReviewHost(
     source,
     centralSettings: central ?? undefined,
   });
-  if (!config.enabled) return null;
+  // Central-only publication: a Standee may serve the review host only when
+  // the integration rollout is active, a valid central document resolved, and
+  // central publication is enabled. Gate OFF, missing central, invalid central
+  // and legacy fallback all fail closed.
+  if (!centralAuthority || config.source !== 'central' || !config.enabled) return null;
 
   const languages = config.category
     ? await getReviewLanguageOptions(config.category)
@@ -378,7 +388,12 @@ export async function isStandeeReviewHostEligible(
   standee: StandeeReviewRecord
 ): Promise<boolean> {
   if (!STANDEE_REVIEW_ASSISTANT_ENABLED) return false;
-  return Boolean(await resolveStandeeReviewProduct(standee));
+  const route = (standee.routeSlug ?? standee.uid ?? '').trim();
+  if (!route) return false;
+  // Use the same central-only publication gate as the public host. If the
+  // review host is not actually publishable, /r must keep the standee's
+  // existing destination instead of sending visitors to an unavailable page.
+  return Boolean(await resolveStandeeReviewHost(route));
 }
 
 export function standeeHasGoogleReviewSlot(standee: StandeeReviewRecord): boolean {
