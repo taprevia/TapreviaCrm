@@ -326,7 +326,10 @@ export default function MyProductsPage() {
                   : publicPath
               : null;
             const destination = inst ? cardDestination(inst, publicUrlFull) : null;
-            const manageHref = resolveProductManageHref(product);
+            const manageHref =
+              product.instanceType === 'standee' && product.assignmentId
+                ? `/dashboard/products/${product.assignmentId}`
+                : resolveProductManageHref(product);
 
             return (
               <Card

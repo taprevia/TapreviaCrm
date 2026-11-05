@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard, Users, Eye, Package, QrCode, Tag, Pencil, KeyRound, ChevronDown } from 'lucide-react';
+import { Search, Download, ShieldCheck, ShieldOff, Trash2, UserPlus, CreditCard, Users, Eye, EyeOff, Package, QrCode, Tag, Pencil, KeyRound, ChevronDown } from 'lucide-react';
 import { STANDEE_PLATFORMS, getStandeePlatformById } from '@/lib/constants';
 import { getFixedStandeeProfiles } from '@/config/products';
 import { isPasswordCompliant, PASSWORD_POLICY_MESSAGE } from '@/lib/auth/password-policy';
@@ -62,6 +62,7 @@ export default function AdminUsersPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', urlSlug: '' });
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogProductLite[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [productCardUids, setProductCardUids] = useState<Record<string, string>>({});
@@ -158,6 +159,7 @@ export default function AdminUsersPage() {
     setProductPlatforms({});
     setSkipCardUids({});
     setFormError('');
+    setShowCreatePassword(false);
     setShowCreateModal(true);
     fetchActiveCatalog();
   };
@@ -223,6 +225,7 @@ export default function AdminUsersPage() {
         return;
       }
 
+      setShowCreatePassword(false);
       setShowCreateModal(false);
       fetchUsers();
     } catch (error) {
@@ -630,7 +633,14 @@ export default function AdminUsersPage() {
         </div>
       </Card>
 
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create Customer Account">
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => {
+          setShowCreatePassword(false);
+          setShowCreateModal(false);
+        }}
+        title="Create Customer Account"
+      >
         <div className="space-y-4">
           {formError && (
             <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 ring-1 ring-red-200">{formError}</div>
@@ -665,14 +675,32 @@ export default function AdminUsersPage() {
             required
           />
 
-          <Input
-            label="Password"
-            type="password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            placeholder="8+ characters incl. letter and number"
-            required
-          />
+          <div className="relative">
+            <Input
+              label="Password"
+              type={showCreatePassword ? 'text' : 'password'}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="8+ characters incl. letter and number"
+              className="pr-10"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowCreatePassword((visible) => !visible)}
+              aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showCreatePassword}
+              title={showCreatePassword ? 'Hide password' : 'Show password'}
+              onMouseDown={(event) => event.preventDefault()}
+              className="absolute bottom-1.5 right-2 inline-grid h-7 w-7 place-items-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            >
+              {showCreatePassword ? (
+                <EyeOff className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Eye className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Products Purchased</label>
@@ -787,7 +815,15 @@ export default function AdminUsersPage() {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowCreatePassword(false);
+                setShowCreateModal(false);
+              }}
+            >
+              Cancel
+            </Button>
             <Button onClick={handleCreate} isLoading={creating}>Create Customer</Button>
           </div>
         </div>
