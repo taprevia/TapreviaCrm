@@ -72,6 +72,38 @@ async function main() {
     status: 'active',
   });
 
+  // ── Admin authentication/authorization ──────────────────────────────────
+  {
+    const params = {
+      id: customer._id.toString(),
+      userProductId: new mongoose.Types.ObjectId().toString(),
+    };
+    const url = `http://localhost/api/admin/users/${params.id}/products/${params.userProductId}/card`;
+    const unauth = await adminLinkPUT(
+      new NextRequest(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cardUid: 'PHASE4-AUTH' }),
+      }),
+      { params }
+    );
+    check('AUTH unauthenticated admin request is rejected', unauth.status === 401, `status=${unauth.status}`);
+
+    const customerToken = generateToken(customer._id.toString(), 'customer');
+    const forbidden = await adminLinkPUT(
+      new NextRequest(url, {
+        method: 'PUT',
+        headers: {
+          cookie: `token=${customerToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ cardUid: 'PHASE4-AUTH' }),
+      }),
+      { params }
+    );
+    check('AUTH customer cannot use admin card-link endpoint', forbidden.status === 403, `status=${forbidden.status}`);
+  }
+
   const unmapped = await CatalogProduct.create({
     name: 'Unmapped Card Product',
     slug: `unmapped-card-${Date.now()}`,

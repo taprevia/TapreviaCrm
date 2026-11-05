@@ -167,28 +167,25 @@ function catalogTypeLabel(item: CatalogProductLite): string {
   return PRODUCT_KIND_LABEL[item.kind ?? ''] ?? CATEGORY_LABEL[item.category] ?? item.category;
 }
 
-/** Configured public origin — never window.location/preview/localhost. */
-const PUBLIC_BASE_URL = canonicalPublicBase();
-
 /** Strict Permanent QR/URL: `/r/{routeSlug|uid}` only, else unavailable. */
-function cardPermanentUrl(card: CardData): string | null {
+function cardPermanentUrl(card: CardData, publicBaseUrl: string): string | null {
   return strictPermanentCardUrl(
     { routeSlug: card.routeSlug, uid: card.uid },
-    PUBLIC_BASE_URL
+    publicBaseUrl
   );
 }
 
 /** Explicitly labelled Legacy QR/URL for cards with no permanent identifier. */
-function cardLegacyUrl(card: CardData): string | null {
-  return legacyCardUrl(card, PUBLIC_BASE_URL);
+function cardLegacyUrl(card: CardData, publicBaseUrl: string): string | null {
+  return legacyCardUrl(card, publicBaseUrl);
 }
 
-function cardQrPayload(card: CardData): string {
-  return cardPermanentUrl(card) ?? cardLegacyUrl(card) ?? '';
+function cardQrPayload(card: CardData, publicBaseUrl: string): string {
+  return cardPermanentUrl(card, publicBaseUrl) ?? cardLegacyUrl(card, publicBaseUrl) ?? '';
 }
 
-function cardQrIsLegacy(card: CardData): boolean {
-  return !cardPermanentUrl(card) && Boolean(cardLegacyUrl(card));
+function cardQrIsLegacy(card: CardData, publicBaseUrl: string): boolean {
+  return !cardPermanentUrl(card, publicBaseUrl) && Boolean(cardLegacyUrl(card, publicBaseUrl));
 }
 
 interface AnalyticsData {  totalTaps: number;
@@ -221,7 +218,10 @@ export default function AdminUserDetailPage() {
   const [pdfBusy, setPdfBusy] = useState('');
   const [pdfError, setPdfError] = useState('');
   const pdfBusyRef = useRef(false);
-  const [loadError, setLoadError] = useState('');  const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState('');
+  const [publicBaseUrl, setPublicBaseUrl] = useState('');
+  const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
+  const [standeeQrDataUrls, setStandeeQrDataUrls] = useState<Record<string, string>>({});
   const [copiedQrId, setCopiedQrId] = useState('');
 
   const [purchasedProducts, setPurchasedProducts] = useState<UserProductRecord[]>([]);
@@ -294,15 +294,22 @@ export default function AdminUserDetailPage() {
     setShowAllCards(false);
   }, [userId]);
 
+  // Resolve the configured origin after mount. This keeps server/client initial
+  // markup identical while still allowing the explicitly configured localhost
+  // origin during local `next start` runs.
   useEffect(() => {
-    if (!cards.length) {
+    setPublicBaseUrl(canonicalPublicBase());
+  }, []);
+
+  useEffect(() => {
+    if (!cards.length || !publicBaseUrl) {
       setQrDataUrls({});
       return;
     }
     let cancelled = false;
     Promise.all(
       cards.map(async (c) => {
-        const url = cardQrPayload(c);
+        const url = cardQrPayload(c, publicBaseUrl);
         if (!url) return [c._id, ''] as const;
         const dataUrl = await QRCode.toDataURL(url, {
           width: 128,
@@ -319,7 +326,7 @@ export default function AdminUserDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [cards]);
+  }, [cards, publicBaseUrl]);
 
   const handleStatusToggle = async () => {
     if (!user) return;
@@ -344,24 +351,72 @@ export default function AdminUserDetailPage() {
 
   // Standee QR URL: canonical standees have a routeSlug (panel + slot routes);
   // legacy standees fall back to /qr/{qrId}.
-  const standeeQrUrl = (s: StandeeData, kind: 'panel' | 'social', index = 0) => {
-    if (!PUBLIC_BASE_URL) return '';
+  const standeeQrUrl = useCallback((s: StandeeData, kind: 'panel' | 'social', index = 0) => {
+    if (!publicBaseUrl) return '';
     const route = (s.routeSlug || s.uid || '').trim();
     if (route) {
       return kind === 'panel'
-        ? `${PUBLIC_BASE_URL}/r/${encodeURIComponent(route)}`
-        : `${PUBLIC_BASE_URL}/r/${encodeURIComponent(route)}/${index + 1}`;
+        ? `${publicBaseUrl}/r/${encodeURIComponent(route)}`
+        : `${publicBaseUrl}/r/${encodeURIComponent(route)}/${index + 1}`;
     }
     return kind === 'panel'
-      ? `${PUBLIC_BASE_URL}/qr/${s.panelQr?.qrId ?? ''}`
-      : `${PUBLIC_BASE_URL}/qr/${s.socialQrs?.[index]?.qrId ?? ''}`;
-  };
+      ? `${publicBaseUrl}/qr/${s.panelQr?.qrId ?? ''}`
+      : `${publicBaseUrl}/qr/${s.socialQrs?.[index]?.qrId ?? ''}`;
+  }, [publicBaseUrl]);
+
+  // Standee QR images are generated locally from the exact same permanent
+  // `/r/{routeSlug}` or legacy `/qr/{qrId}` payloads used by copy/download.
+  useEffect(() => {
+    if (!standees.length) {
+      setStandeeQrDataUrls({});
+      return;
+    }
+    let cancelled = false;
+    const jobs: Array<Promise<readonly [string, string]>> = [];
+    for (const standee of standees) {
+      const panelUrl = standeeQrUrl(standee, 'panel');
+      if (panelUrl) {
+        jobs.push(
+          QRCode.toDataURL(panelUrl, {
+            width: 128,
+            margin: 1,
+            color: { dark: '#1a1a2e', light: '#ffffff' },
+          })
+            .then((dataUrl) => [`panel:${standee._id}`, dataUrl] as const)
+            .catch(() => [`panel:${standee._id}`, ''] as const)
+        );
+      }
+      (standee.socialQrs ?? []).forEach((qr, index) => {
+        const socialUrl = standeeQrUrl(standee, 'social', index);
+        if (!socialUrl) return;
+        jobs.push(
+          QRCode.toDataURL(socialUrl, {
+            width: 128,
+            margin: 1,
+            color: { dark: '#1a1a2e', light: '#ffffff' },
+          })
+            .then((dataUrl) => [`social:${standee._id}:${index}`, dataUrl] as const)
+            .catch(() => [`social:${standee._id}:${index}`, ''] as const)
+        );
+      });
+    }
+    Promise.all(jobs).then((entries) => {
+      if (!cancelled) {
+        setStandeeQrDataUrls(
+          Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl !== ''))
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [standees, standeeQrUrl]);
 
   const absolutePublicUrl = (path: string | null | undefined) => {
     const value = (path ?? '').trim();
     if (!value) return '';
     if (/^https?:\/\//i.test(value)) return value;
-    return PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${value}` : value;
+    return publicBaseUrl ? `${publicBaseUrl}${value}` : value;
   };
 
   const handleCopyQr = async (url: string, key: string) => {
@@ -392,12 +447,12 @@ export default function AdminUserDetailPage() {
   };
 
   const handleDownloadCardQr = async (c: CardData) => {
-    const url = cardQrPayload(c);
+    const url = cardQrPayload(c, publicBaseUrl);
     if (!url || pdfBusyRef.current) return;
     pdfBusyRef.current = true;
     setPdfError('');
     const template = (c.templateKey && templateNames[c.templateKey]) || c.templateKey;
-    const legacy = cardQrIsLegacy(c);
+    const legacy = cardQrIsLegacy(c, publicBaseUrl);
     setPdfBusy(`card:${c.slug}`);
     try {
       await downloadQrPdf(
@@ -897,8 +952,8 @@ export default function AdminUserDetailPage() {
 
                   <div className="mt-3 flex gap-3">
                     {(() => {
-                      const permanent = cardPermanentUrl(c);
-                      const legacy = permanent ? null : cardLegacyUrl(c);
+                      const permanent = cardPermanentUrl(c, publicBaseUrl);
+                      const legacy = permanent ? null : cardLegacyUrl(c, publicBaseUrl);
                       const qr = qrDataUrls[c._id];
                       if (qr) {
                         return (
@@ -925,7 +980,7 @@ export default function AdminUserDetailPage() {
                         <div className="flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-lg border border-dashed border-line-subtle px-2 text-center">
                           <QrCode className="h-5 w-5 text-ink-faint" aria-hidden="true" />
                           <span className="mt-1 text-[10px] leading-tight text-ink-faint">
-                            {!PUBLIC_BASE_URL
+                            {!publicBaseUrl
                               ? 'Public base URL not configured'
                               : permanent
                                 ? 'Permanent QR unavailable'
@@ -1069,7 +1124,7 @@ export default function AdminUserDetailPage() {
           </Button>
         </div>
 
-        {!PUBLIC_BASE_URL && (
+        {!publicBaseUrl && (
           <p className="mb-4 rounded-lg bg-bad/10 px-3 py-2 text-xs text-red-300 ring-1 ring-bad/20">
             Public base URL is not configured. Standee QR links cannot be generated.
           </p>
@@ -1157,12 +1212,22 @@ export default function AdminUserDetailPage() {
                     {!standee.permanentEntryUrl && (
                       <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-warn">Legacy QR</span>
                     )}
-                    <div className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
+                    <div className="inline-flex flex-wrap items-center gap-2 rounded-lg bg-field px-3 py-1.5">
+                      {standeeQrDataUrls[`panel:${standee._id}`] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={standeeQrDataUrls[`panel:${standee._id}`]}
+                          alt={`Permanent QR code for standee ${standee.displayName || standee.name || standee._id}`}
+                          className="h-16 w-16 rounded bg-white p-1"
+                        />
+                      ) : (
+                        <span className="text-[10px] text-ink-faint">QR unavailable</span>
+                      )}
                       <span className="font-mono text-xs text-accent-400">{standee.panelQr.qrId}</span>
                       <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'panel'), standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                         {copiedQrId === standee.panelQr!.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
-                      <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
+                      <button type="button" title="Download PDF" disabled={Boolean(pdfBusy) || !standeeQrDataUrls[`panel:${standee._id}`]} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'panel'), 'panel', standee.panelQr!.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink disabled:opacity-50">
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -1178,13 +1243,23 @@ export default function AdminUserDetailPage() {
                       <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-warn">Legacy QR</span>
                     )}
                     {standee.socialQrs.map((qr, index) => (
-                      <div key={qr.qrId} className="inline-flex items-center gap-2 rounded-lg bg-field px-3 py-1.5">
+                      <div key={qr.qrId} className="inline-flex flex-wrap items-center gap-2 rounded-lg bg-field px-3 py-1.5">
+                        {standeeQrDataUrls[`social:${standee._id}:${index}`] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={standeeQrDataUrls[`social:${standee._id}:${index}`]}
+                            alt={`QR code for ${qr.label || qr.platform}`}
+                            className="h-16 w-16 rounded bg-white p-1"
+                          />
+                        ) : (
+                          <span className="text-[10px] text-ink-faint">QR unavailable</span>
+                        )}
                         <span className="text-xs font-medium text-ink">{qr.label || qr.platform}</span>
                         <span className="font-mono text-xs text-ink-faint">{qr.qrId}</span>
                         <button type="button" title="Copy link" onClick={() => handleCopyQr(standeeQrUrl(standee, 'social', index), qr.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
                           {copiedQrId === qr.qrId ? <Check className="h-3.5 w-3.5 text-ok" /> : <Copy className="h-3.5 w-3.5" />}
                         </button>
-                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy)} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink">
+                        <button type="button" title="Download PDF" disabled={Boolean(pdfBusy) || !standeeQrDataUrls[`social:${standee._id}:${index}`]} onClick={() => handleDownloadQr(standeeQrUrl(standee, 'social', index), qr.platform, qr.qrId)} className="inline-grid h-6 w-6 place-items-center rounded text-ink-mute transition-colors hover:text-ink disabled:opacity-50">
                           <Download className="h-3.5 w-3.5" />
                         </button>
                       </div>

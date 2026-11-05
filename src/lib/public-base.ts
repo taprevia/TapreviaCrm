@@ -28,6 +28,32 @@ export interface CanonicalPublicBaseInput {
   approvedPreviewHost?: string;
   /** Public copy of the same hostname for client components. */
   publicApprovedPreviewHost?: string;
+  /**
+   * Actual browser hostname, when running in a browser. Used only to allow an
+   * explicitly configured localhost origin during local `next start` runs
+   * (NODE_ENV=production). A deployed browser host is never localhost, so this
+   * cannot authorize localhost QR origins in production or preview.
+   */
+  browserHost?: string;
+}
+
+function isLocalHostname(value: string | undefined): boolean {
+  const host = (value ?? '').trim().toLowerCase();
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.endsWith('.localhost')
+  );
+}
+
+function configuredHostname(value: string): string | null {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function trimOrigin(value: string | undefined): string {
@@ -101,10 +127,36 @@ export function resolveCanonicalPublicBase(
 
   const candidate = configured || fallback;
   if (!candidate) return '';
-  if ((nodeEnv === 'production' || vercelEnv === 'production') && UNSAFE_ORIGIN.test(candidate)) {
+
+  // Local `next start` runs with NODE_ENV=production. Permit an explicitly
+  // configured localhost origin only when the actual browser host is also
+  // local. A deployed page can never satisfy that condition, and Preview is
+  // handled by the strict branch above.
+  const localBrowser =
+    !vercelEnv && isLocalHostname(input.browserHost) && isLocalHostname(configuredHostname(candidate) ?? '');
+
+  if (
+    (nodeEnv === 'production' || vercelEnv === 'production') &&
+    UNSAFE_ORIGIN.test(candidate) &&
+    !localBrowser
+  ) {
     return '';
   }
-  return candidate;
+
+  // The configured base must be a bare http(s) origin. Reject unsafe schemes,
+  // credentials, query strings, fragments and subpaths so it cannot become an
+  // injected QR destination.
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  if (parsed.username || parsed.password) return '';
+  if (parsed.search || parsed.hash) return '';
+  if (parsed.pathname !== '/' && parsed.pathname !== '') return '';
+  return parsed.origin;
 }
 
 export function canonicalPublicBase(): string {
@@ -115,5 +167,7 @@ export function canonicalPublicBase(): string {
     vercelEnv: process.env.VERCEL_ENV,
     approvedPreviewHost: process.env.PREVIEW_APPROVED_HOST,
     publicApprovedPreviewHost: process.env.NEXT_PUBLIC_PREVIEW_APPROVED_HOST,
+    browserHost:
+      typeof window !== 'undefined' ? window.location.hostname : undefined,
   });
 }

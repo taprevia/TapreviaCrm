@@ -124,7 +124,7 @@ check('admin imports strict permanent + legacy helpers, not fallback helper', ()
 });
 
 check('admin QR image and PDF share one payload helper', () => {
-  const occurrences = admin.match(/const url = cardQrPayload\(c\);/g) ?? [];
+  const occurrences = admin.match(/const url = cardQrPayload\(c, publicBaseUrl\);/g) ?? [];
   assert.equal(occurrences.length, 2, `expected 2 shared payload calls, got ${occurrences.length}`);
 });
 
