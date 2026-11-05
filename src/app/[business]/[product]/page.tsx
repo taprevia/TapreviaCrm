@@ -1,13 +1,20 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
-import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
+import { notFound, redirect } from 'next/navigation';
 import { connectDB } from '@/lib/db';
+import Card from '@/models/Card';
 import Profile from '@/models/Profile';
 import { getPublicCardByPublicSlug, getPublicStandeeByPublicSlug } from '@/lib/services/human-url';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
 import { PublicCardPage, buildPublicCardMetadata, StandeeLanding } from '@/components/public';
 import { vcardDisplayName } from '@/components/public/hero';
 import { ReviewExperience, resolveReviewAccess } from '@/components/review/review-experience';
 import { resolveStandeePanel } from '@/lib/services/standee-panel';
+import { resolveStandeeEntryDecision } from '@/lib/services/standee-entry-state';
+import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
+import { canonicalPublicBase } from '@/lib/public-base';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import type { ICard } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -53,9 +60,13 @@ const resolveReviewPage = cache(async (business: string, product: string): Promi
 });
 
 interface StandeePublicDoc {
+  _id: unknown;
   userId: unknown;
   routeSlug: string;
+  uid?: string;
   displayName?: string;
+  publicSlug?: string;
+  productKey?: string;
   maxProfiles?: number;
   fixedProfiles?: string[];
   socialQrs?: Array<{
@@ -65,7 +76,7 @@ interface StandeePublicDoc {
   }>;
 }
 
-async function resolveStandee(business: string, product: string) {
+const resolveStandee = cache(async (business: string, product: string) => {
   await connectDB();
   const standee = (await getPublicStandeeByPublicSlug(
     `${business}/${product}`
@@ -80,14 +91,15 @@ async function resolveStandee(business: string, product: string) {
     displayName?: string;
   } | null;
 
+  const socialLinks = profile?.socialLinks ?? [];
   const panel = resolveStandeePanel(
     standee,
     profile?.companyName?.trim() || profile?.displayName?.trim() || null,
-    (profile?.socialLinks ?? []).filter((l) => l.url?.trim()).map((l) => l.platform)
+    socialLinks.filter((l) => l.url?.trim()).map((l) => l.platform)
   );
 
-  return panel;
-}
+  return { standee, panel, socialLinks };
+});
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   try {
@@ -104,10 +116,12 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     if (resolved?.card) {
       return buildPublicCardMetadata(resolved.card);
     }
-    const panel = await resolveStandee(params.business, params.product);
-    if (panel) {
+    const resolvedStandee = await resolveStandee(params.business, params.product);
+    if (resolvedStandee) {
       return {
-        title: panel.ownerName ? `${panel.ownerName} · Taprevia` : 'Choose a destination',
+        title: resolvedStandee.panel.ownerName
+          ? `${resolvedStandee.panel.ownerName} · Taprevia`
+          : 'Choose a destination',
         robots: { index: false, follow: true },
       };
     }
@@ -124,6 +138,7 @@ export default async function PublicHumanUrlPage({ params }: Params) {
     // intentionally does NOT redirect to /review/{alias}; unpublished Cards
     // fail closed with the same 404 behavior as before.
     if (!resolved.access || !resolved.alias) notFound();
+    await recordPublicVisit({ cardId: resolved.card._id, headers: headers() });
     return (
       <ReviewExperience
         card={resolved.card}
@@ -145,9 +160,63 @@ export default async function PublicHumanUrlPage({ params }: Params) {
       />
     );
   }
-  const panel = await resolveStandee(params.business, params.product);
-  if (panel && panel.slotCount >= 1) {
-    return <StandeeLanding panel={panel} />;
+  const resolvedStandee = await resolveStandee(params.business, params.product);
+  if (!resolvedStandee) notFound();
+
+  const { standee, panel, socialLinks } = resolvedStandee;
+  if (panel.slotCount < 1) notFound();
+
+  let delegatePath: string | null = null;
+  const origin = canonicalPublicBase();
+
+  if (origin) {
+    try {
+      const routeKey = (standee.routeSlug || standee.uid || '').trim();
+      if (routeKey) {
+        const routeLookup = routeKey.toLowerCase();
+        // Match /r's Card-first lookup exactly: a Card sharing this routeSlug
+        // or uid would win there and must not be reached through a Standee URL.
+        const cardCollision = await Card.findOne(
+          withPublicCardVisibility({
+            $or: [{ routeSlug: routeLookup }, { uid: routeLookup }],
+          })
+        )
+          .select('_id')
+          .lean();
+
+        if (!cardCollision) {
+          const decision = resolveStandeeEntryDecision({
+            routeSlug: standee.routeSlug,
+            uid: standee.uid,
+            maxProfiles: standee.maxProfiles,
+            fixedProfiles: standee.fixedProfiles,
+            socialQrs: standee.socialQrs,
+            socialLinks,
+            origin,
+          });
+
+          if (decision.action === 'delegate') {
+            const currentPath = `/${encodeURIComponent(params.business)}/${encodeURIComponent(
+              params.product
+            )}`;
+            const loopDetected = await wouldRedirectLoop(
+              currentPath,
+              decision.path,
+              origin
+            );
+            if (!loopDetected) delegatePath = decision.path;
+          }
+        }
+      }
+    } catch {
+      // Fail closed: any preflight uncertainty keeps the existing picker.
+      console.error('Standee branded-entry preflight failed');
+    }
   }
-  notFound();
+
+  if (delegatePath) redirect(delegatePath);
+
+  // Branded picker is the final destination for this navigation.
+  await recordPublicVisit({ standeeId: standee._id, headers: headers() });
+  return <StandeeLanding panel={panel} />;
 }

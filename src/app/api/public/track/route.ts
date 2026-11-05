@@ -7,6 +7,10 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import { z } from 'zod';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import {
+  isCardOwnerPubliclyVisible,
+  isStandeeOwnerPubliclyVisible,
+} from '@/lib/services/public-owner-visibility';
 import { ok, rateLimitFailure } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
@@ -55,9 +59,12 @@ export async function POST(request: NextRequest) {
         const doc = await Card.findOne(
           withPublicCardVisibility({ urlAlias: alias.toLowerCase() })
         )
-          .select('_id')
-          .lean<{ _id: unknown } | null>();
-        if (doc) return { cardId: String(doc._id), standeeId: null };
+          .select('_id userId assignedUserId')
+          .lean<{ _id: unknown; userId?: unknown; assignedUserId?: unknown } | null>();
+        if (doc) {
+          if (!(await isCardOwnerPubliclyVisible(doc))) return null;
+          return { cardId: String(doc._id), standeeId: null };
+        }
 
         // Phase 4D.7: Standee public hosts use the same client tracker with
         // their opaque routeSlug/uid. Card resolution wins first, preserving
@@ -68,17 +75,19 @@ export async function POST(request: NextRequest) {
             { uid: alias.toLowerCase() },
           ],
         })
-          .select('_id')
-          .lean<{ _id: unknown } | null>();
+          .select('_id userId')
+          .lean<{ _id: unknown; userId?: unknown } | null>();
+        if (standee && !(await isStandeeOwnerPubliclyVisible(standee.userId))) return null;
         return standee ? { cardId: null, standeeId: String(standee._id) } : null;
       }
       if (cardUid) {
         const card = await Card.findOne(
           withPublicCardVisibility({ cardUid: cardUid.toUpperCase() })
         )
-          .select('_id')
-          .lean<{ _id: unknown } | null>();
-        return card ? { cardId: String(card._id), standeeId: null } : null;
+          .select('_id userId assignedUserId')
+          .lean<{ _id: unknown; userId?: unknown; assignedUserId?: unknown } | null>();
+        if (!card || !(await isCardOwnerPubliclyVisible(card))) return null;
+        return { cardId: String(card._id), standeeId: null };
       }
       return null;
     };

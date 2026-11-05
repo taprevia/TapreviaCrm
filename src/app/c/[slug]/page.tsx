@@ -6,6 +6,7 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import { clientIpFromHeaders } from '@/lib/request-ip';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import { isCardOwnerPubliclyVisible } from '@/lib/services/public-owner-visibility';
 import { canonicalPublicBase } from '@/lib/public-base';
 import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 
@@ -64,8 +65,9 @@ export default async function LegacyCardPage({ params }: Params) {
   const direct = await Card.findOne(
     withPublicCardVisibility({ $or: [{ urlAlias: slug }, { slug }] })
   )
-    .select('urlAlias slug status')
-    .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
+    .select('urlAlias slug status userId assignedUserId')
+    .lean<{ _id: unknown; urlAlias: string; slug: string; status: string; userId?: unknown; assignedUserId?: unknown } | null>();
+  if (direct && !(await isCardOwnerPubliclyVisible(direct))) notFound();
   if (direct) {
     const destination = `/profile/${encodeURIComponent(direct.urlAlias || direct.slug)}`;
     if (await wouldRedirectLoop(`/c/${encodeURIComponent(slug)}`, destination, appOrigin())) {
@@ -78,8 +80,9 @@ export default async function LegacyCardPage({ params }: Params) {
   const card = await Card.findOne(
     withPublicCardVisibility({ cardUid: slug.toUpperCase() })
   )
-    .select('urlAlias slug status')
-    .lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
+    .select('urlAlias slug status userId assignedUserId')
+    .lean<{ _id: unknown; urlAlias: string; slug: string; status: string; userId?: unknown; assignedUserId?: unknown } | null>();
+  if (card && !(await isCardOwnerPubliclyVisible(card))) notFound();
   if (card) {
     const destination = `/profile/${encodeURIComponent(card.urlAlias || card.slug)}`;
     if (await wouldRedirectLoop(`/c/${encodeURIComponent(slug)}`, destination, appOrigin())) {

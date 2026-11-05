@@ -9,6 +9,7 @@ const AnalyticsLogSchema = new Schema(
     action: {
       type: String,
       enum: [
+        'public_visit',
         'tap',
         'vcard_download',
         'link_click',

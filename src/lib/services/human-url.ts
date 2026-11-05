@@ -7,6 +7,16 @@ import { generateSlug } from '@/lib/utils';
 import { getProductDef } from '@/config/products';
 import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import { nextPermUniqueNumber } from '@/lib/services/customer-identity';
+import { withPublicCardVisibility } from '@/lib/services/card-access';
+import {
+  isCardOwnerPubliclyVisible,
+  isStandeeOwnerPubliclyVisible,
+} from '@/lib/services/public-owner-visibility';
+import {
+  allocateStandeePublicSlug,
+  isPublicPathReserved,
+  reconcileStandeePublicSlug,
+} from '@/lib/services/public-url-reservation';
 
 const PUBLIC_SLUG_MAX_LENGTH = 100;
 /** Bounded retry budget for concurrent allocation of the same path base. */
@@ -144,33 +154,19 @@ async function countProductPathOccurrences(
 }
 
 /**
- * Number of standees the account's business namespace already holds with a
- * "standee" public path. Monotonic numbering identical to cards: next standee
- * gets existingCount + 1, so a freed path is never silently re-issued.
- */
-async function countStandeePathOccurrences(
-  productSlug: string,
-  bizSlug: string
-): Promise<number> {
-  const matcher = new RegExp(
-    `^${escapeRegExp(bizSlug)}/${escapeRegExp(productSlug)}(?:-[1-9][0-9]*)?$`
-  );
-  return Standee.countDocuments({ publicSlug: matcher });
-}
-
-/**
  * Shared Card/Standee public namespace check. The two collections have
  * separate sparse unique indexes, so this application-level guard prevents a
- * new Card and Standee from claiming the same branded path. It does not replace
- * an index; concurrent cross-collection allocation still needs the existing
- * retry path.
+ * new Card and Standee from claiming the same branded path. It also checks the
+ * permanent reservation registry so a future Card can never claim a retired
+ * Standee path. It does not replace a database index.
  */
 async function publicSlugTaken(publicSlug: string): Promise<boolean> {
-  const [card, standee] = await Promise.all([
+  const [card, standee, reserved] = await Promise.all([
     Card.exists({ publicSlug }),
     Standee.exists({ publicSlug }),
+    isPublicPathReserved(publicSlug),
   ]);
-  return Boolean(card || standee);
+  return Boolean(card || standee || reserved);
 }
 
 export interface EnsurePublicSlugResult {
@@ -271,9 +267,10 @@ const STANDEES_RESERVED_PUBLIC_SEGMENTS = new Set([
 
 /**
  * Ensure a standee's public URL ("{business-slug}/standee[-N]") exists
- * idempotently. Derives the account business slug and persists the full path on
- * the standee; never regenerates an already-allocated slug (permanent identity
- * for printed material). Best-effort — callers must tolerate failures.
+ * idempotently. Allocation is delegated to the permanent reservation registry:
+ * a path is reserved before it is written to the Standee, and existing paths
+ * are reconciled rather than regenerated. Allocation fails closed until the
+ * reservation index and backfill readiness marker exist.
  */
 export async function ensureStandeePublicSlug(
   standeeId: string | unknown,
@@ -281,7 +278,18 @@ export async function ensureStandeePublicSlug(
 ): Promise<EnsurePublicSlugResult> {
   const standee = await Standee.findById(standeeId);
   if (!standee || !userId) return { assigned: false };
-  if (standee.publicSlug) return { assigned: true, publicSlug: standee.publicSlug };
+
+  if (standee.publicSlug) {
+    // Existing identifiers are never regenerated. Reconcile the permanent
+    // reservation only; a conflict with another identity fails closed.
+    const publicSlug = await reconcileStandeePublicSlug({
+      standeeId: standee._id,
+      ownerId: userId,
+      publicSlug: standee.publicSlug,
+      source: 'backfill',
+    });
+    return { assigned: true, publicSlug };
+  }
 
   const [user, profile] = await Promise.all([
     User.findById(userId),
@@ -299,41 +307,13 @@ export async function ensureStandeePublicSlug(
     resolveBusinessNameSource({ user, profile })
   );
 
-  let collisionOffset = 0;
-  for (let attempt = 1; attempt <= PUBLIC_SLUG_ALLOCATION_ATTEMPTS; attempt++) {
-    const existing =
-      (await countStandeePathOccurrences(STANDEES_PUBLIC_PRODUCT_SEGMENT, bizSlug)) +
-      collisionOffset;
-    const productPath =
-      existing === 0
-        ? STANDEES_PUBLIC_PRODUCT_SEGMENT
-        : `${STANDEES_PUBLIC_PRODUCT_SEGMENT}-${existing + 1}`;
-    const publicSlug = `${bizSlug}/${productPath}`;
-    if (await publicSlugTaken(publicSlug)) {
-      collisionOffset += 1;
-      continue;
-    }
+  const publicSlug = await allocateStandeePublicSlug({
+    standeeId: standee._id,
+    ownerId: userId,
+    bizSlug,
+  });
 
-    try {
-      const result = await Standee.updateOne(
-        { _id: standee._id, publicSlug: { $in: ['', null] } },
-        { $set: { publicSlug } }
-      );
-      if (result.modifiedCount === 1) return { assigned: true, publicSlug };
-      // Another request already assigned this standee. Return the actual
-      // persisted value, never a locally computed candidate.
-      const fresh = await Standee.findById(standee._id).select('publicSlug').lean<{
-        publicSlug?: string;
-      } | null>();
-      if (fresh?.publicSlug) return { assigned: true, publicSlug: fresh.publicSlug };
-      collisionOffset += 1;
-    } catch (error) {
-      if (!isDuplicateKeyError(error)) throw error;
-      // Another standee claimed this path concurrently; advance and retry.
-      collisionOffset += 1;
-    }
-  }
-  throw new Error('Could not allocate a unique standee public slug');
+  return { assigned: true, publicSlug };
 }
 
 /**
@@ -344,7 +324,9 @@ export async function getPublicStandeeByPublicSlug(key: string) {
   const normalized = key.toLowerCase();
   if (!normalized || normalized.length > PUBLIC_SLUG_MAX_LENGTH) return null;
   if (!/^[a-z0-9-]{1,50}\/[a-z0-9-]{1,50}$/.test(normalized)) return null;
-  return Standee.findOne({ publicSlug: normalized });
+  const standee = await Standee.findOne({ publicSlug: normalized });
+  if (!standee) return null;
+  return (await isStandeeOwnerPubliclyVisible(standee.userId)) ? standee : null;
 }
 
 /**
@@ -357,5 +339,7 @@ export async function getPublicCardByPublicSlug(key: string) {
   const normalized = key.toLowerCase();
   if (!normalized || normalized.length > PUBLIC_SLUG_MAX_LENGTH) return null;
   if (!/^[a-z0-9-]{1,50}\/[a-z0-9-]{1,50}$/.test(normalized)) return null;
-  return Card.findOne({ publicSlug: normalized, isActive: true });
+  const card = await Card.findOne(withPublicCardVisibility({ publicSlug: normalized }));
+  if (!card) return null;
+  return (await isCardOwnerPubliclyVisible(card)) ? card : null;
 }

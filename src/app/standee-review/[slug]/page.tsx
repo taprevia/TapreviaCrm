@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { connectDB } from '@/lib/db';
 import { ReviewAssistantFlow } from '@/components/review/review-assistant';
 import { COPY_FLOW_ACTIVE, REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
 import { resolveStandeeReviewHost } from '@/lib/services/review-standee-settings';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import AnalyticsLog from '@/models/AnalyticsLog';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +42,9 @@ export default async function StandeeReviewPage({ params }: Params) {
   await connectDB();
   const host = await resolveStandeeReviewHost(params.slug);
   if (!host) return <Unavailable />;
+
+  // Final review-host destination: one public visit per navigation.
+  await recordPublicVisit({ standeeId: host.standeeId, headers: headers() });
 
   // Best-effort attribution for the new host. Metadata only — never review
   // text, tokens or private settings.

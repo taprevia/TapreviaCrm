@@ -13,6 +13,7 @@ import Media from '@/models/Media';
 import { getStorage } from '@/lib/storage';
 import { updateCustomerCredentialsSchema } from '@/lib/validation/catalog';
 import { resolveProductUrls } from '@/lib/services/product-preview';
+import { retireStandeeReservationsForUser } from '@/lib/services/public-url-reservation';
 
 interface CardLean {
   _id: string;
@@ -68,11 +69,13 @@ export async function GET(
         .limit(500)
         .lean();
       const tapLogs = await AnalyticsLog.countDocuments({ cardId: card._id, action: 'tap' });
+      const totalVisits = await AnalyticsLog.countDocuments({ cardId: card._id, action: 'public_visit' });
       const downloads = await Lead.countDocuments({ cardOwnerId: id });
       const uniqueIps = Array.from(new Set(logs.filter(l => l.ip).map(l => l.ip)));
 
       analytics = {
         totalTaps: tapLogs,
+        totalVisits,
         tapLogs,
         linkClicks: await AnalyticsLog.countDocuments({ cardId: card._id, action: 'link_click' }),
         vcardDownloads: downloads,
@@ -201,6 +204,10 @@ export async function PUT(
     }
 
     if (action === 'delete') {
+      // Permanent branded URLs must be reserved/retired BEFORE any destructive
+      // account-deletion step. If this fails, abort without deleting anything.
+      await retireStandeeReservationsForUser(user._id);
+
       // Soft-remove purchase records so no active assignment outlives the user
       await UserProduct.updateMany({ userId: user._id }, { status: 'removed' });
 

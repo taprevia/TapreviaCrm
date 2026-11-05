@@ -5,6 +5,7 @@ import Card from '@/models/Card';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import { isCardOwnerPubliclyVisible } from '@/lib/services/public-owner-visibility';
 
 type Params = { params: { uid: string } };
 
@@ -67,9 +68,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       withPublicCardVisibility({
         $or: [{ routeSlug: raw.toLowerCase() }, { uid: raw.toLowerCase() }, { cardUid: raw.toUpperCase() }],
       })
-    ).lean<{ _id: unknown; urlAlias: string; slug: string; status: string } | null>();
+    ).lean<{ _id: unknown; urlAlias: string; slug: string; status: string; userId?: unknown; assignedUserId?: unknown } | null>();
 
-    if (!card || !(card.urlAlias || card.slug)) {
+    if (!card || !(card.urlAlias || card.slug) || !(await isCardOwnerPubliclyVisible(card))) {
       return Response.redirect(new URL('/', request.nextUrl.origin).toString(), 302);
     }
 

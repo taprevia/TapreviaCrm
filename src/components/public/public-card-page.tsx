@@ -13,6 +13,7 @@ import { getCardReviewEntitlement } from '@/lib/services/review-entitlement';
 import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { canonicalPublicBase } from '@/lib/public-base';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
@@ -39,6 +40,9 @@ async function dispatchSocialCard(card: ICard, currentPath?: string): Promise<ne
   ) {
     notFound();
   }
+
+  // Final external destination for this navigation: count one public visit.
+  await recordPublicVisit({ cardId: card._id, headers: headers() });
 
   // Best-effort analytics: a telemetry failure must never block the visitor's
   // external redirect (fail-open, like all public flows).
@@ -188,6 +192,10 @@ export async function PublicCardPage({
         }
       : {}),
   } as React.CSSProperties;
+
+  // Final profile destination renders here; count once for branded and
+  // /profile entries. Social/review cards returned or redirected above.
+  await recordPublicVisit({ cardId: card._id, headers: headers() });
 
   return (
     <div className="vcard-root min-h-screen" style={themeVars}>

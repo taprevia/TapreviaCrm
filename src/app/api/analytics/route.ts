@@ -90,13 +90,16 @@ export async function GET(request: NextRequest) {
       }
       const rowKey = (standee.routeSlug as string | undefined)?.toLowerCase() ?? '';
       if (!rowKey) return fail(400, 'VALIDATION_ERROR', 'Standee has no route configured');
-      // Standee taps are recorded on AnalyticsLog with cardId null and
-      // metadata "route:{routeSlug}" or "route:{routeSlug}/slot:{n}/platform:{p}"
-      // (see /r/[...slug]). No schema change needed — the prefix match covers
-      // the panel QR and every zone/slot tap of this standee.
+      // Standee public visits carry standeeId directly. Legacy tap/slot events
+      // do not, so keep the existing metadata-prefix match for them.
       matchFilter = {
-        cardId: null,
-        metadata: { $regex: new RegExp(`^route:${escapeRegExp(rowKey)}(?:/|$)`), $options: 'i' },
+        $or: [
+          { standeeId: standeeObjectId, action: 'public_visit' },
+          {
+            cardId: null,
+            metadata: { $regex: new RegExp(`^route:${escapeRegExp(rowKey)}(?:/|$)`), $options: 'i' },
+          },
+        ],
       };
     }
 

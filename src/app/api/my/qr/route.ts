@@ -5,6 +5,7 @@ import { fail } from '@/lib/api';
 import Card from '@/models/Card';
 import Standee from '@/models/Standee';
 import UserProduct from '@/models/UserProduct';
+import { canonicalPublicBase } from '@/lib/public-base';
 import { generateQRDataURL } from '@/utils/qr-server';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +28,12 @@ export async function GET(request: NextRequest) {
     const slug = request.nextUrl.searchParams.get('slug')?.toLowerCase() ?? '';
     if (!slug) return fail(400, 'VALIDATION_ERROR', 'slug is required');
 
-    const origin = request.nextUrl.origin;
+    // Never derive a printed QR destination from the request Host. The
+    // approved canonical origin is the only trusted base.
+    const origin = canonicalPublicBase();
+    if (!origin) {
+      return fail(409, 'CONFLICT', 'Public base URL is not configured');
+    }
 
     const makeQr = async (publicSlug: string): Promise<Response> => {
       const url = `${origin}/${publicSlug}`;

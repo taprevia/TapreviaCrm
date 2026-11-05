@@ -10,7 +10,12 @@ import AnalyticsLog from '@/models/AnalyticsLog';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { check } from '@/lib/rate-limit';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import {
+  isCardOwnerPubliclyVisible,
+  isStandeeOwnerPubliclyVisible,
+} from '@/lib/services/public-owner-visibility';
 import { resolveCardDestination } from '@/lib/services/redirect-target';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
 import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
@@ -104,6 +109,11 @@ export async function GET(
     } | null;
 
     if (card) {
+      // Owner suspension revokes the public Card immediately. Do not fall
+      // through to a Standee sharing the same identifier.
+      if (!(await isCardOwnerPubliclyVisible(card))) {
+        return noStoreText('Not found', 404);
+      }
       // Resolve + validate the destination BEFORE recording a successful tap.
       // This prevents invalid/self-referential destinations from inflating
       // analytics and stops bounded internal redirect cycles.
@@ -113,6 +123,14 @@ export async function GET(
       }
       if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
         return noStoreText('Redirect loop detected', 404);
+      }
+      // External social Card: this is the final destination of the navigation.
+      if (/^https?:\/\//i.test(destination)) {
+        await recordPublicVisit({
+          cardId: card._id,
+          headers: request.headers,
+          method: request.method,
+        });
       }
       if (await allowCardTapWrite(card._id, request)) {
         await Promise.all([
@@ -145,6 +163,10 @@ export async function GET(
       uid?: string;
       productKey?: string;
     } | null;
+
+    if (standee && !(await isStandeeOwnerPubliclyVisible(standee.userId))) {
+      return noStoreText('Not found', 404);
+    }
 
     if (standee) {
       const logPanelTap = async (metadata: string) => {
@@ -214,6 +236,11 @@ export async function GET(
             if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
               return noStoreText('Redirect loop detected', 404);
             }
+            await recordPublicVisit({
+              standeeId: standee._id,
+              headers: request.headers,
+              method: request.method,
+            });
             // Log analytics with slot + destination info.
             try {
               await AnalyticsLog.create({
@@ -322,6 +349,11 @@ export async function GET(
           if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
             return noStoreText('Redirect loop detected', 404);
           }
+          await recordPublicVisit({
+            standeeId: standee._id,
+            headers: request.headers,
+            method: request.method,
+          });
           await logPanelTap(`route:${routeKey}`);
           return noStoreRedirect(url, 307);
         }
@@ -340,7 +372,7 @@ export async function GET(
         ],
       })
     )
-      .select('_id urlAlias publicSlug slug kind redirectUrl cardUid')
+      .select('_id urlAlias publicSlug slug kind redirectUrl cardUid userId assignedUserId')
       .lean()) as {
       _id: unknown;
       urlAlias: string;
@@ -349,15 +381,27 @@ export async function GET(
       kind: string;
       redirectUrl: string;
       cardUid: string;
+      userId?: unknown;
+      assignedUserId?: unknown;
     } | null;
 
     if (legacyCard) {
+      if (!(await isCardOwnerPubliclyVisible(legacyCard))) {
+        return noStoreText('Not found', 404);
+      }
       // Use the same product-aware resolver as the routeSlug branch so legacy
       // profile Cards with only a `slug` reach `/c/{slug}` instead of a 404.
       const destination = resolveCardDestination(legacyCard);
       if (destination) {
         if (await wouldRedirectLoop(request.nextUrl.pathname, destination, request.nextUrl.origin)) {
           return noStoreText('Redirect loop detected', 404);
+        }
+        if (/^https?:\/\//i.test(destination)) {
+          await recordPublicVisit({
+            cardId: legacyCard._id,
+            headers: request.headers,
+            method: request.method,
+          });
         }
         // Legacy-resolved taps count the same as routeSlug taps.
         if (await allowCardTapWrite(legacyCard._id, request)) {

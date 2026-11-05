@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Eye,
   MousePointerClick,
   Send,
   Share2,
@@ -21,6 +22,7 @@ export interface ActionMeta {
 
 /** Canonical tile order; anything else is appended alphabetically. */
 const CANONICAL_ORDER = [
+  'public_visit',
   'tap',
   'vcard_download',
   'link_click',
@@ -39,6 +41,7 @@ const CANONICAL_ORDER = [
 ] as const;
 
 const ACTION_META: Record<string, ActionMeta> = {
+  public_visit: { label: 'Total Visits', icon: Eye, iconClassName: 'bg-accent-600/10 text-accent-400' },
   tap: { label: 'Card taps', icon: MousePointerClick, iconClassName: 'bg-accent-600/10 text-accent-400' },
   vcard_download: { label: 'vCard downloads', icon: Download, iconClassName: 'bg-ok/10 text-ok' },
   link_click: { label: 'Link clicks', icon: ExternalLink, iconClassName: 'bg-violet-500/10 text-violet-400' },
@@ -73,7 +76,11 @@ export function metaForAction(action: string): ActionMeta {
 
 /** Totals keys in canonical order, unknown keys appended alphabetically. */
 export function orderedActions(totals: Record<string, number>): string[] {
-  const known = CANONICAL_ORDER.filter((action) => action in totals);
+  // Total Visits is a primary metric: keep the tile visible even when the
+  // selected period has no new visits yet.
+  const known = CANONICAL_ORDER.filter(
+    (action) => action === 'public_visit' || action in totals
+  );
   const knownSet = new Set<string>(CANONICAL_ORDER);
   const unknown = Object.keys(totals)
     .filter((key) => !knownSet.has(key))

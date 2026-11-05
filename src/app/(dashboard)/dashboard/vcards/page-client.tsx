@@ -13,7 +13,7 @@ import { CARD_TEMPLATE_META } from '@/lib/card-templates';
 import { resolveCardDisplayName } from '@/lib/card-display';
 import { downloadQrPdf } from '@/lib/qr-pdf';
 import { canonicalPublicBase } from '@/lib/public-base';
-import { permanentCardUrl } from '@/lib/admin-card-view';
+import { brandedCardQrUrl } from '@/lib/admin-card-view';
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 
 interface Vcard {
@@ -78,22 +78,21 @@ function resolveCardDisplayUrl(vcard: Vcard, origin: string): string {
 }
 
 /**
- * Stable QR payload for a card.
+ * Stable software-QR payload for a card.
  *
- * QR codes must encode a durable redirect identity, never a preview/external
- * destination or the editable `urlAlias`. Passing only `routeSlug` and
- * `publicSlug` makes `permanentCardUrl` resolve:
- *   1. `/r/{routeSlug}` — permanent NFC/QR route.
- *   2. `/{publicSlug}` — allocated-once, immutable legacy public path.
- *
- * Returns '' when neither identifier exists, so the caller shows an explicit
- * unavailable state instead of printing a mutable fallback as "permanent".
+ * The branded publicSlug is preferred. `/r/{routeSlug}` and legacy fallbacks
+ * remain only when no publicSlug exists, preserving older unallocated cards.
  * The base URL comes from canonicalPublicBase(), never from request/window
  * origin, so a spoofed Host cannot become a printed QR destination.
  */
 function resolveCardQrUrl(vcard: Vcard, baseUrl: string): string {
-  return permanentCardUrl(
-    { routeSlug: vcard.routeSlug, publicSlug: vcard.publicSlug },
+  // Keep a working review QR while the Card is still unpublished; its branded
+  // publicSlug intentionally 404s until Review Management enables it.
+  if (vcard.kind === 'review' && !vcard.preview?.ok) {
+    return resolveCardDisplayUrl(vcard, baseUrl);
+  }
+  return brandedCardQrUrl(
+    { routeSlug: vcard.routeSlug, publicSlug: vcard.publicSlug, urlAlias: vcard.urlAlias, slug: vcard.slug },
     baseUrl
   );
 }

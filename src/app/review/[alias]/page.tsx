@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
+import { headers } from 'next/headers';
 import { connectDB } from '@/lib/db';
 import { getPublicCardByAlias } from '@/lib/services/card-access';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import { vcardDisplayName } from '@/components/public/hero';
 import {
   ReviewExperience,
@@ -82,6 +84,10 @@ function Unavailable() {
 export default async function ReviewPage({ params }: Params) {
   const access = await resolveOwnerAccess(params.alias);
   if (!access) return <Unavailable />;
+
+  // Final review destination renders here; intermediate Card routes do not
+  // record, so one navigation counts once.
+  await recordPublicVisit({ cardId: access.card._id, headers: headers() });
 
   return (
     <ReviewExperience

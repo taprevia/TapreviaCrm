@@ -4,6 +4,10 @@
  * Kept outside the page so the 0/1/3/4/5/10-card states and public QR URL
  * construction can be unit tested without a running Next.js server.
  */
+import {
+  classifyStandeeProfile,
+  resolveStandeeEntryDecision,
+} from '@/lib/services/standee-entry-state';
 
 export const INITIAL_CARD_LIMIT = 4;
 
@@ -103,4 +107,106 @@ export function permanentCardUrl(
   const path = cardPublicQrPath(card);
   if (!base || !path) return '';
   return `${base}${path}`;
+}
+
+/**
+ * Branded software-QR path for a Card: the permanent publicSlug is preferred.
+ * `/r/{routeSlug}` and legacy `/c|/profile` remain fallbacks only when no
+ * publicSlug is available. Printed QR/routing helpers above are unchanged.
+ */
+export function brandedCardQrPath(card: PublicCardRoute): string {
+  const publicSlug = (card.publicSlug ?? '').trim().replace(/^\/+|\/+$/g, '');
+  if (publicSlug) return `/${publicSlug}`;
+  return strictPermanentCardPath(card) ?? legacyCardPath(card) ?? '';
+}
+
+export function brandedCardQrUrl(card: PublicCardRoute, publicBaseUrl: string): string {
+  const base = trustedBase(publicBaseUrl);
+  const path = brandedCardQrPath(card);
+  if (!base || !path) return '';
+  return `${base}${path}`;
+}
+
+export function brandedCardQrIsLegacy(card: PublicCardRoute): boolean {
+  return (
+    !(card.publicSlug ?? '').trim() &&
+    !strictPermanentCardPath(card) &&
+    Boolean(legacyCardPath(card))
+  );
+}
+
+export interface PublicStandeeRoute {
+  routeSlug?: string | null;
+  uid?: string | null;
+  publicSlug?: string | null;
+  maxProfiles?: number | null;
+  fixedProfiles?: string[] | null;
+  socialQrs?: Array<{
+    platform?: string | null;
+    destinationUrl?: string | null;
+  }> | null;
+  panelQr?: { qrId?: string | null } | null;
+  socialLinks?: Array<{ platform?: string | null; url?: string | null }> | null;
+}
+
+function trustedBase(publicBaseUrl: string): string {
+  const base = (publicBaseUrl ?? '').trim();
+  if (!base) return '';
+  try {
+    const url = new URL(base);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    if (url.username || url.password) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Standee panel QR URL.
+ *
+ * The branded publicSlug is used for:
+ *   - modern multi-profile pickers
+ *   - legacy AIO pickers (Total Visits counts the picker directly)
+ *   - single-profile Standees with a safe external destination
+ *
+ * Unconfigured, ambiguous, unsafe/same-origin and missing-destination records
+ * keep their existing `/r/{routeSlug}` or legacy `/qr/{panelQrId}` fallback so
+ * the QR cannot silently change their destination. Slot/social QRs never use
+ * this helper.
+ */
+export function brandedStandeePanelQrUrl(
+  standee: PublicStandeeRoute,
+  publicBaseUrl: string,
+  socialLinks: Array<{ platform?: string | null; url?: string | null }> = []
+): string {
+  const base = trustedBase(publicBaseUrl);
+  if (!base) return '';
+
+  const publicSlug = (standee.publicSlug ?? '').trim().replace(/^\/+|\/+$/g, '');
+  if (publicSlug) {
+    const profileClass = classifyStandeeProfile(standee);
+    const decision = resolveStandeeEntryDecision({
+      routeSlug: standee.routeSlug,
+      uid: standee.uid,
+      maxProfiles: standee.maxProfiles,
+      fixedProfiles: standee.fixedProfiles,
+      socialQrs: standee.socialQrs,
+      socialLinks,
+      origin: base,
+    });
+    if (
+      profileClass === 'modern-multi' ||
+      profileClass === 'legacy-multi' ||
+      decision.action === 'delegate'
+    ) {
+      return `${base}/${publicSlug}`;
+    }
+  }
+
+  const route = (standee.routeSlug ?? standee.uid ?? '').trim();
+  if (route) return `${base}/r/${encodeURIComponent(route)}`;
+  const panelQrId = (standee.panelQr?.qrId ?? '').trim();
+  if (panelQrId) return `${base}/qr/${encodeURIComponent(panelQrId)}`;
+  return '';
 }

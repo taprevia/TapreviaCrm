@@ -70,6 +70,9 @@ export default function AnalyticsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Analytics</h1>
         <p className="mt-0.5 text-sm text-ink-mute">Card and standee performance over time</p>
+        <p className="mt-1 text-[11px] text-ink-faint">
+          Total Visits counts all public entries recorded from Phase 2A-3C onward; historical taps remain separate.
+        </p>
       </div>
 
       {/* Controls */}

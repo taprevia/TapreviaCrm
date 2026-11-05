@@ -24,6 +24,7 @@ import './Product';
 import './ProductEnquiry';
 import './ProductTitleLog';
 import './Profile';
+import './PublicUrlReservation';
 import './RateCounter';
 import './ReviewCategory';
 import './ReviewSettings';

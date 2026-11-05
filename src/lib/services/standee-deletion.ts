@@ -1,6 +1,7 @@
 import Standee from '@/models/Standee';
 import UserProduct from '@/models/UserProduct';
 import User from '@/models/User';
+import { retireStandeePublicSlugReservation } from '@/lib/services/public-url-reservation';
 
 /**
  * Canonical standee deletion.
@@ -40,13 +41,25 @@ export async function deleteStandeeCascade(
   if (options.userId) query.userId = options.userId;
 
   const standee = (await Standee.findOne(query)
-    .select('userId')
-    .lean()) as unknown as { _id: unknown; userId?: unknown } | null;
+    .select('userId publicSlug')
+    .lean()) as unknown as {
+    _id: unknown;
+    userId?: unknown;
+    publicSlug?: string;
+  } | null;
   if (!standee) {
     return { ok: false, status: 404, error: 'Standee not found' };
   }
 
   const userId = standee.userId ? String(standee.userId) : null;
+
+  // Permanent URL identity must be preserved BEFORE the Standee is removed.
+  // If the registry cannot be updated safely, deletion fails closed.
+  await retireStandeePublicSlugReservation({
+    standeeId: standee._id,
+    ownerId: standee.userId,
+    publicSlug: standee.publicSlug,
+  });
 
   await Standee.deleteOne({ _id: standee._id });
 

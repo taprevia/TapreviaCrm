@@ -15,12 +15,67 @@ const publicCardRoutes = [
   '/api/public/',
 ];
 
+// Business slugs are allocated from a reserved namespace. These roots can
+// never be a genuine branded public Standee path.
+const NON_BRANDED_ROOTS = new Set([
+  'admin',
+  'api',
+  'c',
+  'dashboard',
+  'login',
+  'media',
+  'panel',
+  'profile',
+  'qr',
+  'r',
+  'register',
+  'review',
+  'standee-review',
+  'preview',
+  'contacts',
+  'privacy',
+  'terms',
+  'cookies',
+  'fonts',
+  't',
+]);
+
+// Standee publicSlug is always "{business}/standee" or
+// "{business}/standee-N". Card publicSlugs never use the reserved
+// "standee" product segment (human-url.ts reserves it for Standees).
+const STANDEE_PUBLIC_PATH =
+  /^\/([a-z0-9-]{1,50})\/standee(?:-[1-9][0-9]*)?\/?$/i;
+
+function isBrandedStandeePublicPath(pathname: string): boolean {
+  const match = STANDEE_PUBLIC_PATH.exec(pathname);
+  if (!match) return false;
+  return !NON_BRANDED_ROOTS.has(match[1].toLowerCase());
+}
+
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Trusted request-method propagation for Server Components.
+ *
+ * Next.js does not expose the HTTP method through `headers()` in a page.
+ * Middleware is the authoritative boundary: it overwrites any inbound value
+ * with the real method before the request reaches application code. Public
+ * visit recording accepts only GET, so HEAD never creates a visit.
+ */
+const REQUEST_METHOD_HEADER = 'x-tp-request-method';
+
+function withTrustedRequestMethod(request: NextRequest): Headers {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(REQUEST_METHOD_HEADER, request.method.toUpperCase());
+  return requestHeaders;
+}
 
 // Dev-only cache hardening: never let a browser/proxy cache an HTML page shell,
 // otherwise stale UI survives code fixes. API caching behavior is untouched.
-function nextWithDevNoStore(pathname: string): NextResponse {
-  const response = NextResponse.next();
+function nextWithDevNoStore(pathname: string, request: NextRequest): NextResponse {
+  const response = NextResponse.next({
+    request: { headers: withTrustedRequestMethod(request) },
+  });
   if (process.env.NODE_ENV === 'development' && !pathname.startsWith('/api')) {
     response.headers.set('Cache-Control', 'no-store');
   }
@@ -100,7 +155,7 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
 
   // Allow public card routes and API routes without auth
   if (publicCardRoutes.some(route => pathname.startsWith(route))) {
-    const res = nextWithDevNoStore(pathname);
+    const res = nextWithDevNoStore(pathname, request);
     res.headers.set('x-request-id', requestId);
     return res;
   }
@@ -114,7 +169,7 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
 
   // Allow public pages
   if (publicRoutes.includes(pathname)) {
-    const res = nextWithDevNoStore(pathname);
+    const res = nextWithDevNoStore(pathname, request);
     res.headers.set('x-request-id', requestId);
     return res;
   }
@@ -132,7 +187,7 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
       return res;
     }
     // Allow other routes (might be public pages)
-    const res = nextWithDevNoStore(pathname);
+    const res = nextWithDevNoStore(pathname, request);
     res.headers.set('x-request-id', requestId);
     return res;
   }
@@ -147,6 +202,16 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
         { error: 'Unauthorized', code: 'UNAUTHORIZED' },
         { status: 401 }
       );
+      response.cookies.set('token', '', { maxAge: 0, path: '/' });
+      response.headers.set('x-request-id', requestId);
+      return response;
+    }
+    // Branded public Standee URLs are intentionally public. A stale, expired,
+    // malformed, or unrelated token must not turn a printed QR scan into a
+    // login redirect. Clear the stale cookie and let the public page resolve
+    // normally. Protected namespaces never reach this branch.
+    if (isBrandedStandeePublicPath(pathname)) {
+      const response = nextWithDevNoStore(pathname, request);
       response.cookies.set('token', '', { maxAge: 0, path: '/' });
       response.headers.set('x-request-id', requestId);
       return response;
@@ -172,7 +237,7 @@ async function handle(request: NextRequest, pathname: string, requestId: string)
     // Admin trying to access customer dashboard - allow (admin can view both)
   }
 
-  const res = nextWithDevNoStore(pathname);
+  const res = nextWithDevNoStore(pathname, request);
   res.headers.set('x-request-id', requestId);
   return res;
 }

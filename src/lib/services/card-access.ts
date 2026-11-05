@@ -3,6 +3,7 @@ import Card from '@/models/Card';
 import User from '@/models/User';
 import type { AuthUser } from '@/lib/auth';
 import { canUseFeature } from '@/lib/services/feature-access';
+import { isCardOwnerPubliclyVisible } from '@/lib/services/public-owner-visibility';
 import type { CardKind, FeatureKey } from '@/types';
 
 /**
@@ -116,11 +117,7 @@ export async function getPublicCardByAlias(alias: string) {
   // Suspension must revoke a public URL immediately, including legacy cards
   // whose card status was not updated by the admin action. Missing owners and
   // legacy users without an explicit status remain compatible.
-  const ownerIds = [card.userId, card.assignedUserId].filter(Boolean);
-  if (ownerIds.length > 0 && (await User.exists({ _id: { $in: ownerIds }, status: 'suspended' }))) {
-    return null;
-  }
-  return card;
+  return (await isCardOwnerPubliclyVisible(card)) ? card : null;
 }
 
 /**

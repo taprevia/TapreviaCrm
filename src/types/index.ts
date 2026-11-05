@@ -294,7 +294,9 @@ export type IVcard = ICard;
 
 export interface IAnalyticsLog {
   cardId?: string;
+  standeeId?: string;
   action:
+    | 'public_visit'
     | 'tap'
     | 'vcard_download'
     | 'link_click'

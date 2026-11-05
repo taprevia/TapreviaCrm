@@ -21,9 +21,10 @@ import { Modal } from '@/components/ui/modal';
 import { downloadQrPdf } from '@/lib/qr-pdf';
 import { canonicalPublicBase } from '@/lib/public-base';
 import {
-  legacyCardUrl,
+  brandedCardQrIsLegacy,
+  brandedCardQrUrl,
+  brandedStandeePanelQrUrl,
   remainingCardCount,
-  strictPermanentCardUrl,
   visibleAdminCards,
 } from '@/lib/admin-card-view';
 
@@ -80,6 +81,7 @@ interface CardData {
   uid?: string;
   publicSlug?: string;
   urlAlias?: string;
+  kind?: string;
   templateKey?: string;
   status: string;
   canonicalPublicUrl?: string | null;
@@ -167,28 +169,24 @@ function catalogTypeLabel(item: CatalogProductLite): string {
   return PRODUCT_KIND_LABEL[item.kind ?? ''] ?? CATEGORY_LABEL[item.category] ?? item.category;
 }
 
-/** Strict Permanent QR/URL: `/r/{routeSlug|uid}` only, else unavailable. */
-function cardPermanentUrl(card: CardData, publicBaseUrl: string): string | null {
-  return strictPermanentCardUrl(
-    { routeSlug: card.routeSlug, uid: card.uid },
-    publicBaseUrl
-  );
-}
-
-/** Explicitly labelled Legacy QR/URL for cards with no permanent identifier. */
-function cardLegacyUrl(card: CardData, publicBaseUrl: string): string | null {
-  return legacyCardUrl(card, publicBaseUrl);
-}
-
 function cardQrPayload(card: CardData, publicBaseUrl: string): string {
-  return cardPermanentUrl(card, publicBaseUrl) ?? cardLegacyUrl(card, publicBaseUrl) ?? '';
+  // An unpublished review Card has no renderable branded publicSlug yet;
+  // keep its working /r or legacy review destination instead of a 404 QR.
+  if (card.kind === 'review' && !card.canonicalPublicUrl) {
+    const fallback = (card.permanentEntryUrl ?? card.legacyEntryUrl ?? '').trim();
+    if (!fallback) return '';
+    if (/^https?:\/\//i.test(fallback)) return fallback;
+    return publicBaseUrl ? `${publicBaseUrl}${fallback}` : '';
+  }
+  return brandedCardQrUrl(card, publicBaseUrl);
 }
 
-function cardQrIsLegacy(card: CardData, publicBaseUrl: string): boolean {
-  return !cardPermanentUrl(card, publicBaseUrl) && Boolean(cardLegacyUrl(card, publicBaseUrl));
+function cardQrIsLegacy(card: CardData): boolean {
+  return brandedCardQrIsLegacy(card);
 }
 
 interface AnalyticsData {  totalTaps: number;
+  totalVisits: number;
   tapLogs: number;
   linkClicks: number;
   vcardDownloads: number;
@@ -353,16 +351,17 @@ export default function AdminUserDetailPage() {
   // legacy standees fall back to /qr/{qrId}.
   const standeeQrUrl = useCallback((s: StandeeData, kind: 'panel' | 'social', index = 0) => {
     if (!publicBaseUrl) return '';
+    if (kind === 'panel') {
+      // Branded publicSlug is used only when the existing Phase 2A-2 entry
+      // will delegate to /r, preserving route-tap analytics and destination.
+      return brandedStandeePanelQrUrl(s, publicBaseUrl, profile?.socialLinks ?? []);
+    }
     const route = (s.routeSlug || s.uid || '').trim();
     if (route) {
-      return kind === 'panel'
-        ? `${publicBaseUrl}/r/${encodeURIComponent(route)}`
-        : `${publicBaseUrl}/r/${encodeURIComponent(route)}/${index + 1}`;
+      return `${publicBaseUrl}/r/${encodeURIComponent(route)}/${index + 1}`;
     }
-    return kind === 'panel'
-      ? `${publicBaseUrl}/qr/${s.panelQr?.qrId ?? ''}`
-      : `${publicBaseUrl}/qr/${s.socialQrs?.[index]?.qrId ?? ''}`;
-  }, [publicBaseUrl]);
+    return `${publicBaseUrl}/qr/${s.socialQrs?.[index]?.qrId ?? ''}`;
+  }, [publicBaseUrl, profile?.socialLinks]);
 
   // Standee QR images are generated locally from the exact same permanent
   // `/r/{routeSlug}` or legacy `/qr/{qrId}` payloads used by copy/download.
@@ -452,7 +451,7 @@ export default function AdminUserDetailPage() {
     pdfBusyRef.current = true;
     setPdfError('');
     const template = (c.templateKey && templateNames[c.templateKey]) || c.templateKey;
-    const legacy = cardQrIsLegacy(c, publicBaseUrl);
+    const legacy = cardQrIsLegacy(c);
     setPdfBusy(`card:${c.slug}`);
     try {
       await downloadQrPdf(
@@ -884,6 +883,10 @@ export default function AdminUserDetailPage() {
           {analytics ? (
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg bg-accent-600/15 p-2.5 text-center">
+                <p className="text-xl font-bold text-accent-400">{analytics.totalVisits ?? 0}</p>
+                <p className="text-[10px] leading-tight text-ink">Total Visits</p>
+              </div>
+              <div className="rounded-lg bg-accent-600/15 p-2.5 text-center">
                 <p className="text-xl font-bold text-accent-400">{analytics.totalTaps}</p>
                 <p className="text-[10px] leading-tight text-ink">Taps (newest card)</p>
               </div>
@@ -907,7 +910,7 @@ export default function AdminUserDetailPage() {
           )}
           {analytics && (
             <p className="mt-3 text-[10px] leading-relaxed text-ink-faint">
-              Taps, link clicks and unique IPs cover the newest assigned card only. Lead records are legacy Lead entries, not verified downloads.
+              On this panel, Total Visits, taps, link clicks and unique IPs cover the newest assigned card only. Total Visits counts all public entries recorded from Phase 2A-3C onward; unique IPs are legacy and are not exact person identification. Lead records are legacy entries, not verified downloads.
             </p>
           )}
         </Card>
@@ -952,8 +955,8 @@ export default function AdminUserDetailPage() {
 
                   <div className="mt-3 flex gap-3">
                     {(() => {
-                      const permanent = cardPermanentUrl(c, publicBaseUrl);
-                      const legacy = permanent ? null : cardLegacyUrl(c, publicBaseUrl);
+                      const legacy = cardQrIsLegacy(c);
+                      const qrPayload = cardQrPayload(c, publicBaseUrl);
                       const qr = qrDataUrls[c._id];
                       if (qr) {
                         return (
@@ -970,7 +973,7 @@ export default function AdminUserDetailPage() {
                             </button>
                             {legacy && (
                               <p className="mt-1 max-w-[96px] text-[10px] leading-tight text-ink-faint">
-                                Not the permanent /r URL
+                                Legacy fallback URL
                               </p>
                             )}
                           </div>
@@ -982,11 +985,11 @@ export default function AdminUserDetailPage() {
                           <span className="mt-1 text-[10px] leading-tight text-ink-faint">
                             {!publicBaseUrl
                               ? 'Public base URL not configured'
-                              : permanent
-                                ? 'Permanent QR unavailable'
+                              : qrPayload
+                                ? 'QR unavailable'
                                 : legacy
                                   ? 'Legacy QR unavailable'
-                                  : 'Permanent URL unavailable — legacy card'}
+                                  : 'QR URL unavailable'}
                           </span>
                         </div>
                       );

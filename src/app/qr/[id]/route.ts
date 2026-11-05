@@ -8,7 +8,12 @@ import Standee from '@/models/Standee';
 import AnalyticsLog from '@/models/AnalyticsLog';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { withPublicCardVisibility } from '@/lib/services/card-access';
+import {
+  isCardOwnerPubliclyVisible,
+  isStandeeOwnerPubliclyVisible,
+} from '@/lib/services/public-owner-visibility';
 import { clientIp } from '@/lib/request-ip';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
 import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
@@ -68,19 +73,30 @@ export async function GET(
     const cardBySlug = (await Card.findOne(
       withPublicCardVisibility({ $or: [{ routeSlug: key }, { uid: key }] })
     )
-      .select('urlAlias slug kind redirectUrl')
+      .select('_id urlAlias slug kind redirectUrl userId assignedUserId')
       .lean()) as {
+      _id: unknown;
       urlAlias: string;
       slug: string;
       kind: string;
       redirectUrl: string;
+      userId?: unknown;
+      assignedUserId?: unknown;
     } | null;
 
     if (cardBySlug) {
+      if (!(await isCardOwnerPubliclyVisible(cardBySlug))) {
+        return noStoreText('Not found', 404);
+      }
       if (cardBySlug.kind === 'social' && isSafeExternalUrl(cardBySlug.redirectUrl)) {
         if (await wouldRedirectLoop(request.nextUrl.pathname, cardBySlug.redirectUrl, request.nextUrl.origin)) {
           return noStoreText('Redirect loop detected', 404);
         }
+        await recordPublicVisit({
+          cardId: cardBySlug._id,
+          headers: request.headers,
+          method: request.method,
+        });
         return noStoreRedirect(cardBySlug.redirectUrl, 302);
       }
       if (cardBySlug.urlAlias) {
@@ -103,6 +119,10 @@ export async function GET(
       uid?: string;
       productKey?: string;
     } | null;
+    if (standee && !(await isStandeeOwnerPubliclyVisible(standee.userId))) {
+      return noStoreText('Not found', 404);
+    }
+
     if (standee) {
       const socialQr = standee.socialQrs.find((q) => q.qrId === id);
       if (socialQr) {
@@ -143,6 +163,11 @@ export async function GET(
           if (await wouldRedirectLoop(request.nextUrl.pathname, url, request.nextUrl.origin)) {
             return noStoreText('Redirect loop detected', 404);
           }
+          await recordPublicVisit({
+            standeeId: standee._id,
+            headers: request.headers,
+            method: request.method,
+          });
           return noStoreRedirect(url, 302);
         }
       }
@@ -166,6 +191,10 @@ export async function GET(
       maxProfiles?: number;
       fixedProfiles?: string[];
     } | null;
+    if (panel && !(await isStandeeOwnerPubliclyVisible(panel.userId))) {
+      return noStoreText('Not found', 404);
+    }
+
     if (panel) {
       const reviewRoute = (panel.routeSlug ?? panel.uid ?? '').trim();
       const multiProfileStandee =
@@ -207,8 +236,11 @@ export async function GET(
 
     // 3. Legacy embedded standeeQr (QRs printed before the Standee collection).
     const legacy = (await Profile.findOne({ 'standeeQr.qrId': id })
-      .select('standeeQr')
-      .lean()) as { standeeQr?: { destinationUrl?: string } } | null;
+      .select('standeeQr userId')
+      .lean()) as { standeeQr?: { destinationUrl?: string }; userId?: unknown } | null;
+    if (legacy && !(await isStandeeOwnerPubliclyVisible(legacy.userId))) {
+      return noStoreText('Not found', 404);
+    }
     const legacyUrl = legacy?.standeeQr?.destinationUrl;
     // Unsafe/malformed stored destinations fall through to 404 — never a
     // protocol-jumping redirect (java/script/file/…).

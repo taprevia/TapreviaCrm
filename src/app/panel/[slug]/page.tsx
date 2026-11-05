@@ -1,16 +1,20 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { connectDB } from '@/lib/db';
 import Standee from '@/models/Standee';
 import Profile from '@/models/Profile';
 import { StandeeLanding } from '@/components/public';
 import { resolveStandeePanel } from '@/lib/services/standee-panel';
+import { isStandeeOwnerPubliclyVisible } from '@/lib/services/public-owner-visibility';
+import { recordPublicVisit } from '@/lib/services/public-visits';
 
 export const dynamic = 'force-dynamic';
 
 type Params = { params: { slug: string } };
 
 interface StandeeDoc {
+  _id: unknown;
   routeSlug: string;
   userId: unknown;
   displayName?: string;
@@ -38,7 +42,7 @@ export default async function PanelPage({ params }: Params) {
       { uid: params.slug.toLowerCase() },
     ],
   }).lean()) as StandeeDoc | null;
-  if (!standee) notFound();
+  if (!standee || !(await isStandeeOwnerPubliclyVisible(standee.userId))) notFound();
 
   const profile = (await Profile.findOne({ userId: standee.userId })
     .select('socialLinks companyName displayName')
@@ -56,5 +60,6 @@ export default async function PanelPage({ params }: Params) {
 
   if (panel.slotCount < 1) notFound();
 
+  await recordPublicVisit({ standeeId: standee._id, headers: headers() });
   return <StandeeLanding panel={panel} />;
 }
