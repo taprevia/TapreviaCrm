@@ -58,19 +58,87 @@ interface ProductsResponse {
   meta?: ListMeta;
 }
 
-/** Uniform error body; VALIDATION_ERROR carries per-field messages. */
+/** Uniform error body; VALIDATION_ERROR carries per-field messages under `details`. */
+type FieldErrorValue = string | string[];
+type FieldErrorMap = Record<string, FieldErrorValue>;
+
 interface ApiErrorBody {
   error?: string;
-  fieldErrors?: Record<string, string>;
+  code?: string;
+  /**
+   * Current API shape: `fail(..., parsed.error.flatten().fieldErrors)` stores
+   * the field map directly under `details` (not `details.fieldErrors`).
+   * The nested/top-level variants are tolerated for older callers.
+   */
+  details?: FieldErrorMap | { fieldErrors?: FieldErrorMap };
+  /** Legacy top-level shape kept for backward compatibility. */
+  fieldErrors?: FieldErrorMap;
+}
+
+function isFieldErrorMap(value: unknown): value is FieldErrorMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every(
+    (item) =>
+      typeof item === 'string' ||
+      (Array.isArray(item) && item.every((entry) => typeof entry === 'string'))
+  );
+}
+
+function extractFieldErrors(data: ProductMutationResponse | null): FieldErrorMap | null {
+  if (!data) return null;
+  if (isFieldErrorMap(data.fieldErrors)) return data.fieldErrors;
+  const details = data.details;
+  if (details && typeof details === 'object' && 'fieldErrors' in details) {
+    if (isFieldErrorMap(details.fieldErrors)) return details.fieldErrors;
+  }
+  return isFieldErrorMap(details) ? details : null;
 }
 
 type ProductMutationResponse = { product?: ProductRow } & ApiErrorBody;
+
+/* ─── Price conversion ──────────────────────────────────────────────────────── */
+
+/**
+ * Stored minor units (paise) → major-unit input value (rupees), always with two
+ * decimals so editing round-trips cleanly (10000 → "100.00").
+ */
+export function minorToMajorInput(priceMinor: number): string {
+  return (priceMinor / 100).toFixed(2);
+}
+
+type ParsedPrice =
+  | { kind: 'empty' }
+  | { kind: 'valid'; priceMinor: number }
+  | { kind: 'invalid' };
+
+/**
+ * Major-unit input (rupees) → integer minor units (paise).
+ * Empty input means "not provided" so callers can preserve the stored default.
+ */
+export function parsePriceMajor(raw: string): ParsedPrice {
+  const trimmed = raw.trim();
+  if (trimmed === '') return { kind: 'empty' };
+
+  // Digits with at most two decimal places; rejects negatives, exponents and
+  // other invalid numeric syntax before it reaches the API.
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return { kind: 'invalid' };
+
+  const major = Number(trimmed);
+  const priceMinor = Math.round(major * 100);
+  if (!Number.isFinite(major) || !Number.isSafeInteger(priceMinor)) {
+    return { kind: 'invalid' };
+  }
+
+  return { kind: 'valid', priceMinor };
+}
 
 /* ─── Form model ────────────────────────────────────────────────────────────── */
 
 interface ProductFormState {
   title: string;
   description: string;
+  /** Price in MAJOR units (rupees) as typed by the user; '' means unset. */
+  priceMajor: string;
   category: string;
   imageUrl: string;
   sortOrder: string;
@@ -80,6 +148,7 @@ function emptyForm(nextSortOrder: number): ProductFormState {
   return {
     title: '',
     description: '',
+    priceMajor: '',
     category: '',
     imageUrl: '',
     sortOrder: String(nextSortOrder),
@@ -141,6 +210,12 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
   /** null ⇒ create mode; otherwise the _id being patched. */
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductFormState>(() => emptyForm(0));
+  /**
+   * Price as it was when the editor opened. Saving only sends `priceMinor`
+   * when this value changes, so unrelated edits (e.g. the title) can never
+   * rewrite a legacy stored price.
+   */
+  const [initialPriceMajor, setInitialPriceMajor] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -151,19 +226,27 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
 
   const openCreate = useCallback(() => {
     setForm(emptyForm(items.length)); // default sort order = next index
+    setInitialPriceMajor('');
     setEditingId(null);
     setFieldErrors({});
     setEditorOpen(true);
   }, [items.length]);
 
   const openEdit = useCallback((product: ProductRow) => {
+    // Only prefill a real price; the stored 0 default stays an empty field.
+    const priceMajor =
+      typeof product.priceMinor === 'number' && product.priceMinor > 0
+        ? minorToMajorInput(product.priceMinor)
+        : '';
     setForm({
       title: product.title ?? '',
       description: product.description ?? '',
+      priceMajor,
       category: product.category ?? '',
       imageUrl: product.imageUrl ?? '',
       sortOrder: String(product.sortOrder ?? 0),
     });
+    setInitialPriceMajor(priceMajor);
     setEditingId(product._id);
     setFieldErrors({});
     setEditorOpen(true);
@@ -263,6 +346,11 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
       const title = form.title.trim();
       if (!title) errors.title = 'Title is required.';
 
+      const parsedPrice = parsePriceMajor(form.priceMajor);
+      if (parsedPrice.kind === 'invalid') {
+        errors.priceMinor = 'Enter a valid non-negative amount (max 2 decimals).';
+      }
+
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors);
         return;
@@ -270,6 +358,17 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
 
       const body: Record<string, unknown> = { title };
       if (form.description.trim()) body.description = form.description.trim();
+      if (parsedPrice.kind === 'valid') {
+        body.priceMinor = parsedPrice.priceMinor;
+      } else if (
+        editingId &&
+        parsedPrice.kind === 'empty' &&
+        form.priceMajor.trim() !== initialPriceMajor
+      ) {
+        // The user cleared a previously set price — reset to the model default.
+        body.priceMinor = 0;
+      }
+      // Unchanged edits omit priceMinor entirely so the stored value is kept.
       if (form.category.trim()) body.category = form.category.trim();
       // Always send imageUrl — including '' — so removing a stored image is
       // persisted (the PATCH handler deletes the detached object).
@@ -302,9 +401,25 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
         }
 
         if (!res.ok) {
-          const serverFieldErrors = data?.fieldErrors;
+          // The API stores the field map directly under `details`; support the
+          // nested and legacy top-level shapes too.
+          const serverFieldErrors = extractFieldErrors(data);
           if (serverFieldErrors && Object.keys(serverFieldErrors).length > 0) {
-            setFieldErrors(serverFieldErrors);
+            const normalized: Record<string, string> = {};
+            for (const [key, value] of Object.entries(serverFieldErrors)) {
+              normalized[key] = Array.isArray(value) ? value.join(' ') : value;
+            }
+            setFieldErrors(normalized);
+            // Fields with no rendered input would otherwise fail silently.
+            const rendered = new Set(['title', 'description', 'priceMinor', 'category', 'sortOrder']);
+            const unrendered = Object.entries(normalized).find(([key]) => !rendered.has(key));
+            if (unrendered) {
+              toast({
+                title: editingId ? 'Update failed' : 'Add failed',
+                description: unrendered[1],
+                variant: 'error',
+              });
+            }
             return;
           }
           throw new Error(data?.error || 'Could not save this product.');
@@ -331,7 +446,7 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
         setSaving(false);
       }
     },
-    [editingId, form, items.length, saving, toast, cardId]
+    [editingId, form, initialPriceMajor, items.length, saving, toast, cardId]
   );
 
   /** Controlled-input setter bound to a form field key. */
@@ -522,6 +637,27 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
             />
             {fieldErrors.description && (
               <p className="mt-1.5 text-xs text-red-500">{fieldErrors.description}</p>
+            )}
+          </div>
+
+          {/* Price (INR) */}
+          <div>
+            <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-gray-700">
+              Price (₹)
+            </label>
+            <Input
+              id="product-price"
+              type="number"
+              step="0.01"
+              min="0"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={form.priceMajor}
+              onChange={inputSetter('priceMajor')}
+              aria-invalid={Boolean(fieldErrors.priceMinor)}
+            />
+            {fieldErrors.priceMinor && (
+              <p className="mt-1.5 text-xs text-red-500">{fieldErrors.priceMinor}</p>
             )}
           </div>
 

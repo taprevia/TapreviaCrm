@@ -1,9 +1,10 @@
 /**
- * Presentation-only price removal guard.
+ * Presentation-only price guard.
  *
  * Read-only static verification: no DB, network or filesystem writes.
- * Proves that product-price output is gone from the affected UI surfaces while
- * pricing fields and backend/API contracts remain intact.
+ * Proves that product-price output stays gone from the public/marketing/admin
+ * surfaces, while the builder's Premium NFC product editor has its INR price
+ * input restored and the pricing fields/backend contracts remain intact.
  *
  * Run: npx tsx scripts/test-price-ui-removal.ts
  */
@@ -14,18 +15,10 @@ import fs from 'node:fs';
 const UI_FILES = [
   'src/app/(admin)/admin/users/page.tsx',
   'src/app/(admin)/admin/users/[id]/page.tsx',
-  'src/components/builder/tabs/products-tab.tsx',
   'src/components/marketing/ui/ProductCard.tsx',
   'src/components/marketing/ui/ProductModal.tsx',
   'src/app/(public)/page.tsx',
   'src/app/(public)/contacts/page.tsx',
-];
-
-const DATA_FILES = [
-  'src/models/CatalogProduct.ts',
-  'src/models/Product.ts',
-  'src/lib/marketing/products.ts',
-  'src/lib/format.ts',
 ];
 
 let passed = 0;
@@ -48,9 +41,15 @@ check('affected UI no longer renders a rupee price or price formatter', () => {
   }
 });
 
-check('builder no longer exposes price/currency editing controls', () => {
+check('builder restores the INR price input but keeps currency editing hidden', () => {
   const text = read('src/components/builder/tabs/products-tab.tsx');
-  assert.equal(/product-price|product-currency|priceMajor|body\.priceMinor|body\.currency/.test(text), false);
+  assert.match(text, /id="product-price"/);
+  assert.match(text, /type="number"/);
+  assert.match(text, /step="0\.01"/);
+  assert.match(text, /Price \(₹\)/);
+  assert.match(text, /priceMajor/);
+  assert.match(text, /body\.priceMinor/);
+  assert.equal(/product-currency|body\.currency/.test(text), false, 'currency editing must stay hidden');
 });
 
 check('marketing cards/modal no longer print product prices or discounts', () => {
