@@ -121,12 +121,21 @@ export async function resolveStandeePreview(
         routeSlug?: string | null;
         uid?: string | null;
         publicSlug?: string | null;
+        linkedCardPublicSlug?: string | null;
       }
     | null
     | undefined
 ): Promise<ProductPreview> {
   if (!standee) {
     return { ok: false, kind: 'standee', reason: 'missing-instance', message: SETUP_MESSAGES['missing-instance'] };
+  }
+  // Business Profile Standee: when a linked profile Card is present, preview
+  // resolves to that card's canonical public URL (the business profile), not
+  // the standee's own redirect slug. Unlinked legacy standees fall through to
+  // the existing behaviour below.
+  const linkedCardPublicSlug = (standee.linkedCardPublicSlug ?? '').trim().replace(/^\/+/, '');
+  if (linkedCardPublicSlug) {
+    return { ok: true, kind: 'profile', href: `/${linkedCardPublicSlug}` };
   }
   const route = (standee.routeSlug ?? standee.uid ?? '').trim();
   if (STANDEE_REVIEW_ASSISTANT_ENABLED && route) {
@@ -194,6 +203,7 @@ export function legacyEntryPath(
 export async function resolveProductUrls(input: {
   instanceType: 'card' | 'standee' | null;
   instance: Record<string, unknown> | null;
+  linkedCardPublicSlug?: string | null;
 }): Promise<ProductUrlResolution> {
   if (!input.instance || !input.instanceType) {
     return {
@@ -209,7 +219,10 @@ export async function resolveProductUrls(input: {
   const preview =
     input.instanceType === 'card'
       ? await resolveCardPreview(input.instance as never)
-      : await resolveStandeePreview(input.instance as never);
+      : await resolveStandeePreview({
+          ...(input.instance as Record<string, unknown>),
+          linkedCardPublicSlug: input.linkedCardPublicSlug,
+        } as never);
   const permanentEntryUrl = permanentEntryPath(input.instanceType, input.instance);
   const legacyEntryUrl = legacyEntryPath(input.instanceType, input.instance);
   const canonicalPublicUrl = preview.ok ? preview.href : null;

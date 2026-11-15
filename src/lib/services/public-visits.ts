@@ -16,6 +16,11 @@
  */
 import { connectDB } from '@/lib/db';
 import AnalyticsLog from '@/models/AnalyticsLog';
+import PublicVisitMarker from '@/models/PublicVisitMarker';
+import { randomBytes } from 'crypto';
+
+/** TTL for a standee visit-attribution marker (one redirect round-trip). */
+const VISIT_MARKER_TTL_MS = 60_000;
 
 export interface HeadersLike {
   get(name: string): string | null;
@@ -89,5 +94,59 @@ export async function recordPublicVisit(input: PublicVisitInput): Promise<void> 
     });
   } catch {
     // Fail open: analytics must never block a public navigation.
+  }
+}
+
+/**
+ * Mint a single-use standee visit-attribution marker.
+ *
+ * Returns an opaque random token bound to the exact (standeeId, cardId) pair,
+ * or `null` when minting fails (fail-open: the caller proceeds with a normal
+ * Card-attributed visit rather than blocking the redirect).
+ */
+export async function mintStandeeVisitMarker(
+  standeeId: unknown,
+  cardId: unknown
+): Promise<string | null> {
+  if (!standeeId || !cardId) return null;
+  try {
+    await connectDB();
+    const token = randomBytes(16).toString('hex');
+    await PublicVisitMarker.create({
+      token,
+      standeeId,
+      cardId,
+      expiresAt: new Date(Date.now() + VISIT_MARKER_TTL_MS),
+    });
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Atomically consume a standee visit-attribution marker.
+ *
+ * Only a non-expired marker whose `cardId` matches the rendered Card is
+ * consumed (single-use). Returns the marker's `standeeId` so the caller can
+ * attribute the visit to the Standee, or `null` when the token is missing,
+ * expired, already consumed, foreign, or invalid — in which case the caller
+ * records a normal Card-attributed visit.
+ */
+export async function consumeStandeeVisitMarker(
+  token: string | null | undefined,
+  cardId: unknown
+): Promise<{ standeeId: unknown } | null> {
+  if (!token || !cardId) return null;
+  try {
+    await connectDB();
+    const marker = (await PublicVisitMarker.findOneAndDelete({
+      token,
+      cardId,
+      expiresAt: { $gt: new Date() },
+    }).exec()) as unknown as { standeeId?: unknown } | null;
+    return marker && marker.standeeId ? { standeeId: marker.standeeId } : null;
+  } catch {
+    return null;
   }
 }

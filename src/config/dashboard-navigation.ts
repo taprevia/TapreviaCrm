@@ -71,7 +71,7 @@ export const CUSTOMER_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/reviews', label: 'Google Reviews', icon: Star, requiredCapability: 'google_review', anyCapability: ['google_review'] },
   { href: '/dashboard/review-management', label: 'Review Management', icon: MessageSquareText, requiredCapability: 'review_ai_suggestions' },
   { href: '/dashboard/facebook', label: 'Facebook', icon: Users, requiredCapability: 'facebook', anyCapability: ['facebook'] },
-  { href: '/dashboard/whatsapp', label: 'WhatsApp', icon: MessageCircle, requiredCapability: 'whatsapp', anyCapability: ['whatsapp'] },
+  { href: '/dashboard/whatsapp', label: 'Business Profile', icon: MessageCircle, requiredCapability: 'whatsapp', anyCapability: ['whatsapp'] },
 
   { href: '/dashboard/settings', label: 'Settings', icon: Settings, requiredCapability: null },
 

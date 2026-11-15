@@ -276,7 +276,7 @@ function main(): void {
   expectNav('Instagram-only', instagramCaps, ['Dashboard', 'My Products', 'Instagram', 'Settings', 'Analytics']);
   expectNav('Google Review-only', googleReviewCaps, ['Dashboard', 'My Products', 'Google Reviews', 'Review Management', 'Settings', 'Analytics']);
   expectNav('Facebook-only', facebookCaps, ['Dashboard', 'My Products', 'Facebook', 'Settings', 'Analytics']);
-  expectNav('WhatsApp-only', whatsappOnlyCaps, ['Dashboard', 'My Products', 'WhatsApp', 'Settings', 'Analytics']);
+  expectNav('WhatsApp-only', whatsappOnlyCaps, ['Dashboard', 'My Products', 'Business Profile', 'Settings', 'Analytics']);
   expectNav('No capability (universals only)', [], ['Dashboard', 'My Products', 'Settings']);
   expectNav(
     'LinkedIn + Instagram (multi, each row once)',
@@ -300,7 +300,7 @@ function main(): void {
   );
 
   // Each product-specific row is registered exactly once (no duplicate rows).
-  const productLabels = ['LinkedIn', 'Instagram', 'Google Reviews', 'Facebook', 'WhatsApp'];
+  const productLabels = ['LinkedIn', 'Instagram', 'Google Reviews', 'Facebook', 'Business Profile'];
   const dupes = productLabels.filter(
     (label) => CUSTOMER_NAV_ITEMS.filter((i) => i.label === label).length !== 1
   );
@@ -660,15 +660,18 @@ function main(): void {
 
   const myProductsListApi = apiFileForPath('/my/products');
 
-  // P-A1 — the My Products list endpoint represents an unbound card-category
-  // assignment as a card (instanceType 'card', instance null, no permanent
-  // route) so the existing needsConfig logic shows "Setup Required"/"Set Up" on
-  // the list page exactly like the configuration page does.
+  // P-A1 — the My Products list endpoint classifies the physical product first
+  // (a Standee with a linked profile Card is a Standee, not a Card), then the
+  // Card, and finally synthesizes an unbound card-category assignment as a
+  // card (instanceType 'card', instance null, no permanent route) so the
+  // existing needsConfig logic shows "Setup Required"/"Set Up" on the list page
+  // exactly like the configuration page does.
   check(
-    'list API synthesizes instanceType card only for unbound card-category assignments',
-    hasText(myProductsListApi, 'else if (catalog?.category === \'card\')') &&
+    'list API classifies Standee before Card, then unbound card-category',
+    hasText(myProductsListApi, 'if (assignment.standeeId)') &&
+      hasText(myProductsListApi, 'else if (assignment.cardId)') &&
       hasText(myProductsListApi, "instanceType = 'card';") &&
-      hasText(myProductsListApi, 'else if (assignment.standeeId)')
+      hasText(myProductsListApi, "else if (catalog?.category === 'card')")
   );
   check(
     'list API never fabricates an instance from config (pending synthesis stays on the single-product GET)',
@@ -770,7 +773,7 @@ function main(): void {
     '/dashboard/whatsapp': '/dashboard/standees',
   };
   const aio4Caps = getProductCapabilities('ALL_IN_ONE_STANDEE_4');
-  const platformLabels = ['LinkedIn', 'Instagram', 'Google Reviews', 'Facebook', 'WhatsApp'];
+  const platformLabels = ['LinkedIn', 'Instagram', 'Google Reviews', 'Facebook', 'Business Profile'];
   const standeeOnlyNav = dedupeNavByDestination(
     filterNavByCapabilities(CUSTOMER_NAV_ITEMS, aio4Caps),
     standeeOnlyDest
@@ -799,7 +802,7 @@ function main(): void {
   check(
     'P7-3. standee + Instagram card: Instagram row kept (its card editor), other platform rows dropped',
     mixedLabels.includes('Instagram') &&
-      !['Google Reviews', 'Facebook', 'WhatsApp'].some((l) => mixedLabels.includes(l)) &&
+      !['Google Reviews', 'Facebook', 'Business Profile'].some((l) => mixedLabels.includes(l)) &&
       mixedLabels.includes('Standees')
   );
 

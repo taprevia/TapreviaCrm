@@ -8,7 +8,7 @@ import type { ICard } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { alias: string } };
+type Params = { params: { alias: string }; searchParams: { tpv?: string } };
 
 const getCard = cache(async (alias: string) => {
   await connectDB();
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
 }
 
-export default async function ProfilePage({ params }: Params) {
+export default async function ProfilePage({ params, searchParams }: Params) {
   const raw = await getCard(params.alias);
   if (!raw) notFound();
 
@@ -51,6 +51,7 @@ export default async function ProfilePage({ params }: Params) {
     <PublicCardPage
       card={card}
       currentPath={`/profile/${encodeURIComponent(params.alias)}`}
+      standeeVisitToken={searchParams.tpv}
     />
   );
 }

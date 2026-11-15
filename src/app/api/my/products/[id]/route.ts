@@ -32,6 +32,7 @@ interface LoadedProduct {
   assignment: AssignmentDoc & Record<string, unknown>;
   instance: Record<string, unknown> | null;
   instanceType: 'card' | 'standee' | null;
+  linkedCardPublicSlug: string | null;
 }
 
 /**
@@ -54,17 +55,33 @@ async function loadProductDetail(
 
   let instance: Record<string, unknown> | null = null;
   let instanceType: 'card' | 'standee' | null = null;
+  let linkedCardPublicSlug: string | null = null;
 
-  if (assignment.cardId) {
+  if (assignment.standeeId) {
+    instance = (await Standee.findById(assignment.standeeId)
+      .select('name displayName routeSlug productKey cardId maxProfiles fixedProfiles panelQr socialQrs zones publicSlug')
+      .lean()) as unknown as Record<string, unknown> | null;
+    instanceType = 'standee';
+
+    // Business Profile Standee: expose the linked profile Card's public URL so
+    // the displayed public URL and preview match the business profile (not the
+    // standee's own redirect slug). Scoped to the authenticated customer's own
+    // assignment (cardId is never client-supplied); fetch fails safely to the
+    // standee publicSlug fallback.
+    const cardId = instance?.cardId;
+    if (cardId) {
+      const linked = (await Card.findById(cardId)
+        .select('publicSlug')
+        .lean()) as unknown as { publicSlug?: string | null } | null;
+      if (linked && typeof linked.publicSlug === 'string' && linked.publicSlug) {
+        linkedCardPublicSlug = linked.publicSlug;
+      }
+    }
+  } else if (assignment.cardId) {
     instance = (await Card.findById(assignment.cardId)
       .select('cardUid slug routeSlug urlAlias name cardLabel kind redirectUrl setupComplete isActive instagramConfig whatsappConfig linkedinConfig facebookConfig reviewAssistant publicSlug')
       .lean()) as unknown as Record<string, unknown> | null;
     instanceType = 'card';
-  } else if (assignment.standeeId) {
-    instance = (await Standee.findById(assignment.standeeId)
-      .select('name displayName routeSlug productKey maxProfiles fixedProfiles panelQr socialQrs zones publicSlug')
-      .lean()) as unknown as Record<string, unknown> | null;
-    instanceType = 'standee';
   } else if (assignment.pendingConfig) {
     // Uninstantiated assignment — the physical card/standee is not bound yet,
     // so the saved config lives on pendingConfig. Synthesize an instance shape
@@ -102,15 +119,29 @@ async function loadProductDetail(
     }
   }
 
-  return { assignment: assignment as AssignmentDoc & Record<string, unknown>, instance, instanceType };
+  return {
+    assignment: assignment as AssignmentDoc & Record<string, unknown>,
+    instance,
+    instanceType,
+    linkedCardPublicSlug,
+  };
 }
 
-function buildProductPayload({ assignment, instance, instanceType }: LoadedProduct) {
+function buildProductPayload({
+  assignment,
+  instance,
+  instanceType,
+  linkedCardPublicSlug,
+}: LoadedProduct) {
   const catalog = assignment.catalogProductId as Record<string, unknown> | null;
   const slug = (catalog?.slug as string) ?? '';
   const productId: ProductId | null = resolveCanonicalProductId(slug);
   const productDef = productId ? PRODUCT_CATALOG[productId] : null;
   const routeSlug = (instance?.routeSlug as string | undefined) ?? '';
+  const displayPublicSlug =
+    linkedCardPublicSlug ||
+    (instance && typeof instance.publicSlug === 'string' && instance.publicSlug) ||
+    '';
 
   return {
     assignmentId: assignment._id,
@@ -144,12 +175,9 @@ function buildProductPayload({ assignment, instance, instanceType }: LoadedProdu
       : null,
     instanceType,
     // Human-readable public URL ("/{business-slug}/{product-slug}[-N]").
-    // Cards and standees with an allocated publicSlug expose one;
-    // uninstantiated/unbound instances keep null.
-    publicUrl:
-      instance && typeof instance.publicSlug === 'string' && instance.publicSlug
-        ? `/${instance.publicSlug}`
-        : null,
+    // BPS shows its linked Card's publicSlug; other standees/cards show their
+    // own; uninstantiated/unbound instances keep null.
+    publicUrl: displayPublicSlug ? `/${displayPublicSlug}` : null,
     instance: instance
       ? {
           id: instance._id,
@@ -175,6 +203,9 @@ function buildProductPayload({ assignment, instance, instanceType }: LoadedProdu
             ? {
                 productKey: instance.productKey,
                 displayName: instance.displayName,
+                // Linked profile Card (Business Profile Standee) — exposed so
+                // Manage can open the Card editor.
+                cardId: instance.cardId,
                 maxProfiles: instance.maxProfiles,
                 fixedProfiles: instance.fixedProfiles,
                 panelQr: instance.panelQr,
@@ -195,6 +226,7 @@ async function buildProductPayloadWithUrls(loaded: LoadedProduct) {
   const urls = await resolveProductUrls({
     instanceType: loaded.instanceType,
     instance: loaded.instance,
+    linkedCardPublicSlug: loaded.linkedCardPublicSlug,
   });
 
   // Additive Premium/profile review action. The canonical NFC destination is

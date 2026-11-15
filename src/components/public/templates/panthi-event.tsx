@@ -23,7 +23,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { safeExternalUrl } from '@/lib/safe-url';
 import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
-import { downloadVcfForCard } from '@/lib/vcf-download';
+import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
+import { phoneDigits, telHref } from '@/lib/phone';
 import { brandLabelFromUrl } from '@/utils/get-link-icon';
 import { getBrandIcon } from '@/utils/getBrandIcon';
 import type { IVcard } from '../types';
@@ -50,6 +51,8 @@ interface PantheventData {
   tagline: string;
   phoneDisplay: string;
   phoneRaw: string;
+  alternatePhoneDisplay: string;
+  alternatePhoneRaw: string;
   email: string;
   website: string;
   cardUrl: string;
@@ -547,10 +550,6 @@ const SHEET_CLOSE_MS = 240;
 
 const WEBSITE_PLATFORMS = new Set(['website', 'site', 'web', 'blog', 'portfolio']);
 
-function digitsOf(value: string): string {
-  return value.replace(/\D/g, '');
-}
-
 function buildData({
   vcard,
   products,
@@ -572,7 +571,9 @@ function buildData({
     '';
 
   const phoneDisplay = vcard.basic?.phone?.trim() ?? '';
-  const phoneRaw = digitsOf(phoneDisplay);
+  const phoneRaw = phoneDigits(phoneDisplay);
+  const alternatePhoneDisplay = vcard.basic?.alternatePhone?.trim() ?? '';
+  const alternatePhoneRaw = phoneDigits(alternatePhoneDisplay);
 
   const email = vcard.basic?.email?.trim() ?? '';
 
@@ -615,6 +616,8 @@ function buildData({
     tagline,
     phoneDisplay,
     phoneRaw,
+    alternatePhoneDisplay,
+    alternatePhoneRaw,
     email,
     website,
     cardUrl: resolveCustomerPublicPath(vcard) ?? '',
@@ -699,6 +702,8 @@ export function PanthiEventTemplate({
   const [exErrors, setExErrors] = useState<FieldErrors>({});
   const [exBusy, setExBusy] = useState<boolean>(false);
   const [exSent, setExSent] = useState<boolean>(false);
+  /** Reuse the exchange sheet for the optional VCF contact-details gate. */
+  const [exVcfGate, setExVcfGate] = useState<boolean>(false);
   const [servicesExpanded, setServicesExpanded] = useState<boolean>(false);
 
   const chipTimer = useRef<number | null>(null);
@@ -836,6 +841,7 @@ export function PanthiEventTemplate({
       setExEmail('');
       setExErrors({});
       setExBusy(false);
+      setExVcfGate(false);
     }, SHEET_CLOSE_MS);
   };
 
@@ -914,20 +920,54 @@ export function PanthiEventTemplate({
     setLeadSent(false);
   };
 
-  const handleExchangeSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
+  const handleExchangeSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ): Promise<void> => {
     event.preventDefault();
-    if (exBusy || !WA_NUMBER) return;
+    if (exBusy || (!exVcfGate && !WA_NUMBER)) return;
     const errors: FieldErrors = {};
     if (exName.trim().length === 0) errors.name = 'Please enter your name';
-    if (exPhone.trim().length === 0) errors.phone = 'Please enter your phone';
-    else if (!PHONE_RE.test(exPhone.trim())) errors.phone = 'Please enter a valid phone number';
+
     const email = exEmail.trim();
-    if (email.length > 0 && !EMAIL_RE.test(email)) errors.email = 'Please enter a valid email address';
+    if (exVcfGate) {
+      if (email.length === 0) errors.email = 'Please enter your email';
+      else if (!EMAIL_RE.test(email)) errors.email = 'Please enter a valid email address';
+    } else {
+      if (exPhone.trim().length === 0) errors.phone = 'Please enter your phone';
+      else if (!PHONE_RE.test(exPhone.trim())) errors.phone = 'Please enter a valid phone number';
+      if (email.length > 0 && !EMAIL_RE.test(email)) {
+        errors.email = 'Please enter a valid email address';
+      }
+    }
+
     setExErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    setExBusy(true);
+
     const name = exName.trim();
     const phone = exPhone.trim();
+
+    if (exVcfGate) {
+      setExBusy(true);
+      const result = await requestVcfDownload(vcard.urlAlias || '', {
+        name,
+        email,
+        ...(phone.length > 0 ? { phone } : {}),
+      });
+      setExBusy(false);
+      if (result.status === 'downloaded') {
+        setExSent(true);
+        return;
+      }
+      setExErrors({
+        email:
+          result.status === 'gateRequired'
+            ? 'Please enter your name and email address.'
+            : 'Could not save the contact. Please try again.',
+      });
+      return;
+    }
+
+    setExBusy(true);
     const messageLines = [
       `Hello ${data.name}! Sharing my contact details from your digital card.`,
       '',
@@ -947,6 +987,17 @@ export function PanthiEventTemplate({
     // Payload comes from the canonical server-side vCard 3.0 builder, so this
     // template cannot drift into its own (unparseable) dialect again.
     const result = await downloadVcfForCard(vcard);
+    if (result.status === 'gateRequired') {
+      // Reuse the exchange sheet to collect the tenant-required details.
+      setExName('');
+      setExPhone('');
+      setExEmail('');
+      setExErrors({});
+      setExSent(false);
+      setExVcfGate(true);
+      openSheet();
+      return;
+    }
     if (result.status === 'error') console.error('[vcf] download failed:', result.message);
   };
 
@@ -1021,9 +1072,15 @@ export function PanthiEventTemplate({
               {data.tagline ? <p className="pep2-tagline">{data.tagline}</p> : null}
               <div className="pep2-meta">
                 {data.phoneRaw && (
-                  <a className="pep2-meta-item" href={`tel:+${data.phoneRaw}`}>
+                  <a className="pep2-meta-item" href={telHref(data.phoneDisplay) ?? undefined}>
                     <Icon name="phone" size={14} />
                     {data.phoneDisplay}
+                  </a>
+                )}
+                {data.alternatePhoneRaw && (
+                  <a className="pep2-meta-item" href={telHref(data.alternatePhoneDisplay) ?? undefined}>
+                    <Icon name="phone" size={14} />
+                    {data.alternatePhoneDisplay}
                   </a>
                 )}
                 {data.email && (
@@ -1420,7 +1477,7 @@ export function PanthiEventTemplate({
       <nav className="pep2-bar" aria-label="Event quick actions">
         <div className="pep2-bar-in">
           {data.phoneRaw ? (
-            <a className="pep2-btn pep2-btn--brand pep2-bar-btn pep2-bar-btn--brand" href={`tel:+${data.phoneRaw}`}>
+            <a className="pep2-btn pep2-btn--brand pep2-bar-btn pep2-bar-btn--brand" href={telHref(data.phoneDisplay) ?? undefined}>
               <Icon name="phone" size={16} />
               Call
             </a>
@@ -1477,9 +1534,13 @@ export function PanthiEventTemplate({
               </span>
               <div>
                 <h2 className="pep2-sheet-title" id="pep2-sheet-title">
-                  Exchange Contact
+                  {exVcfGate ? 'Save Contact' : 'Exchange Contact'}
                 </h2>
-                <p className="pep2-sheet-intro">Share your details with {data.name}</p>
+                <p className="pep2-sheet-intro">
+                  {exVcfGate
+                    ? `Enter your details to save ${data.name}'s contact.`
+                    : `Share your details with ${data.name}`}
+                </p>
               </div>
             </div>
             {exSent ? (
@@ -1487,9 +1548,15 @@ export function PanthiEventTemplate({
                 <span className="pep2-okico">
                   <Icon name="check" size={26} />
                 </span>
-                <p className="pep2-oktitle">Contact sent successfully!</p>
+                <p className="pep2-oktitle">
+                  {exVcfGate ? 'Contact saved successfully!' : 'Contact sent successfully!'}
+                </p>
                 <p className="pep2-oksub">
-                  <em>Your contact details have been shared with {data.name}.</em>
+                  <em>
+                    {exVcfGate
+                      ? `The contact has been downloaded to your device.`
+                      : `Your contact details have been shared with ${data.name}.`}
+                  </em>
                 </p>
               </div>
             ) : (
@@ -1569,15 +1636,17 @@ export function PanthiEventTemplate({
                 <button
                   type="submit"
                   className="pep2-btn pep2-btn--brand pep2-btn--block"
-                  disabled={exBusy || !WA_NUMBER}
+                  disabled={exBusy || (!exVcfGate && !WA_NUMBER)}
                 >
                   {exBusy ? (
                     <>
                       <span className="pep2-spin">
                         <Icon name="share" size={16} />
                       </span>
-                      Sending…
+                      {exVcfGate ? 'Saving…' : 'Sending…'}
                     </>
+                  ) : exVcfGate ? (
+                    'Save Contact'
                   ) : (
                     'Share My Contact'
                   )}

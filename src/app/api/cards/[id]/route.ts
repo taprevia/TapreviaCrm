@@ -16,8 +16,9 @@ import { updateCardSchema } from '@/lib/validation/card';
 import { fail, ok } from '@/lib/api';
 import { getOwnedCard, canEditCardExperience } from '@/lib/services/card-access';
 import { availableTemplatesForUser } from '@/lib/services/template-access';
-import { canUseFeature, featureMax } from '@/lib/services/feature-access';
+import { canUseFeature, resolveCardSocialMax } from '@/lib/services/feature-access';
 import { canUseReviewAssistantForCard } from '@/lib/services/review-entitlement';
+import { resolvePhoneFieldUpdate } from '@/lib/phone';
 import {
   CARD_IMMUTABLE_URL_FIELDS,
   findImmutableUrlChange,
@@ -132,6 +133,49 @@ async function cleanupSupersededMedia(
   }
 }
 
+type SocialLinkMetadata = {
+  platform?: string;
+  url?: string;
+  label?: string;
+  iconUrl?: string;
+  clicks?: number;
+};
+
+type IncomingSocialLink = {
+  platform: string;
+  url: string;
+  label?: string;
+  iconUrl?: string;
+};
+
+/**
+ * Preserve non-editable social-link metadata when the builder replaces the
+ * array. The UI does not expose click counters, and the request schema does
+ * not carry them, so a save must not silently reset existing values to 0.
+ * Unchanged rows are matched by platform + URL; labels/icon URLs are kept when
+ * the incoming row omits them.
+ */
+function preserveSocialLinkMetadata(
+  previous: SocialLinkMetadata[] | undefined,
+  incoming: IncomingSocialLink[]
+): Array<IncomingSocialLink & { clicks?: number }> {
+  const byKey = new Map<string, SocialLinkMetadata>();
+  for (const link of previous ?? []) {
+    if (!link.platform || !link.url) continue;
+    byKey.set(`${link.platform}\u0000${link.url}`, link);
+  }
+
+  return incoming.map((link) => {
+    const prior = byKey.get(`${link.platform}\u0000${link.url}`);
+    return {
+      ...link,
+      ...(prior?.clicks !== undefined ? { clicks: prior.clicks } : {}),
+      ...(link.label === undefined && prior?.label ? { label: prior.label } : {}),
+      ...(link.iconUrl === undefined && prior?.iconUrl ? { iconUrl: prior.iconUrl } : {}),
+    };
+  });
+}
+
 // GET /api/cards/[id]
 export async function GET(request: NextRequest, { params }: Params) {
   try {
@@ -234,7 +278,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const requiredKey = kindToKey[(card.kind ?? 'profile') as keyof typeof kindToKey] ?? 'profile';
     const [hasKindFeature, socialMax] = await Promise.all([
       canUseFeature(ownerId, requiredKey),
-      featureMax(ownerId, 'social'),
+      resolveCardSocialMax(card._id, ownerId),
     ]);
     if (!hasKindFeature) {
       return fail(
@@ -290,6 +334,25 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     if (data.basic) {
+      // The builder sends the whole `basic` object whenever any basic field is
+      // dirty. Preserve a stored phone value the customer did not touch
+      // (legacy formats included) and canonicalise only intentional changes.
+      // Review/social cards are outside the country-selector scope.
+      if ((card.kind ?? 'profile') === 'profile') {
+        for (const field of ['phone', 'alternatePhone'] as const) {
+          const incoming = data.basic[field];
+          if (incoming === undefined) continue;
+          const stored = (card.basic?.[field] ?? '') as string;
+          const update = resolvePhoneFieldUpdate(incoming, stored);
+          if (!update.ok) {
+            return fail(400, 'VALIDATION_ERROR', 'Invalid phone number', {
+              [`basic.${field}`]: ['Enter a valid phone number.'],
+            });
+          }
+          data.basic[field] = update.value;
+        }
+      }
+
       for (const [key, value] of Object.entries(data.basic)) {
         if (value !== undefined) {
           (card.basic as unknown as Record<string, unknown>)[key] = value;
@@ -331,7 +394,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         (day) => byDay.get(day as never) ?? { day: day as never, enabled: false, from: '', to: '' }
       );
     }
-    if (data.socialLinks) card.socialLinks = data.socialLinks;
+    if (data.socialLinks) {
+      card.socialLinks = preserveSocialLinkMetadata(card.socialLinks, data.socialLinks);
+    }
     if (data.reviewAssistant) {
       if (!card.reviewAssistant) card.reviewAssistant = {} as never;
       for (const [key, value] of Object.entries(data.reviewAssistant)) {

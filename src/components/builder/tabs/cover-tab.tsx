@@ -3,8 +3,10 @@
 /**
  * Cover & Photos tab.
  *
- * coverType options mirror the public renderer union exactly:
- *   z.enum(['image', 'color', 'video'])  (lib/validation/vcard.ts)
+ * coverType options are image and colour. Video is a legacy stored value only:
+ * it can no longer be selected in the customer UI, but existing cards with
+ * `coverType: 'video'` keep their stored value until the customer explicitly
+ * chooses another cover type.
  * The public CoverMedia renders `color` as a solid background-color — there are
  * NO gradient presets anywhere in the public portal, so the swatch grid offers
  * solid presets only (a gradient string would break backgroundColor rendering).
@@ -15,15 +17,15 @@
  */
 
 import type { ChangeEvent } from 'react';
-import { Input, SegmentedControl } from '@/components/ui';
+import { SegmentedControl } from '@/components/ui';
 import { useToast } from '@/components/ui/toast';
 import type { CoverType, CoverStyle } from '@/types';
 import { useBuilder } from '../context';
 import { RemoveUploadButton, UploadButton } from '../upload-button';
 import { cn } from '@/lib/utils';
 
-const darkInput =
-  'border-line bg-field text-ink placeholder:text-ink-faint focus:border-accent-500 focus:ring-accent-500/25 hover:border-line-strong';
+/** Cover types a customer may select. `video` is legacy-read-only. */
+type SelectableCoverType = Exclude<CoverType, 'video'>;
 
 /** Solid colour presets for the cover — tasteful, dark-UI-friendly defaults. */
 const COLOR_PRESETS = [
@@ -59,11 +61,14 @@ export function CoverTab() {
 
   const avatarUrl = draft.profileImageUrl?.trim() ?? '';
 
-  const handleTypeChange = (next: CoverType) => {
+  const handleTypeChange = (next: SelectableCoverType) => {
     // Reset a value that doesn't fit the newly selected kind of cover.
     const value = draft.coverValue.trim();
+    const replacingLegacyVideo = draft.coverType === 'video';
     if (next === 'color' && !isHexColor(value)) setField('coverValue', '');
-    if ((next === 'image' || next === 'video') && isHexColor(value)) setField('coverValue', '');
+    if (next === 'image' && (isHexColor(value) || replacingLegacyVideo)) {
+      setField('coverValue', '');
+    }
     setField('coverType', next);
   };
 
@@ -126,11 +131,13 @@ export function CoverTab() {
             <SegmentedControl<CoverType>
               aria-label="Cover type"
               value={draft.coverType}
-              onChange={handleTypeChange}
+              onChange={(value) => {
+                // Video is legacy-only and no longer offered.
+                if (value !== 'video') handleTypeChange(value);
+              }}
               options={[
                 { value: 'image', label: 'Image' },
                 { value: 'color', label: 'Color' },
-                { value: 'video', label: 'Video' },
               ]}
             />
           </div>
@@ -148,6 +155,13 @@ export function CoverTab() {
             />
           </div>
         </div>
+
+        {draft.coverType === 'video' && (
+          <p className="mt-4 rounded-lg bg-warn/10 px-3 py-2.5 text-xs leading-relaxed text-warn ring-1 ring-warn/20">
+            This card uses a legacy video cover. Choose Image or Colour to replace it. The stored
+            video URL is kept until you choose another cover type.
+          </p>
+        )}
 
         <div className="mt-4">
           {draft.coverType === 'image' && (
@@ -223,22 +237,6 @@ export function CoverTab() {
             </div>
           )}
 
-          {draft.coverType === 'video' && (
-            <div className="max-w-md">
-              <Input
-                type="url"
-                placeholder="https://example.com/clip.mp4"
-                className={darkInput}
-                value={draft.coverValue}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setField('coverValue', event.target.value)
-                }
-              />
-              <p className="mt-1.5 text-xs text-ink-faint">
-                Direct MP4/WebM URL — plays muted + looping, like the public page.
-              </p>
-            </div>
-          )}
         </div>
       </section>
 

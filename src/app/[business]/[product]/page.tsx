@@ -12,14 +12,18 @@ import { vcardDisplayName } from '@/components/public/hero';
 import { ReviewExperience, resolveReviewAccess } from '@/components/review/review-experience';
 import { resolveStandeePanel } from '@/lib/services/standee-panel';
 import { resolveStandeeEntryDecision } from '@/lib/services/standee-entry-state';
+import { resolveBusinessProfileStandeeDestination } from '@/lib/services/standee-profile-resolution';
 import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import { canonicalPublicBase } from '@/lib/public-base';
-import { recordPublicVisit } from '@/lib/services/public-visits';
+import { recordPublicVisit, mintStandeeVisitMarker } from '@/lib/services/public-visits';
 import type { ICard } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { business: string; product: string } };
+type Params = {
+  params: { business: string; product: string };
+  searchParams: { tpv?: string };
+};
 
 function toPlain<T>(raw: unknown): T | null {
   if (!raw) return null;
@@ -67,6 +71,7 @@ interface StandeePublicDoc {
   displayName?: string;
   publicSlug?: string;
   productKey?: string;
+  cardId?: unknown;
   maxProfiles?: number;
   fixedProfiles?: string[];
   socialQrs?: Array<{
@@ -131,7 +136,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
 }
 
-export default async function PublicHumanUrlPage({ params }: Params) {
+export default async function PublicHumanUrlPage({ params, searchParams }: Params) {
   const resolved = await resolveReviewPage(params.business, params.product);
   if (resolved?.review) {
     // Published review Cards render directly at the branded publicSlug. This
@@ -157,6 +162,7 @@ export default async function PublicHumanUrlPage({ params }: Params) {
       <PublicCardPage
         card={resolved.card}
         currentPath={`/${encodeURIComponent(params.business)}/${encodeURIComponent(params.product)}`}
+        standeeVisitToken={searchParams.tpv}
       />
     );
   }
@@ -164,6 +170,37 @@ export default async function PublicHumanUrlPage({ params }: Params) {
   if (!resolvedStandee) notFound();
 
   const { standee, panel, socialLinks } = resolvedStandee;
+
+  // Business Profile Standee: the branded URL ("{business}/standee") resolves
+  // straight to the linked profile Card, mirroring the permanent /r resolver.
+  // This must run BEFORE the generic slot-count guard because a BPS standee
+  // intentionally has zero social slots. Fail closed to the picker/404 when the
+  // relationship is missing or invalid.
+  if (standee.productKey === 'BUSINESS_PROFILE_STANDEE' && standee.cardId) {
+    const profileDestination =
+      await resolveBusinessProfileStandeeDestination(standee);
+    if (profileDestination) {
+      const currentPath = `/${encodeURIComponent(params.business)}/${encodeURIComponent(
+        params.product
+      )}`;
+      const loopDetected = await wouldRedirectLoop(
+        currentPath,
+        profileDestination,
+        canonicalPublicBase() ?? ''
+      );
+      if (!loopDetected) {
+        const token = await mintStandeeVisitMarker(standee._id, standee.cardId);
+        const sep = profileDestination.includes('?') ? '&' : '?';
+        redirect(
+          token
+            ? `${profileDestination}${sep}tpv=${encodeURIComponent(token)}`
+            : profileDestination
+        );
+      }
+    }
+    notFound();
+  }
+
   if (panel.slotCount < 1) notFound();
 
   let delegatePath: string | null = null;

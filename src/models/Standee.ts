@@ -81,6 +81,11 @@ const StandeeSchema = new Schema(
     // has and which platform profile type each slot maps to (in 1-indexed order).
     // The customer may change each slot's *destination* but not the slot types.
     productKey: { type: String, default: '' },
+    // Linked business-profile Card (Business Profile Standee only). Additive +
+    // optional: legacy standees have no cardId and keep their existing
+    // single-slot redirect behavior. The linked Card always belongs to the same
+    // owner as the Standee.
+    cardId: { type: Schema.Types.ObjectId, ref: 'Card', default: null },
     maxProfiles: { type: Number, default: 0 },
     fixedProfiles: { type: [String], default: [] },
     panelQr: {

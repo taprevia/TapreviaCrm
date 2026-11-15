@@ -316,16 +316,47 @@ export async function assignUserProduct({
       const productId = catalogItem.slug.toUpperCase().replace(/-/g, '_');
       const def = isProductId(productId) ? getProductDef(productId) : null;
       const profileConfig = def ? getStandeeProfileConfig(productId) : null;
+      const isBusinessProfileStandee = productId === 'BUSINESS_PROFILE_STANDEE';
       const fixedProfiles: string[] = profileConfig?.fixedProfiles?.length
         ? profileConfig.fixedProfiles
         : (Array.isArray(platforms) && platforms.length
             ? platforms
             : STANDEE_PLATFORMS.map((p) => p.id));
-      const maxProfiles = profileConfig?.maxProfiles ?? fixedProfiles.length;
-
-      const validPlatforms = Array.from(new Set(fixedProfiles.filter((p) => getStandeePlatformById(p))));
+      // Business Profile Standee is a card-backed business profile, not a
+      // slot-based standee: it must never create the obsolete WhatsApp (or any
+      // platform) social QR slots. Its linked profile Card is the only digital
+      // experience; the Standee keeps just its own panel QR identity.
+      const validPlatforms = isBusinessProfileStandee
+        ? []
+        : Array.from(new Set(fixedProfiles.filter((p) => getStandeePlatformById(p))));
+      const maxProfiles = isBusinessProfileStandee
+        ? 0
+        : (profileConfig?.maxProfiles ?? fixedProfiles.length);
 
       const routeSlug = await allocateStandeeRouteSlug();
+
+      // Business Profile Standee is the QR-only physical format of the Premium
+      // business profile. Provision one linked digital profile Card up-front so
+      // the Standee can reference it and the assignment records both physical
+      // identities on the single UserProduct row. The synthetic UID is always
+      // freshly minted, so no existing customer Card is ever reused or claimed.
+      let linkedCard: CardDoc | null = null;
+      let linkedCardCreated = false;
+      if (isBusinessProfileStandee) {
+        const bindingUid = await allocateDigitalCardUid();
+        const provisioned = await provisionCardForAssignment({
+          uid: bindingUid,
+          userId: user._id.toString(),
+          userName: user.name,
+          productName: catalogItem.name,
+          kind: 'profile',
+        });
+        if (!provisioned.ok) {
+          return { ok: false, status: provisioned.status, error: provisioned.error };
+        }
+        linkedCard = provisioned.card;
+        linkedCardCreated = provisioned.created;
+      }
 
       const standee = await Standee.create({
         userId: user._id,
@@ -338,6 +369,9 @@ export async function assignUserProduct({
         // can dual-track legacy `routeSlug` and new timestamp identifiers.
         uid: routeSlug,
         productKey: isProductId(productId) ? productId : '',
+        ...(isBusinessProfileStandee && linkedCard
+          ? { cardId: linkedCard._id }
+          : {}),
         maxProfiles,
         fixedProfiles: validPlatforms,
         panelQr: { qrId: generateQrId(), qrColor: '#000000' },
@@ -362,6 +396,12 @@ export async function assignUserProduct({
           userId: user._id,
           catalogProductId: catalogItem._id,
           standeeId: standee._id,
+          // Business Profile Standee also links its profile Card on the same
+          // assignment so the Card is editable, review-entitled and surfaced
+          // in My Products through the existing card path.
+          ...(isBusinessProfileStandee && linkedCard
+            ? { cardId: linkedCard._id }
+            : {}),
           quantity,
           unitPriceMinor: catalogItem.priceMinor,
           notes,
@@ -375,6 +415,18 @@ export async function assignUserProduct({
           throw new Error('Could not allocate a branded public URL for this standee');
         }
 
+        // Branded public URL for the linked business-profile Card (BPS only).
+        // Mirrors the Premium card allocation so the profile has a human URL.
+        if (isBusinessProfileStandee && linkedCard) {
+          const cardAllocation = await ensureCardPublicSlug(
+            linkedCard._id,
+            user._id.toString()
+          );
+          if (getPublicProductSlug(catalogItem.slug) && !cardAllocation.assigned) {
+            throw new Error('Could not allocate a branded public URL for the linked card');
+          }
+        }
+
         return { ok: true, status: 201, data: { userProduct, standee } };
       } catch (error) {
         if (createdUserProduct) {
@@ -385,6 +437,11 @@ export async function assignUserProduct({
         user.hasStandy = previousStandy;
         await user.save().catch(() => undefined);
         await Standee.deleteOne({ _id: standee._id });
+        // Clean up only the Card provisioned by THIS failed attempt. A card we
+        // did not create is never deleted (linkedCardCreated guards this).
+        if (isBusinessProfileStandee && linkedCard && linkedCardCreated) {
+          await Card.deleteOne({ _id: linkedCard._id }).catch(() => undefined);
+        }
         throw error;
       }
     }

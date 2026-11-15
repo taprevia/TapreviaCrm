@@ -5,18 +5,9 @@ import { Check, Link2, Mail, MessageSquare, Phone, Share2, UserPlus } from 'luci
 import { requestVcfDownload } from '@/lib/vcf-download';
 import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveCustomerPublicUrl } from '@/lib/services/customer-public-url';
+import { telHref, whatsappHref } from '@/lib/phone';
 import { BrandIcon } from './socials-row';
 import type { IVcard } from './types';
-
-function telHref(phone: string | undefined): string | null {
-  const raw = phone?.trim();
-  return raw ? `tel:${raw.replace(/[^\d+]/g, '')}` : null;
-}
-
-function waHref(phone: string | undefined): string | null {
-  const digits = phone?.replace(/\D/g, '');
-  return digits ? `https://wa.me/${digits}` : null;
-}
 
 /**
  * Fixed bottom action dock: Call · WhatsApp · Share · Add to Contact.
@@ -97,7 +88,7 @@ export function StickyDock({ vcard }: { vcard: IVcard }) {
   const name = vcard.name;
   const phone = vcard.basic?.phone;
   const call = telHref(phone);
-  const chat = waHref(phone);
+  const chat = whatsappHref(phone);
   /* Customer-facing Public URL — never the permanent /r/ QR payload. */
   const shareUrl = resolveCustomerPublicUrl(vcard, canonicalPublicBase()) ?? '';
 

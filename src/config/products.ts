@@ -93,6 +93,12 @@ export interface ProductDefinition {
    * experiences (NFC cards + plates); standees keep /r/{routeSlug}.
    */
   publicSlug?: string;
+  /**
+   * Optional product-specific social-links limit. When set it takes precedence
+   * over the platform default for that product. Business and Premium NFC cards
+   * allow 6; every other product keeps the existing 4-link default.
+   */
+  socialLinksMax?: number;
 }
 
 // ─── Product Catalog ──────────────────────────────────────────────────────────
@@ -118,6 +124,7 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       materials: ['metal', 'wooden'],
     },
     publicSlug: 'business-card',
+    socialLinksMax: 6,
   },
 
   PREMIUM_NFC_CARD: {
@@ -138,6 +145,7 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       materials: ['metal', 'wooden'],
     },
     publicSlug: 'premium-card',
+    socialLinksMax: 6,
   },
 
   INSTA_CARD: {
@@ -230,10 +238,15 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
     name: 'Business Profile Standee',
     description: 'Counter standee for business profile and lead capture.',
     category: 'standee',
+    // QR-only physical format of the Premium Business NFC Card. It shares the
+    // full profile capability set (including the AI Review Assistant) so its
+    // linked profile Card is editable and review-entitled, while keeping its
+    // own standee identity, QR and analytics.
     capabilities: [
       'qr', 'nfc', 'standee', 'standee_analytics', 'standee_dynamic_link',
       'public_profile', 'profile_edit', 'contact_save', 'social_links',
-      'lead_capture', 'appointments', 'google_maps', 'whatsapp',
+      'catalogue', 'portfolio', 'lead_capture', 'appointments', 'google_maps', 'whatsapp',
+      'tap_analytics', 'dynamic_dashboard', 'review_ai_suggestions',
       'dynamic_link', 'multi_language',
     ],
     metadata: {
@@ -242,6 +255,11 @@ export const PRODUCT_CATALOG: Record<ProductId, ProductDefinition> = {
       qrSlots: 1,
       fixedProfiles: ['whatsapp'],
     },
+    // Branded public URL segment for the linked profile Card
+    // ("{business-slug}/business-profile[-N]"), mirroring the Premium card's
+    // own human-readable URL.
+    publicSlug: 'business-profile',
+    socialLinksMax: 6,
   },
 
   ALL_IN_ONE_STANDEE_3: {

@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const CARD_SELECT =
       'cardUid slug routeSlug urlAlias name cardLabel kind redirectUrl setupComplete isActive instagramConfig whatsappConfig linkedinConfig facebookConfig reviewAssistant publicSlug';
     const STANDEE_SELECT =
-      'name displayName routeSlug productKey maxProfiles fixedProfiles panelQr socialQrs zones publicSlug';
+      'name displayName routeSlug productKey cardId maxProfiles fixedProfiles panelQr socialQrs zones publicSlug';
 
     const [cards, standees] = await Promise.all([
       cardIds.length
@@ -69,12 +69,12 @@ export async function GET(request: NextRequest) {
         let instance: Record<string, unknown> | null = null;
         let instanceType: 'card' | 'standee' | null = null;
 
-        if (assignment.cardId) {
-          instance = cardMap.get(String(assignment.cardId)) ?? null;
-          instanceType = 'card';
-        } else if (assignment.standeeId) {
+        if (assignment.standeeId) {
           instance = standeeMap.get(String(assignment.standeeId)) ?? null;
           instanceType = 'standee';
+        } else if (assignment.cardId) {
+          instance = cardMap.get(String(assignment.cardId)) ?? null;
+          instanceType = 'card';
         } else if (catalog?.category === 'card') {
           // Uninstantiated card assignment — no physical card bound yet. Mirror
           // the single-product endpoint's synthesized instanceType so the My
@@ -90,8 +90,19 @@ export async function GET(request: NextRequest) {
 
         const routeSlug = (instance?.routeSlug as string | undefined) ?? '';
 
+        // Business Profile Standee: resolve its linked profile Card (already in
+        // `cardMap` for this customer's own assignments) so the displayed public
+        // URL and preview point at the business profile, not the standee's own
+        // redirect slug.
+        const linkedCard =
+          instanceType === 'standee' && instance?.cardId
+            ? (cardMap.get(String(instance.cardId)) ?? null)
+            : null;
+
         let preview: ProductPreview;
-        if (instanceType === 'card' && instance) {
+        if (linkedCard) {
+          preview = await resolveCardPreview(linkedCard as never);
+        } else if (instanceType === 'card' && instance) {
           preview = await resolveCardPreview(instance as never);
         } else if (instanceType === 'standee' && instance) {
           preview = await resolveStandeePreview(instance as never);
@@ -103,6 +114,11 @@ export async function GET(request: NextRequest) {
             message: 'This product has not been assigned a physical instance yet.',
           };
         }
+
+        const displayPublicSlug =
+          (linkedCard && typeof linkedCard.publicSlug === 'string' && linkedCard.publicSlug) ||
+          (instance && typeof instance.publicSlug === 'string' && instance.publicSlug) ||
+          '';
 
         return {
           assignmentId: assignment._id,
@@ -136,12 +152,9 @@ export async function GET(request: NextRequest) {
             : null,
           instanceType,
           // Human-readable public URL ("/{business-slug}/{product-slug}[-N]").
-          // Cards and standees with an allocated publicSlug expose one;
-          // uninstantiated/unbound instances keep null.
-          publicUrl:
-            instance && typeof instance.publicSlug === 'string' && instance.publicSlug
-              ? `/${instance.publicSlug}`
-              : null,
+          // BPS shows its linked Card's publicSlug; other standees/cards show
+          // their own; uninstantiated/unbound instances keep null.
+          publicUrl: displayPublicSlug ? `/${displayPublicSlug}` : null,
           instance: instance
             ? {
                 id: instance._id,
@@ -169,6 +182,9 @@ export async function GET(request: NextRequest) {
                   ? {
                       productKey: instance.productKey,
                       displayName: instance.displayName,
+                      // Linked profile Card (Business Profile Standee) — exposed
+                      // so Manage can open the Card editor.
+                      cardId: instance.cardId,
                       maxProfiles: instance.maxProfiles,
                       fixedProfiles: instance.fixedProfiles,
                       panelQr: instance.panelQr,

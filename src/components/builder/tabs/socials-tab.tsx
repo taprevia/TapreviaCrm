@@ -47,7 +47,9 @@ export function SocialsTab() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/my/features');
+        const res = await fetch(
+          `/api/my/features?cardId=${encodeURIComponent(draft._id)}`
+        );
         if (res.ok) {
           const data = await res.json();
           const social = data?.features?.social;
@@ -60,7 +62,7 @@ export function SocialsTab() {
       }
       setAllowed(true);
     })();
-  }, []);
+  }, [draft._id]);
 
   const maxLinks = socialMax ?? DEFAULT_SOCIAL_LINKS_MAX;
 
@@ -184,6 +186,12 @@ export function SocialsTab() {
           {links.length}/{maxLinks}
         </span>
       </div>
+
+      {links.length >= maxLinks && (
+        <p className="text-xs text-ink-faint" role="status">
+          Limit of {maxLinks} social links reached.
+        </p>
+      )}
     </div>
   );
 }

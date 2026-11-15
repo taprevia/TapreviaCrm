@@ -13,7 +13,7 @@ import { getCardReviewEntitlement } from '@/lib/services/review-entitlement';
 import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-settings';
 import { isSafeExternalUrl } from '@/lib/safe-url';
 import { canonicalPublicBase } from '@/lib/public-base';
-import { recordPublicVisit } from '@/lib/services/public-visits';
+import { recordPublicVisit, consumeStandeeVisitMarker } from '@/lib/services/public-visits';
 import { wouldRedirectLoop } from '@/lib/services/redirect-loop';
 import { toPublicRenderCardDto } from '@/lib/dto/card.dto';
 import type { ICard, IProduct } from '@/types';
@@ -97,9 +97,11 @@ function luminance(hex: string): number {
 export async function PublicCardPage({
   card,
   currentPath,
+  standeeVisitToken,
 }: {
   card: ICard;
   currentPath?: string;
+  standeeVisitToken?: string | null;
 }) {
   if (card.kind === 'social') {
     await dispatchSocialCard(card, currentPath);
@@ -195,7 +197,17 @@ export async function PublicCardPage({
 
   // Final profile destination renders here; count once for branded and
   // /profile entries. Social/review cards returned or redirected above.
-  await recordPublicVisit({ cardId: card._id, headers: headers() });
+  // A valid single-use standee marker attributes this visit to the Standee
+  // (Business Profile Standee QR scan) instead of recording a second,
+  // independent Card visit — one physical scan counts once.
+  const standeeAttribution = standeeVisitToken
+    ? await consumeStandeeVisitMarker(standeeVisitToken, card._id)
+    : null;
+  await recordPublicVisit({
+    cardId: card._id,
+    ...(standeeAttribution ? { standeeId: standeeAttribution.standeeId } : {}),
+    headers: headers(),
+  });
 
   return (
     <div className="vcard-root min-h-screen" style={themeVars}>

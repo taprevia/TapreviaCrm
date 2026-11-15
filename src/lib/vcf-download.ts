@@ -8,9 +8,9 @@
  *
  *  1. iOS Safari aborts a blob download when `revokeObjectURL` runs in the same
  *     tick as `click()`. The URL must outlive the click by a wide margin.
- *  2. In-app WebViews (WhatsApp, Instagram, Facebook) and some Android builds
- *     drop a `blob:` download entirely. Falling back to a direct navigation on
- *     the real endpoint lets the platform's own downloader take over.
+ *  2. Some Android/iOS WebViews do not expose a usable blob download. When the
+ *     blob path is unavailable or throws, the same attachment endpoint is used
+ *     as a direct download fallback so the platform downloader can take over.
  *
  * Downloads are routed through the API endpoint rather than built in the
  * browser, so every platform gets one identical payload from `buildVcf()` and
@@ -33,21 +33,52 @@ export function vcfEndpoint(alias: string): string {
  * The anchor must be in the document for iOS, and the object URL must survive
  * the click — see the module comment.
  */
-export function downloadVcfBlob(body: string, filename: string): void {
-  const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
+export function downloadVcfBlob(body: string, filename: string): boolean {
+  if (typeof document === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return false;
+  }
 
+  let url: string;
+  try {
+    const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' });
+    url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename || 'contact.vcf';
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } catch {
+    return false;
+  }
+
+  // 10s is comfortably past the click handler on a slow device, and short
+  // enough not to pin the blob in memory.
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
+}
+
+/**
+ * Direct-endpoint fallback for environments where blob downloads are not
+ * supported (some Android/iOS WebViews). The endpoint still serves the
+ * canonical vCard with attachment headers; callers must only use this after a
+ * successful gate check, which requestVcfDownload() performs.
+ */
+export function downloadVcfEndpoint(
+  alias: string,
+  query: string,
+  filename: string
+): void {
+  if (typeof document === 'undefined') return;
   const anchor = document.createElement('a');
-  anchor.href = url;
+  anchor.href = `${vcfEndpoint(alias)}${query}`;
   anchor.download = filename || 'contact.vcf';
   anchor.rel = 'noopener';
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
-
-  // 10s is comfortably past the click handler on a slow device, and short
-  // enough not to pin the blob in memory.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 /** Pull the server's suggested filename out of Content-Disposition. */
@@ -106,7 +137,11 @@ export async function requestVcfDownload(
     `${alias || 'contact'}.vcf`,
   );
 
-  downloadVcfBlob(body, filename);
+  if (!downloadVcfBlob(body, filename)) {
+    // Blob downloads are unavailable in this browser/WebView. Fall back to the
+    // attachment endpoint itself, preserving the already-satisfied gate query.
+    downloadVcfEndpoint(alias, query, filename);
+  }
   return { status: 'downloaded', filename };
 }
 

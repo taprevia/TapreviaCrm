@@ -9,6 +9,7 @@
  * later extended by accident.
  */
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
+import { vcfPhone } from '@/lib/phone';
 
 export interface VcfCardSource {
   _id?: unknown;
@@ -148,7 +149,14 @@ export function buildVcf(
   if (b.company) lines.push(`ORG;CHARSET=UTF-8:${esc(b.company)}`);
   if (card.occupation) lines.push(`ROLE;CHARSET=UTF-8:${esc(card.occupation)}`);
 
-  if (b.phone) lines.push(`TEL;TYPE=CELL,VOICE:${esc(b.phone)}`);
+  // Canonicalise valid legacy numbers at export time only; an unparseable
+  // stored value is exported verbatim rather than dropped or fabricated.
+  const primaryTel = vcfPhone(b.phone) ?? (b.phone?.trim() || null);
+  if (primaryTel) lines.push(`TEL;TYPE=CELL,VOICE:${esc(primaryTel)}`);
+  // Optional second number. Keep the primary as the mobile/CELL number and
+  // emit the alternate only when the customer actually supplied one.
+  const alternateTel = vcfPhone(b.alternatePhone) ?? (b.alternatePhone?.trim() || null);
+  if (alternateTel) lines.push(`TEL;TYPE=CELL,VOICE:${esc(alternateTel)}`);
   if (b.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(b.email)}`);
 
   if (location.address) {

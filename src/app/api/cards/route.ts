@@ -4,6 +4,7 @@ import { connectDB } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { requireApiEntitlement } from '@/lib/auth/capability-guard';
 import Card, { DEFAULT_BUSINESS_HOURS } from '@/models/Card';
+import Standee from '@/models/Standee';
 import { createCardSchema } from '@/lib/validation/card';
 import { fail, ok, parsePagination } from '@/lib/api';
 import { generateSlug } from '@/lib/utils';
@@ -47,6 +48,23 @@ export async function GET(request: NextRequest) {
       ];
     } else {
       filter.$or = ownership;
+    }
+
+    // Exclude Cards that are internal linked resources of Business Profile
+    // Standee assignments (managed through the Standee, not listed as separate
+    // purchased vCards). Scoped strictly to the authenticated user's own BPS
+    // standees; never inferred from client-supplied IDs.
+    const bpsLinkedCardIds = (
+      (await Standee.find({
+        userId: user._id,
+        productKey: 'BUSINESS_PROFILE_STANDEE',
+        cardId: { $ne: null },
+      })
+        .select('cardId')
+        .lean()) as unknown as Array<{ cardId: unknown }>
+    ).map((standee) => standee.cardId);
+    if (bpsLinkedCardIds.length > 0) {
+      filter._id = { $nin: bpsLinkedCardIds };
     }
 
     const [cards, total] = await Promise.all([

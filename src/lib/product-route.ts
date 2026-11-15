@@ -27,6 +27,8 @@ export interface ManageTargetInput {
   /** Resolved instance snapshot (card: id + config; standee: slots). */
   instance?: {
     id?: string | null;
+    /** Linked profile Card id (Business Profile Standee). */
+    cardId?: string | null;
     socialQrs?: readonly unknown[] | null;
   } | null;
 }
@@ -36,18 +38,26 @@ const MY_PRODUCTS_FALLBACK = '/dashboard/products';
 export function resolveProductManageHref(product: ManageTargetInput): string {
   const instance = product.instance;
 
-  // 1. Standee with configured slots → the dedicated slot manager.
+  // 1. Standee with a linked profile Card (Business Profile Standee) → the
+  //    linked Card editor, so profile editing stays on the Card while the
+  //    physical product remains a Standee.
+  const linkedCardId = instance?.cardId?.trim();
+  if (product.instanceType === 'standee' && linkedCardId) {
+    return `/dashboard/vcards/${linkedCardId}/edit`;
+  }
+
+  // 2. Standee with configured slots → the dedicated slot manager.
   if (product.instanceType === 'standee' && (instance?.socialQrs?.length ?? 0) > 0) {
     return '/dashboard/standees';
   }
 
-  // 2. Instantiated card → the specific card editor (never another card's).
+  // 3. Instantiated card → the specific card editor (never another card's).
   const instanceId = instance?.id?.trim();
   if (product.instanceType === 'card' && instanceId) {
     return `/dashboard/vcards/${instanceId}/edit`;
   }
 
-  // 3. Assignment without an instantiated card → its configuration page.
+  // 4. Assignment without an instantiated card → its configuration page.
   const assignmentId = product.assignmentId?.trim();
   return assignmentId ? `/dashboard/products/${assignmentId}` : MY_PRODUCTS_FALLBACK;
 }

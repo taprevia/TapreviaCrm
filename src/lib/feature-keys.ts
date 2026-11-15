@@ -14,7 +14,8 @@
  * Features are referenced by KEY everywhere (never by product name/slug), so
  * products stay decoupled from specific business names. Access is FIXED per
  * experience — the only product-level variable is the social-links limit
- * (`CatalogProduct.features.social.max`, 1–4, see feature-access.ts).
+ * (`CatalogProduct.features.social.max`, or the card product definition's
+ * `socialLinksMax`, see feature-access.ts).
  *
  * This module is shared between server (src/lib/services/feature-access.ts)
  * and client components, so it must not import server-only modules.
@@ -36,11 +37,17 @@ export type Experience = FeatureKey;
 export const EXPERIENCES: readonly Experience[] = FEATURE_KEYS;
 
 /**
- * Business rule: a social product allows between 1 and 4 links. This is both
- * the default cap for every experience that grants the `social` feature and
- * the maximum a product's own `features.social.max` may raise it to.
+ * Default social-links cap for every experience that grants `social`, and the
+ * maximum a product's own `features.social.max` may raise the default to.
  */
 export const DEFAULT_SOCIAL_LINKS_MAX = 4;
+
+/**
+ * Hard platform ceiling for product-specific social-links limits. Only the
+ * Business and Premium NFC Card definitions currently opt into 6; every other
+ * product continues to resolve to DEFAULT_SOCIAL_LINKS_MAX (4).
+ */
+export const MAX_SOCIAL_LINKS_MAX = 6;
 
 export interface FeatureDef {
   key: FeatureKey;

@@ -56,6 +56,7 @@ import { getBrandIcon } from '@/utils/getBrandIcon';
 import { safeExternalUrl } from '@/lib/safe-url';
 import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
+import { phoneDigits, telHref } from '@/lib/phone';
 import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
 import type { IProduct, IVcard } from '../types';
 import { SafeHtml } from '@/lib/sanitizer';
@@ -96,10 +97,6 @@ interface PPData {
 
 const WEBSITE_PLATFORMS = new Set(['website', 'site', 'web', 'blog', 'portfolio']);
 
-function digitsOf(value: string): string {
-  return value.replace(/\D/g, '');
-}
-
 function buildData({ vcard, products }: { vcard: IVcard; products: IProduct[] }): PPData {
   const name =
     vcard.name?.trim() ||
@@ -115,9 +112,9 @@ function buildData({ vcard, products }: { vcard: IVcard; products: IProduct[] })
     '';
 
   const phoneDisplay = vcard.basic?.phone?.trim() ?? '';
-  const phoneRaw = digitsOf(phoneDisplay);
+  const phoneRaw = phoneDigits(phoneDisplay);
   const phone2Display = vcard.basic?.alternatePhone?.trim() ?? '';
-  const phone2Raw = digitsOf(phone2Display);
+  const phone2Raw = phoneDigits(phone2Display);
   const email = vcard.basic?.email?.trim() ?? '';
 
   const website = safeExternalUrl(
@@ -750,13 +747,13 @@ export function ProfessionalProfileTemplate({
               {(data.phoneDisplay || data.phone2Display || data.email) && (
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                   {data.phoneDisplay && (
-                    <a href={`tel:+${data.phoneRaw}`} className={INNER_LINK}>
+                    <a href={telHref(data.phoneDisplay) ?? undefined} className={INNER_LINK}>
                       <FaPhone size={14} aria-hidden="true" />
                       {data.phoneDisplay}
                     </a>
                   )}
                   {data.phone2Display && (
-                    <a href={`tel:+${data.phone2Raw}`} className={INNER_LINK}>
+                    <a href={telHref(data.phone2Display) ?? undefined} className={INNER_LINK}>
                       <FaPhone size={14} aria-hidden="true" />
                       {data.phone2Display}
                     </a>

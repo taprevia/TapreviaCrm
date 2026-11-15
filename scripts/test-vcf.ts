@@ -366,7 +366,22 @@ section('Degenerate input');
 
   const noAlias = buildVcf(baseCard({ urlAlias: '' }), BASE, NOW);
   report('public UID uses alias rather than NFC serial', noAlias.includes('UID:') && !noAlias.includes('CARD-UID-0001'));
-  report('alternate contacts are not exported', !noAlias.includes('a.lovelace@example.com') && !noAlias.includes('+442071234567'));
+  report(
+    'alternate phone is exported as a second TEL property',
+    noAlias.includes('TEL;TYPE=CELL,VOICE:+442071234567'),
+  );
+  report('alternate email remains excluded', !noAlias.includes('a.lovelace@example.com'));
+  const noAlternate = buildVcf(
+    baseCard({
+      basic: { ...baseCard().basic, alternatePhone: '' },
+    }),
+    BASE,
+    NOW,
+  );
+  report(
+    'empty alternate phone is omitted',
+    noAlternate.split('\r\n').filter((line) => line.startsWith('TEL;')).length === 1,
+  );
   report(
     'missing cardUid + alias falls back to card _id',
     buildVcf(baseCard({ urlAlias: '', cardUid: '' }), BASE, NOW).includes(
@@ -462,6 +477,11 @@ section('Download client (gate + fallback routing)');
   );
   report('the blob declares the charset', DOWNLOAD_SRC.includes("type: 'text/vcard;charset=utf-8'"));
   report('the gate query carries name and email', /n=\$\{encodeURIComponent\(contact\.name\)\}/.test(DOWNLOAD_SRC) && /e=\$\{encodeURIComponent\(contact\.email\)\}/.test(DOWNLOAD_SRC));
+  report(
+    'a direct endpoint fallback exists when blob downloads fail',
+    DOWNLOAD_SRC.includes('downloadVcfEndpoint') &&
+      /!downloadVcfBlob\(body, filename\)/.test(DOWNLOAD_SRC),
+  );
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

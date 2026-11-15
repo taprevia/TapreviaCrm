@@ -11,9 +11,11 @@
  *  - Experience rules are FIXED (src/lib/feature-keys.ts). Product names,
  *    names, materials, sizes and prices never grant access.
  *  - The only product-level variable is the social-links limit:
- *    `CatalogProduct.features.social.max` (1–4). Defaults to
- *    DEFAULT_SOCIAL_LINKS_MAX (4) when unset; the merge takes the most
- *    generous limit across grants and hard-caps at the business max.
+ *    `CatalogProduct.features.social.max` or the card product definition's
+ *    `socialLinksMax`. Defaults to DEFAULT_SOCIAL_LINKS_MAX (4) when unset.
+ *    Business and Premium NFC cards opt into 6; every other product remains
+ *    at 4. The merge takes the most generous limit across grants and hard-caps
+ *    at MAX_SOCIAL_LINKS_MAX (6).
  *  - A feature is enabled if ANY active product grants it.
  *  - Legacy grants (owned active cards / hasStandy) apply ONLY to accounts
  *    with zero active product assignments, so genuinely legacy customers keep
@@ -30,9 +32,10 @@ import CatalogProduct from '@/models/CatalogProduct';
 import {
   DEFAULT_SOCIAL_LINKS_MAX,
   EXPERIENCE_RULES,
+  MAX_SOCIAL_LINKS_MAX,
   resolveExperience,
 } from '@/lib/feature-keys';
-import { getProductCapabilities } from '@/config/products';
+import { getProductCapabilities, getProductDef } from '@/config/products';
 import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 
 export type ResolvedFeatures = Record<FeatureKey, IFeatureConfig>;
@@ -61,17 +64,38 @@ function productGrants(
   if (!experience) return {};
   const rules = EXPERIENCE_RULES[experience];
   const grants: Partial<Record<FeatureKey, IFeatureConfig>> = { ...rules.features };
+  const productId = resolveCanonicalProductId(product.slug);
+  const productDefinition = productId ? getProductDef(productId) : null;
+
+  // Business Profile Standee is the QR-only physical format of the Premium
+  // business profile. Its `kind` stays `standee` (for standee identity/QR/
+  // analytics), but it additionally grants the profile + social experiences so
+  // its linked profile Card is editable through the existing Card PATCH API
+  // (`canUseFeature(owner, 'profile')` / `'social'`).
+  if (productId === 'BUSINESS_PROFILE_STANDEE') {
+    grants.profile = { enabled: true };
+    grants.social = { enabled: true };
+  }
 
   if (grants.social?.enabled) {
+    // Stored per-product override wins when present; otherwise the card
+    // product definition may opt into a higher limit (Business/Premium = 6).
     const explicit = storedSocialMax(product.features);
-    grants.social = { enabled: true, max: explicit ?? DEFAULT_SOCIAL_LINKS_MAX };
+    const productMax = productDefinition?.socialLinksMax;
+    const limit = Math.min(
+      Math.max(explicit ?? 0, productMax ?? 0),
+      MAX_SOCIAL_LINKS_MAX
+    );
+    grants.social = {
+      enabled: true,
+      max: limit || DEFAULT_SOCIAL_LINKS_MAX,
+    };
   }
 
   // Capability-driven review grant: Premium NFC Card is a profile experience
   // that now carries `review_ai_suggestions` in the stable product catalog.
   // The grant is derived from the immutable catalog slug, so existing and new
   // assignments unlock together without a database backfill.
-  const productId = resolveCanonicalProductId(product.slug);
   if (productId) {
     const caps = getProductCapabilities(productId);
     if (caps.includes('review_ai_suggestions')) {
@@ -89,7 +113,7 @@ function merge(base: ResolvedFeatures, grants: Partial<Record<FeatureKey, IFeatu
 
     let grantMax = grant.max ?? KEY_DEFAULT_MAX[key];
     if (key === 'social' && grantMax !== undefined) {
-      grantMax = Math.min(grantMax, DEFAULT_SOCIAL_LINKS_MAX);
+      grantMax = Math.min(grantMax, MAX_SOCIAL_LINKS_MAX);
     }
 
     const currentMax = base[key].max;
@@ -192,6 +216,50 @@ export async function featureMax(
 ): Promise<number | undefined> {
   const features = await resolveFeatureAccess(userId);
   return features[key]?.max;
+}
+
+/**
+ * Resolve the social-links limit for one specific Card from its active
+ * product assignment. Falls back to the account-level feature max for legacy
+ * cards with no active assignment or a product that does not grant social.
+ *
+ * This is intentionally separate from resolveFeatureAccess(): the account
+ * resolver merges every owned product, which would let a 6-link Business/
+ * Premium card raise the limit of an unrelated 4-link card on the same account.
+ */
+export async function resolveCardSocialMax(
+  cardId: string | unknown,
+  ownerId: string | unknown
+): Promise<number | undefined> {
+  if (!cardId) return featureMax(ownerId, 'social');
+
+  const assignmentFilter: Record<string, unknown> = { cardId, status: 'active' };
+  if (ownerId) assignmentFilter.userId = ownerId;
+  const assignments = (await UserProduct.find(assignmentFilter)
+    .select('catalogProductId')
+    .populate('catalogProductId', 'slug kind features')
+    .sort({ createdAt: 1 })
+    .lean()) as unknown as Array<{
+    catalogProductId?: {
+      slug?: string;
+      kind?: string;
+      features?: unknown;
+    } | null;
+  }>;
+
+  let limit: number | undefined;
+  for (const assignment of assignments) {
+    const product = assignment.catalogProductId;
+    if (!product) continue;
+    const social = productGrants(product).social;
+    if (!social?.enabled) continue;
+    const candidate = social.max ?? DEFAULT_SOCIAL_LINKS_MAX;
+    limit = limit === undefined ? candidate : Math.max(limit, candidate);
+  }
+
+  if (limit !== undefined) return Math.min(limit, MAX_SOCIAL_LINKS_MAX);
+  // Legacy/unassigned card: preserve the previous account-level behaviour.
+  return featureMax(ownerId, 'social');
 }
 
 /** Serialisable snapshot for client consumption (GET /api/my/features). */

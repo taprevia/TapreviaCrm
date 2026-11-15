@@ -1,3 +1,5 @@
+import { phoneDigits } from '@/lib/phone';
+
 export interface WhatsAppEnquiryOpts {
   productName: string;
   /** Integer minor units (paise) — rendered as major units with 2 decimals. */
@@ -23,7 +25,7 @@ export function buildWhatsAppEnquiryUrl(
   phone: string | undefined,
   opts: WhatsAppEnquiryOpts
 ): string | null {
-  const digits = (phone ?? '').replace(/\D/g, '');
+  const digits = phoneDigits(phone);
   if (digits.length < 8) return null;
 
   let message = `Hi${opts.cardName ? ` ${opts.cardName}:` : ','} I'm interested in "${opts.productName}"`;

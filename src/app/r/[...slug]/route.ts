@@ -15,7 +15,8 @@ import {
   isStandeeOwnerPubliclyVisible,
 } from '@/lib/services/public-owner-visibility';
 import { resolveCardDestination } from '@/lib/services/redirect-target';
-import { recordPublicVisit } from '@/lib/services/public-visits';
+import { resolveBusinessProfileStandeeDestination } from '@/lib/services/standee-profile-resolution';
+import { recordPublicVisit, mintStandeeVisitMarker } from '@/lib/services/public-visits';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
 import { emitReviewEvent } from '@/lib/services/review-observability';
 import {
@@ -151,7 +152,7 @@ export async function GET(
         { uid: routeKey },
       ],
     })
-      .select('_id userId panelQr socialQrs maxProfiles fixedProfiles routeSlug uid productKey')
+      .select('_id userId panelQr socialQrs maxProfiles fixedProfiles routeSlug uid productKey cardId')
       .lean()) as {
       _id: unknown;
       userId: unknown;
@@ -162,6 +163,7 @@ export async function GET(
       routeSlug?: string;
       uid?: string;
       productKey?: string;
+      cardId?: unknown;
     } | null;
 
     if (standee && !(await isStandeeOwnerPubliclyVisible(standee.userId))) {
@@ -182,6 +184,38 @@ export async function GET(
         }
       };
       const reviewRoute = (standee.routeSlug ?? standee.uid ?? '').trim();
+      // Business Profile Standee: resolve the linked profile Card and redirect
+      // to its public profile destination. This is deliberately checked before
+      // the slot/review/multi logic so a single "WhatsApp" slot or panel QR
+      // both land on the shared business profile (WhatsApp becomes an action
+      // inside the profile). Fail closed: an invalid/foreign/inactive/non-
+      // profile Card reference returns "unavailable" and never falls through
+      // to the legacy redirect. Legacy standees with no cardId keep their
+      // existing single-slot/redirect behavior.
+      if (standee.productKey === 'BUSINESS_PROFILE_STANDEE' && standee.cardId) {
+        const profileDestination =
+          await resolveBusinessProfileStandeeDestination(standee);
+        if (profileDestination) {
+          if (
+            await wouldRedirectLoop(
+              request.nextUrl.pathname,
+              profileDestination,
+              request.nextUrl.origin
+            )
+          ) {
+            return noStoreText('Redirect loop detected', 404);
+          }
+          // Mint a single-use, card-bound marker so the final profile page
+          // records exactly ONE Standee-attributed visit instead of a second
+          // independent Card visit (no double-count).
+          const token = await mintStandeeVisitMarker(standee._id, standee.cardId);
+          const destUrl = new URL(profileDestination, request.url);
+          if (token) destUrl.searchParams.set('tpv', token);
+          await logPanelTap(`route:${routeKey}`);
+          return noStoreRedirect(destUrl, 307);
+        }
+        return noStoreText('Business profile unavailable', 404);
+      }
       const reviewEligible =
         STANDEE_REVIEW_ASSISTANT_ENABLED && Boolean(reviewRoute)
           ? await isStandeeReviewHostEligible({

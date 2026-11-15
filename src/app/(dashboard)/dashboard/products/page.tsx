@@ -62,6 +62,8 @@ interface ProductInstance {
   fixedProfiles?: string[];
   socialQrs?: SocialQrEntry[];
   displayName?: string;
+  /** Linked profile Card id (Business Profile Standee). */
+  cardId?: string;
 }
 
 interface ProductEntry {
@@ -327,9 +329,11 @@ export default function MyProductsPage() {
               : null;
             const destination = inst ? cardDestination(inst, publicUrlFull) : null;
             const manageHref =
-              product.instanceType === 'standee' && product.assignmentId
-                ? `/dashboard/products/${product.assignmentId}`
-                : resolveProductManageHref(product);
+              product.instanceType === 'standee' && product.instance?.cardId
+                ? `/dashboard/vcards/${product.instance.cardId}/edit`
+                : product.instanceType === 'standee' && product.assignmentId
+                  ? `/dashboard/products/${product.assignmentId}`
+                  : resolveProductManageHref(product);
 
             return (
               <Card

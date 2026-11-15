@@ -17,6 +17,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { CountryPhoneField } from '../country-phone-field';
 import { useBuilder } from '../context';
 import { cn } from '@/lib/utils';
 import { canonicalPublicBase } from '@/lib/public-base';
@@ -50,6 +51,10 @@ function Field({
 export function BasicTab() {
   const { draft, setField } = useBuilder();
   const basic = draft.basic;
+  // The country selector is scoped to NFC Business/Premium profile cards.
+  // BasicTab is also reused for the Google Review "Details" tab, which must
+  // keep its existing plain phone inputs.
+  const isProfile = (draft.kind ?? 'profile') === 'profile';
   const publicPath = resolveCustomerPublicPath(draft);
   const publicBase = canonicalPublicBase().replace(/\/+$/, '');
   const publicUrl = publicPath ? (publicBase ? `${publicBase}${publicPath}` : publicPath) : '';
@@ -152,10 +157,21 @@ export function BasicTab() {
         </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Phone" htmlFor="basic-phone">
+      <Field label="Phone" htmlFor="basic-phone">
+        {isProfile ? (
+          <CountryPhoneField
+            id="basic-phone"
+            value={basic.phone ?? ''}
+            onChange={(value) => setField('basic.phone', value)}
+            placeholder="9878822213"
+            className={darkInput}
+          />
+        ) : (
           <Input id="basic-phone" type="tel" maxLength={20} autoComplete="tel" className={darkInput} {...bindBasic('phone')} />
-        </Field>
+        )}
+      </Field>
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Email" htmlFor="basic-email">
           <Input id="basic-email" type="email" maxLength={255} autoComplete="email" className={darkInput} {...bindBasic('email')} />
         </Field>
@@ -171,6 +187,29 @@ export function BasicTab() {
           />
         </Field>
       </div>
+
+      <Field label="Alternate Phone Number" htmlFor="basic-alternatePhone">
+        {isProfile ? (
+          <CountryPhoneField
+            id="basic-alternatePhone"
+            value={basic.alternatePhone ?? ''}
+            onChange={(value) => setField('basic.alternatePhone', value)}
+            placeholder="Optional"
+            className={darkInput}
+          />
+        ) : (
+          <Input
+            id="basic-alternatePhone"
+            type="tel"
+            inputMode="tel"
+            maxLength={20}
+            autoComplete="tel"
+            placeholder="Optional"
+            className={darkInput}
+            {...bindBasic('alternatePhone')}
+          />
+        )}
+      </Field>
 
       {/* ── Public URL (immutable) ── */}
       <Field label="Public URL" htmlFor="basic-urlAlias">

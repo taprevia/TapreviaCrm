@@ -216,6 +216,13 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
    * rewrite a legacy stored price.
    */
   const [initialPriceMajor, setInitialPriceMajor] = useState('');
+  /**
+   * Original description/category when the editor opened. Edit saves include
+   * these keys when they changed so clearing a value is persisted, while an
+   * unrelated edit leaves the stored value untouched.
+   */
+  const [initialDescription, setInitialDescription] = useState('');
+  const [initialCategory, setInitialCategory] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -227,6 +234,8 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
   const openCreate = useCallback(() => {
     setForm(emptyForm(items.length)); // default sort order = next index
     setInitialPriceMajor('');
+    setInitialDescription('');
+    setInitialCategory('');
     setEditingId(null);
     setFieldErrors({});
     setEditorOpen(true);
@@ -238,15 +247,19 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
       typeof product.priceMinor === 'number' && product.priceMinor > 0
         ? minorToMajorInput(product.priceMinor)
         : '';
+    const description = product.description ?? '';
+    const category = product.category ?? '';
     setForm({
       title: product.title ?? '',
-      description: product.description ?? '',
+      description,
       priceMajor,
-      category: product.category ?? '',
+      category,
       imageUrl: product.imageUrl ?? '',
       sortOrder: String(product.sortOrder ?? 0),
     });
     setInitialPriceMajor(priceMajor);
+    setInitialDescription(description);
+    setInitialCategory(category);
     setEditingId(product._id);
     setFieldErrors({});
     setEditorOpen(true);
@@ -357,7 +370,17 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
       }
 
       const body: Record<string, unknown> = { title };
-      if (form.description.trim()) body.description = form.description.trim();
+      const description = form.description.trim();
+      const category = form.category.trim();
+      if (editingId) {
+        // Send changed values even when empty so clearing is persisted. An
+        // unchanged field is omitted and therefore keeps its stored value.
+        if (form.description !== initialDescription) body.description = description;
+        if (form.category !== initialCategory) body.category = category;
+      } else {
+        if (description) body.description = description;
+        if (category) body.category = category;
+      }
       if (parsedPrice.kind === 'valid') {
         body.priceMinor = parsedPrice.priceMinor;
       } else if (
@@ -369,7 +392,6 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
         body.priceMinor = 0;
       }
       // Unchanged edits omit priceMinor entirely so the stored value is kept.
-      if (form.category.trim()) body.category = form.category.trim();
       // Always send imageUrl — including '' — so removing a stored image is
       // persisted (the PATCH handler deletes the detached object).
       body.imageUrl = form.imageUrl;
@@ -446,7 +468,17 @@ export function ProductsTab({ cardId }: ProductsTabProps) {
         setSaving(false);
       }
     },
-    [editingId, form, initialPriceMajor, items.length, saving, toast, cardId]
+    [
+      editingId,
+      form,
+      initialCategory,
+      initialDescription,
+      initialPriceMajor,
+      items.length,
+      saving,
+      toast,
+      cardId,
+    ]
   );
 
   /** Controlled-input setter bound to a form field key. */
