@@ -47,6 +47,8 @@ interface StandeeInstance {
   displayName?: string;
   routeSlug: string;
   productKey?: string;
+  /** Linked profile Card id (Business Profile Standee). */
+  cardId?: string | null;
   maxProfiles?: number;
   fixedProfiles?: string[];
   socialQrs?: SocialQrEntry[];
@@ -298,6 +300,14 @@ export default function StandeeManager({ assignmentId }: { assignmentId?: string
               : row.publicUrl
             : null;
 
+          // Business Profile Standee is card-backed: Manage opens the linked
+          // profile Card editor. Every other standee keeps the slot config page.
+          const isBps = inst.productKey === 'BUSINESS_PROFILE_STANDEE';
+          const manageHref =
+            isBps && inst.cardId
+              ? `/dashboard/vcards/${inst.cardId}/edit`
+              : `/dashboard/products/${row.assignmentId}`;
+
           return (
             <Card key={row.assignmentId} className="bg-surface border-transparent ring-1 ring-line-subtle p-5 space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -325,7 +335,7 @@ export default function StandeeManager({ assignmentId }: { assignmentId?: string
                     {slotCount} QR
                   </Badge>
                   <Link
-                    href={`/dashboard/products/${row.assignmentId}`}
+                    href={manageHref}
                     className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-field px-3 text-xs font-medium text-ink-mute transition-colors hover:bg-white/5 hover:text-ink"
                   >
                     <Settings2 className="h-3.5 w-3.5" />

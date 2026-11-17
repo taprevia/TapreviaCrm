@@ -139,6 +139,10 @@ export interface PublicStandeeRoute {
   routeSlug?: string | null;
   uid?: string | null;
   publicSlug?: string | null;
+  productKey?: string | null;
+  cardId?: string | null;
+  /** Canonical public URL of the linked Business Profile Card (BPS only). */
+  linkedCardPublicSlug?: string | null;
   maxProfiles?: number | null;
   fixedProfiles?: string[] | null;
   socialQrs?: Array<{
@@ -182,6 +186,16 @@ export function brandedStandeePanelQrUrl(
 ): string {
   const base = trustedBase(publicBaseUrl);
   if (!base) return '';
+
+  // Business Profile Standee: the QR encodes the linked profile Card's
+  // canonical public URL directly (never /r/{routeSlug} or the standee's own
+  // redirect slug). Unlinked legacy BPS keeps the existing fallback below.
+  const linkedCardSlug = (standee.linkedCardPublicSlug ?? '')
+    .trim()
+    .replace(/^\/+|\/+$/g, '');
+  if (standee.productKey === 'BUSINESS_PROFILE_STANDEE' && linkedCardSlug) {
+    return `${base}/${linkedCardSlug}`;
+  }
 
   const publicSlug = (standee.publicSlug ?? '').trim().replace(/^\/+|\/+$/g, '');
   if (publicSlug) {

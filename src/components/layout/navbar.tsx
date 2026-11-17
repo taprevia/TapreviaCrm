@@ -56,6 +56,28 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
       );
   const links = isInAdminSection ? ADMIN_NAV_ITEMS : customerNavLinks;
 
+  // Deterministic single active destination. Priority:
+  //   1. exact destination match (pathname === destHref);
+  //   2. boundary-aware nested match (pathname.startsWith(destHref + '/')),
+  //      most-specific (longest) destination wins, navigation order tie-breaks.
+  // A platform row's exact match (e.g. a card editor) therefore suppresses a
+  // broader parent row's prefix highlight, guaranteeing at most one active item.
+  const activeDest = (() => {
+    let best: string | null = null;
+    for (const link of links) {
+      const destHref = platformDestinations?.[link.href] ?? link.href;
+      if (pathname === destHref) return destHref;
+      if (
+        link.href !== '/admin' &&
+        link.href !== '/dashboard' &&
+        pathname.startsWith(destHref + '/')
+      ) {
+        if (best === null || destHref.length > best.length) best = destHref;
+      }
+    }
+    return best;
+  })();
+
   return (
     <>
       <nav aria-label="Primary navigation" className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-line-subtle bg-bg/80 px-3 backdrop-blur sm:gap-4 sm:px-4 md:px-6">
@@ -149,9 +171,7 @@ export function Navbar({ user, capabilities, platformDestinations }: NavbarProps
               // light up when a platform row resolved to it — that row is now
               // active when either its own page OR its destination page matches.
               const destHref = platformDestinations?.[link.href] ?? link.href;
-              const isActive =
-                pathname === destHref ||
-                (link.href !== '/admin' && link.href !== '/dashboard' && pathname.startsWith(destHref));
+              const isActive = destHref === activeDest;
               return (
                 <Link
                   key={link.href}

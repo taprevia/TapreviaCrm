@@ -78,6 +78,32 @@ export async function GET(request: NextRequest) {
         standeeId: standee._id,
       });
       if (!owned) return fail(404, 'NOT_FOUND', 'Route not found or not owned by you');
+
+      // Business Profile Standee: encode the linked Card's canonical public URL
+      // directly (never the standee's own redirect slug or the /r route).
+      // Resolved only through the standee's stored cardId and same-owner check.
+      if (standee.productKey === 'BUSINESS_PROFILE_STANDEE' && standee.cardId) {
+        const linked = (await Card.findById(standee.cardId)
+          .select('publicSlug userId assignedUserId')
+          .lean()) as unknown as {
+          publicSlug?: string | null;
+          userId?: unknown;
+          assignedUserId?: unknown;
+        } | null;
+        if (linked) {
+          const owner = linked.userId ?? linked.assignedUserId;
+          if (
+            owner &&
+            String(owner) === String(user._id) &&
+            typeof linked.publicSlug === 'string' &&
+            linked.publicSlug
+          ) {
+            return makeQr(linked.publicSlug);
+          }
+        }
+        // Unlinked/foreign BPS: fall through to the standee's own slug.
+      }
+
       if (!standee.publicSlug) {
         return fail(409, 'CONFLICT', 'Public URL not allocated for this product yet');
       }

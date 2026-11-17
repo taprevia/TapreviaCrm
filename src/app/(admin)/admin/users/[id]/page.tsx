@@ -119,6 +119,8 @@ interface StandeeData {
   uid?: string;
   publicSlug?: string;
   productKey?: string;
+  /** Canonical public URL of the linked Business Profile Card (BPS only). */
+  linkedCardPublicSlug?: string | null;
   canonicalPublicUrl?: string | null;
   permanentEntryUrl?: string | null;
   legacyEntryUrl?: string | null;

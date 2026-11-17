@@ -45,7 +45,25 @@ export async function GET(
     }
 
     const profile = await Profile.findOne({ userId: id }).lean();
-    const rawCards = (await Card.find({ assignedUserId: id }).sort({ createdAt: -1 }).lean()) as unknown as CardLean[];
+
+    // Exclude Cards that are internal linked resources of Business Profile
+    // Standee assignments (managed through the Standee, not listed as separate
+    // purchased NFC cards). Mirrors the customer /api/cards exclusion; scoped to
+    // this customer's own BPS standees only.
+    const bpsLinkedCardIds = (
+      (await Standee.find({
+        userId: id,
+        productKey: 'BUSINESS_PROFILE_STANDEE',
+        cardId: { $ne: null },
+      })
+        .select('cardId')
+        .lean()) as unknown as Array<{ cardId: unknown }>
+    ).map((standee) => standee.cardId);
+
+    const rawCards = (await Card.find({
+      assignedUserId: id,
+      ...(bpsLinkedCardIds.length > 0 ? { _id: { $nin: bpsLinkedCardIds } } : {}),
+    }).sort({ createdAt: -1 }).lean()) as unknown as CardLean[];
     const cards = await Promise.all(
       rawCards.map(async (row) => ({
         ...row,
@@ -56,10 +74,42 @@ export async function GET(
     const leads = await Lead.find({ cardOwnerId: id }).sort({ createdAt: -1 }).limit(50).lean();
     const rawStandees = await Standee.find({ userId: id }).sort({ createdAt: -1 }).lean();
     const standees = await Promise.all(
-      rawStandees.map(async (row) => ({
-        ...row,
-        ...(await resolveProductUrls({ instanceType: 'standee', instance: row as never })),
-      }))
+      rawStandees.map(async (row) => {
+        // Business Profile Standee: resolve the linked Card's canonical public URL.
+        // Resolved ONLY through the standee's own cardId and only when the Card's
+        // owner matches this customer. Used both for the displayed canonical URL
+        // (via resolveProductUrls) and for direct-QR encoding.
+        let linkedCardPublicSlug: string | null = null;
+        const doc = row as unknown as { productKey?: string | null; cardId?: unknown };
+        if (doc.productKey === 'BUSINESS_PROFILE_STANDEE' && doc.cardId) {
+          const linked = (await Card.findById(doc.cardId)
+            .select('publicSlug userId assignedUserId')
+            .lean()) as unknown as {
+            publicSlug?: string | null;
+            userId?: unknown;
+            assignedUserId?: unknown;
+          } | null;
+          if (linked) {
+            const owner = linked.userId ?? linked.assignedUserId;
+            if (
+              owner &&
+              String(owner) === String(id) &&
+              typeof linked.publicSlug === 'string' &&
+              linked.publicSlug
+            ) {
+              linkedCardPublicSlug = linked.publicSlug;
+            }
+          }
+        }
+
+        const urls = await resolveProductUrls({
+          instanceType: 'standee',
+          instance: row as never,
+          linkedCardPublicSlug,
+        });
+
+        return { ...row, ...urls, linkedCardPublicSlug };
+      })
     );
 
     let analytics = null;
