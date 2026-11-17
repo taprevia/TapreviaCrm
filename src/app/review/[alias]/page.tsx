@@ -95,6 +95,7 @@ export default async function ReviewPage({ params }: Params) {
       config={access.config}
       languages={access.languages}
       alias={params.alias}
+      openaiConfigured={access.openaiConfigured}
     />
   );
 }

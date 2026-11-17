@@ -89,7 +89,13 @@ export async function generateReviewSuggestion(
     canUseReviewAssistantForCard(card),
     resolveEffectiveReviewSettings(card),
   ]);
-  if (!entitled || !effective.enabled) {
+  // The Review Assistant's own enabled flag is the availability authority; the
+  // Central Public Integration gate must not disable the library fallback.
+  // canUseReviewAssistantForCard already checks `enabled` for non-review Cards,
+  // but review-kind Cards are entitled by kind, so honor the legacy flag here.
+  const legacyEnabled =
+    (card as { reviewAssistant?: { enabled?: unknown } | null }).reviewAssistant?.enabled === true;
+  if (!entitled || !legacyEnabled) {
     return { ok: false, code: 'NOT_FOUND', message: 'Review assistant is not available' };
   }
 
@@ -118,7 +124,7 @@ export async function generateReviewSuggestion(
   if (!(await tenantHasAiConfiguration(ownerId))) {
     return generateLibrarySuggestion({
       businessName: (effective.businessName || card.name || '').trim(),
-      config: effective,
+      config: { ...effective, enabled: true },
       feedback,
       topics,
       language,
@@ -243,6 +249,11 @@ export interface GenerateForHostInput {
     styleMode: 'fixed' | 'varied';
     lengthMode: 'fixed' | 'varied';
     businessName?: string;
+    category?: string;
+    feedbackTopics?: string[];
+    employees?: string[];
+    services?: string[];
+    keywords?: string[];
   };
   feedback: string;
   /** Optional for direct callers; public routes always pass an array. */
@@ -384,6 +395,12 @@ export async function generateReviewForHost(
   const topicsLine =
     topics.length > 0 ? topics.map((t: string) => `- ${t}`).join('\n') : '(none selected)';
 
+  const category = (config.category ?? '').trim();
+  const services = (config.services ?? []).map((s) => s.trim()).filter(Boolean);
+  const employees = (config.employees ?? []).map((s) => s.trim()).filter(Boolean);
+  const keywords = (config.keywords ?? []).map((s) => s.trim()).filter(Boolean);
+  const businessTopics = (config.feedbackTopics ?? []).map((s) => s.trim()).filter(Boolean);
+
   const system = [
     'You are a writing assistant inside a Google-review flow. A customer has already decided to leave a review and uses you only to phrase their own experience more naturally.',
     'Hard rules:',
@@ -402,6 +419,21 @@ export async function generateReviewForHost(
   const userMsg = [
     ...(businessName
       ? ['Business name (reference only, never invent details):', businessName, '']
+      : []),
+    ...(category
+      ? ['Business category (reference only, never invent details):', category, '']
+      : []),
+    ...(services.length > 0
+      ? ['Business services (reference only, never invent a purchase or experience):', services.join(', '), '']
+      : []),
+    ...(employees.length > 0
+      ? ['Business team members (reference only, never invent an interaction):', employees.join(', '), '']
+      : []),
+    ...(keywords.length > 0
+      ? ['Business keywords (reference only, never invent details):', keywords.join(', '), '']
+      : []),
+    ...(businessTopics.length > 0
+      ? ['Business feedback topics (reference only, never treat as facts):', businessTopics.join(', '), '']
       : []),
     'Customer-selected language (reply in it):',
     lang,

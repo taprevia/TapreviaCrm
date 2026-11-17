@@ -71,7 +71,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       canUseReviewAssistantForCard(card),
       resolveEffectiveReviewSettings(card),
     ]);
-    if (!entitled || !effective.enabled) {
+    // Library suggestion availability is decoupled from the Central Public
+    // Integration gate: that gate controls review PUBLICATION, not the Review
+    // Assistant's library. Entitlement (canUseReviewAssistantForCard) is the
+    // authority here and already validates the assistant's own enabled flag.
+    if (!entitled) {
       return fail(404, 'NOT_FOUND', 'Review assistant is not available');
     }
 
@@ -94,7 +98,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         : null;
 
     const suggestions = await getReviewTemplateSuggestions({
-      card: { name: card.name, reviewAssistant: effective },
+      card: { name: card.name, reviewAssistant: { ...effective, enabled: true } },
       language,
       length,
       topics: parsed.data.topics,

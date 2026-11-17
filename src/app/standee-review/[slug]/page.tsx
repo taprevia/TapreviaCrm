@@ -4,6 +4,7 @@ import { connectDB } from '@/lib/db';
 import { ReviewAssistantFlow } from '@/components/review/review-assistant';
 import { COPY_FLOW_ACTIVE, REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
 import { resolveStandeeReviewHost } from '@/lib/services/review-standee-settings';
+import { tenantHasAiConfiguration } from '@/lib/services/review-generate';
 import { recordPublicVisit } from '@/lib/services/public-visits';
 import AnalyticsLog from '@/models/AnalyticsLog';
 
@@ -54,6 +55,8 @@ export default async function StandeeReviewPage({ params }: Params) {
     metadata: `standee-review:${host.routeSlug}`,
   }).catch(() => undefined);
 
+  const openaiConfigured = await tenantHasAiConfiguration(host.ownerId);
+
   return (
     <main className="vcard-root min-h-screen bg-[var(--v-bg)]">
       <ReviewAssistantFlow
@@ -73,6 +76,7 @@ export default async function StandeeReviewPage({ params }: Params) {
           feedbackTopics: host.config.feedbackTopics,
           styleMode: host.config.styleMode,
           lengthMode: host.config.lengthMode,
+          openaiConfigured,
         }}
       />
     </main>

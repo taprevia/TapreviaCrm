@@ -150,6 +150,7 @@ export default async function PublicHumanUrlPage({ params, searchParams }: Param
         config={resolved.access.config}
         languages={resolved.access.languages}
         alias={resolved.alias}
+        openaiConfigured={resolved.access.openaiConfigured}
       />
     );
   }

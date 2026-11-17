@@ -6,11 +6,13 @@ import { getReviewLanguageOptions } from '@/lib/services/review-templates';
 import { ReviewAssistantFlow } from '@/components/review/review-assistant';
 import { getInitials, vcardDisplayName } from '@/components/public/hero';
 import { COPY_FLOW_ACTIVE, REVIEW_ROTATION_ACTIVE } from '@/lib/review-feature-flags';
+import { tenantHasAiConfiguration } from '@/lib/services/review-generate';
 import type { IReviewAssistantConfig } from '@/types';
 
 export interface ReviewAccess {
   config: ResolvedReviewSettings;
   languages: string[];
+  openaiConfigured: boolean;
 }
 
 function luminance(hex: string): number {
@@ -54,8 +56,11 @@ export async function resolveReviewAccess(card: ICard): Promise<ReviewAccess | n
   ]);
   if (!entitled.entitled || !effective.enabled) return null;
 
-  const languages = await resolveReviewLanguages(effective);
-  return { config: effective, languages };
+  const [languages, openaiConfigured] = await Promise.all([
+    resolveReviewLanguages(effective),
+    tenantHasAiConfiguration(ownerId),
+  ]);
+  return { config: effective, languages, openaiConfigured };
 }
 
 /**
@@ -68,11 +73,13 @@ export function ReviewExperience({
   config,
   languages,
   alias,
+  openaiConfigured,
 }: {
   card: ICard;
   config: ResolvedReviewSettings;
   languages: string[];
   alias: string;
+  openaiConfigured: boolean;
 }) {
   const accent = /^#[0-9a-fA-F]{6}$/.test(card.themeConfig?.accentColor ?? '')
     ? card.themeConfig.accentColor
@@ -117,6 +124,7 @@ export function ReviewExperience({
           feedbackTopics: config.feedbackTopics ?? [],
           styleMode: config.styleMode,
           lengthMode: config.lengthMode,
+          openaiConfigured,
         }}
       />
     </div>

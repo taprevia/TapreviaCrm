@@ -46,6 +46,8 @@ interface ReviewAssistantConfig {
   feedbackTopics: string[];
   styleMode?: 'fixed' | 'varied';
   lengthMode?: 'fixed' | 'varied';
+  /** True when the tenant has an enabled, keyed OpenAI integration. */
+  openaiConfigured?: boolean;
 }
 
 interface ReviewAssistantFlowProps {
@@ -1060,14 +1062,16 @@ export function ReviewAssistantFlow({
             <PenLine className="h-4 w-4" aria-hidden="true" />
             Write my own review →
           </button>
-          <button
-            type="button"
-            onClick={openAiComposer}
-            className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 text-xs font-medium text-[var(--v-accent)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2"
-          >
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            Write it with AI instead
-          </button>
+          {config.openaiConfigured && (
+            <button
+              type="button"
+              onClick={openAiComposer}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 text-xs font-medium text-[var(--v-accent)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2"
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Write it with AI instead
+            </button>
+          )}
         </div>
       )}
 
