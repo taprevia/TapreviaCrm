@@ -1248,10 +1248,10 @@ export function ReviewAssistantFlow({
           <button
             type="button"
             onClick={writeItMyself}
-            className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 text-xs font-medium text-[var(--v-muted)] transition-colors hover:text-[var(--v-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]"
+            className={cn(primaryButtonClass, 'mt-1')}
           >
-            <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
-            Use my words as my review
+            <PenLine className="h-4 w-4" aria-hidden="true" />
+            Continue to Post Review
           </button>
         </div>
       )}
@@ -1292,6 +1292,10 @@ export function ReviewAssistantFlow({
               <p className="text-xs font-medium text-red-600">Couldn’t copy automatically — select the text and copy it manually.</p>
             )}
 
+            <p className="text-xs text-[var(--v-muted)]">
+              Your review is ready! Copy it and continue to Google to paste and publish it.
+            </p>
+
             <div className="space-y-2.5">
               {hasGoogleUrl ? (
                 <button
@@ -1301,7 +1305,7 @@ export function ReviewAssistantFlow({
                   className={cn(primaryButtonClass, 'disabled:cursor-not-allowed disabled:opacity-50')}
                 >
                   <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
-                  Copy &amp; Continue to Google Reviews
+                  Copy Review &amp; Open Google
                 </button>
               ) : (
                 <button
@@ -1318,7 +1322,7 @@ export function ReviewAssistantFlow({
                   ) : (
                     <>
                       <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
-                      Copy review
+                      Copy My Review
                     </>
                   )}
                 </button>
