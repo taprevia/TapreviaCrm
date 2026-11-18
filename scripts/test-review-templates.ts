@@ -800,8 +800,8 @@ async function run() {
       excludeTemplateIds: [...seen],
     });
     report(
-      'B4 detailed pool of 3 reuses the same set after exhaustion',
-      disjointServes && exhaustive && fourth.length === MAX_EXPECTED.one && fourth.every((s) => seen.has(s.templateId)),
+      'B4 detailed pool serves other lengths after exhaustion',
+      disjointServes && exhaustive && fourth.length === MAX_EXPECTED.one && !seen.has(fourth[0].templateId),
       `seen=${[...seen].join(',')}`
     );
   }
@@ -828,7 +828,8 @@ async function run() {
       (ids, i) => i === 0 || ids.every((id) => !served[i - 1].includes(id))
     );
     const exhaustive = seen.size === 4;
-    // Fully exhausted → identical exclusion-driven refills stay deterministic.
+    // Preferred-length templates exhausted → the next serves select other
+    // eligible lengths (never repeat the already-shown set).
     const s5 = await getReviewTemplateSuggestions({
       card,
       language: 'English',
@@ -841,11 +842,15 @@ async function run() {
       length: 'short',
       excludeTemplateIds: [...seen],
     });
-    const deterministic =
-      s5.map((s) => s.templateId).join(',') === s6.map((s) => s.templateId).join(',');
+    const newLengths =
+      s5.length === MAX_EXPECTED.one &&
+      s6.length === MAX_EXPECTED.one &&
+      !seen.has(s5[0].templateId) &&
+      !seen.has(s6[0].templateId) &&
+      s5[0].templateId !== s6[0].templateId;
     report(
-      'B5 short pool deterministic and unique after exhaustion',
-      cleanServes && disjoint && exhaustive && deterministic && uniqueIds(s5).size === s5.length
+      'B5 short pool reaches other lengths after exhaustion',
+      cleanServes && disjoint && exhaustive && newLengths
     );
   }
 

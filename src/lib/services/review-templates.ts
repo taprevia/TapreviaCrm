@@ -238,7 +238,6 @@ function substitute(
 /** Resolve the language bucket: exact match first, English as a top-up. */
 function languageBucket(candidates: EdibleCandidate[], language: string): EdibleCandidate[] {
   const exact = candidates.filter((t) => t.language === language);
-  if (exact.length >= MAX_SUGGESTIONS) return exact;
   const english = candidates.filter(
     (t) => t.language === FALLBACK_LANGUAGE && t.language !== language
   );
@@ -247,7 +246,6 @@ function languageBucket(candidates: EdibleCandidate[], language: string): Edible
 
 function lengthBucket(pool: EdibleCandidate[], preferred: string): EdibleCandidate[] {
   const exact = pool.filter((t) => t.length === preferred);
-  if (exact.length >= MAX_SUGGESTIONS) return exact;
   const others = pool.filter((t) => t.length !== preferred);
   return [...exact, ...others];
 }
@@ -408,6 +406,10 @@ export async function getReviewTemplateSuggestions(
     input.now,
     Boolean(input.length)
   ) as string;
+  // The customer's explicitly requested length (business default when absent),
+  // used for ranking preference only — the varied `preferredLength` above is
+  // only the generated-text length label.
+  const requestedLength = (input.length ?? cfg.preferredLength ?? 'medium') as ReviewPreferredLength;
   const writingStyle = selectVariedStyle(cfg.writingStyle, cfg.styleMode, input.now);
   const now = input.now ?? new Date();
 
@@ -457,10 +459,16 @@ export async function getReviewTemplateSuggestions(
         styleMatchScore(candidate, writingStyle),
     }))
     .sort((a, b) => {
-      // Rotation first (oldest shown / least used) keeps consecutive serves
-      // fresh, then relevance decides order among equally-fresh candidates —
-      // so on any fresh pool the customer's feedback/topics/style genuinely
-      // shape which suggestions appear first.
+      // Requested language then requested length are preferred first; among
+      // those, copy-rotation freshness (oldest shown / least used) keeps
+      // consecutive serves fresh, then relevance shapes the order. Session
+      // "already shown" handling happens later via soft exclusion.
+      const aLang = a.candidate.language === language ? 0 : 1;
+      const bLang = b.candidate.language === language ? 0 : 1;
+      if (aLang !== bLang) return aLang - bLang;
+      const aLen = a.candidate.length === requestedLength ? 0 : 1;
+      const bLen = b.candidate.length === requestedLength ? 0 : 1;
+      if (aLen !== bLen) return aLen - bLen;
       const aAt = a.candidate.lastShownAt ? new Date(a.candidate.lastShownAt).getTime() : 0;
       const bAt = b.candidate.lastShownAt ? new Date(b.candidate.lastShownAt).getTime() : 0;
       if (aAt !== bAt) return aAt - bAt;
@@ -468,7 +476,11 @@ export async function getReviewTemplateSuggestions(
       const bUsed = b.candidate.usageCount ?? 0;
       if (aUsed !== bUsed) return aUsed - bUsed;
       if (a.score !== b.score) return b.score - a.score;
-      return 0;
+      // Deterministic final tie-break so identical-score candidates never rely
+      // on the DB's non-guaranteed natural order.
+      const aId = String(a.candidate._id).toLowerCase();
+      const bId = String(b.candidate._id).toLowerCase();
+      return aId < bId ? -1 : aId > bId ? 1 : 0;
     });
 
   if (ranked.length === 0) return [];
