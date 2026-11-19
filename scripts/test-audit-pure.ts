@@ -10,7 +10,9 @@ import { resolveCanonicalProductId } from '@/lib/services/product-identity';
 import {
   CARD_TEMPLATE_META,
   DEFAULT_TEMPLATE_KEY,
+  defaultThemeForTemplate,
   isRegisteredTemplate,
+  resolveTemplateThemeChange,
   safeTemplateKey,
 } from '@/lib/card-templates';
 
@@ -74,6 +76,58 @@ check('safeTemplateKey keeps valid, missing, unknown and legacy fallback behavio
   assert.equal(safeTemplateKey('unknown-template'), DEFAULT_TEMPLATE_KEY);
   assert.equal(safeTemplateKey('modern-professional'), DEFAULT_TEMPLATE_KEY);
   assert.equal(safeTemplateKey('panthevent'), DEFAULT_TEMPLATE_KEY);
+});
+check('every registered template has a valid default palette', () => {
+  for (const template of CARD_TEMPLATE_META) {
+    const theme = defaultThemeForTemplate(template.key);
+    assert.ok(theme, template.key);
+    assert.match(theme.accentColor, /^#[0-9a-fA-F]{6}$/, template.key);
+    assert.match(theme.bgColor, /^#[0-9a-fA-F]{6}$/, template.key);
+  }
+});
+check('same-template selection never triggers a colour reset', () => {
+  for (const template of CARD_TEMPLATE_META) {
+    assert.equal(resolveTemplateThemeChange(template.key, template.key), null);
+  }
+});
+check('explicit Royal Aura / Noir Elite switches apply registered defaults', () => {
+  const noir = defaultThemeForTemplate('noir-elite')!;
+  const royal = defaultThemeForTemplate('premium-purple')!;
+  assert.deepEqual(resolveTemplateThemeChange('premium-purple', 'noir-elite'), {
+    templateKey: 'noir-elite',
+    themeConfig: noir,
+  });
+  assert.deepEqual(resolveTemplateThemeChange('noir-elite', 'premium-purple'), {
+    templateKey: 'premium-purple',
+    themeConfig: royal,
+  });
+});
+check('switching to every registered template changes only key and palette', () => {
+  for (const template of CARD_TEMPLATE_META) {
+    const current = template.key === 'social' ? 'premium-purple' : 'social';
+    const update = resolveTemplateThemeChange(current, template.key);
+    assert.ok(update, template.key);
+    assert.deepEqual(Object.keys(update).sort(), ['templateKey', 'themeConfig']);
+    assert.equal(update.templateKey, template.key);
+    assert.deepEqual(update.themeConfig, defaultThemeForTemplate(template.key));
+  }
+});
+check('unknown or incomplete template palette is never guessed', () => {
+  assert.equal(defaultThemeForTemplate('not-registered'), null);
+  assert.equal(resolveTemplateThemeChange('noir-elite', 'not-registered'), null);
+});
+check('rapid switch sequence ends with the final registered palette', () => {
+  let draft = {
+    templateKey: 'premium-purple',
+    themeConfig: defaultThemeForTemplate('premium-purple')!,
+  };
+  for (const key of ['noir-elite', 'panthi-event', 'social', 'premium-purple']) {
+    const update = resolveTemplateThemeChange(draft.templateKey, key);
+    assert.ok(update, key);
+    draft = { templateKey: update.templateKey, themeConfig: update.themeConfig };
+  }
+  assert.equal(draft.templateKey, 'premium-purple');
+  assert.deepEqual(draft.themeConfig, defaultThemeForTemplate('premium-purple'));
 });
 
 console.log('\n=== AUDIT PURE SUMMARY ===');

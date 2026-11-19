@@ -4,14 +4,18 @@
  * Template tab — pick the card layout.
  *
  * Lists the templates granted to this customer by the admin
- * (GET /api/card-templates?cardId=) and writes `draft.templateKey`.
+ * (GET /api/card-templates?cardId=). An explicit switch writes the selected
+ * template key together with that template's registered default colours.
  */
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, LayoutTemplate, Loader2 } from 'lucide-react';
 import { useBuilder } from '../context';
 import { cn } from '@/lib/utils';
-import { DEFAULT_TEMPLATE_KEY } from '@/lib/card-templates';
+import {
+  DEFAULT_TEMPLATE_KEY,
+  resolveTemplateThemeChange,
+} from '@/lib/card-templates';
 
 interface TemplateMeta {
   key: string;
@@ -24,6 +28,7 @@ export function TemplateTab() {
   const current = draft.templateKey ?? DEFAULT_TEMPLATE_KEY;
   const [templates, setTemplates] = useState<TemplateMeta[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paletteIssue, setPaletteIssue] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,10 +49,39 @@ export function TemplateTab() {
     };
   }, [draft._id]);
 
+  const selectTemplate = (template: TemplateMeta) => {
+    const update = resolveTemplateThemeChange(current, template.key);
+    if (!update) {
+      // Same-template clicks and incomplete metadata must never touch colours.
+      // A different key with no registered palette is reported, not guessed.
+      if (template.key !== current) {
+        setPaletteIssue(
+          `${template.name} has no registered default palette. The saved theme and template were left unchanged.`,
+        );
+      }
+      return;
+    }
+
+    setPaletteIssue(null);
+    // One click owns all three writes. setField clones the latest draftRef
+    // synchronously and React batches the render, so preview never paints a
+    // mixed template/colour state. Autosave already ignores PATCH response
+    // colours, so a late response cannot restore the previous palette.
+    setField('templateKey', update.templateKey);
+    setField('themeConfig.accentColor', update.themeConfig.accentColor);
+    setField('themeConfig.bgColor', update.themeConfig.bgColor);
+  };
+
   const selectedIsAvailable = (templates ?? []).some((t) => t.key === current);
 
   return (
     <div className="space-y-5">
+      {paletteIssue ? (
+        <p role="status" className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-xs leading-relaxed text-warn ring-1 ring-warn/20">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {paletteIssue}
+        </p>
+      ) : null}
       {error ? (
         <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-xs leading-relaxed text-warn ring-1 ring-warn/20">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -79,7 +113,7 @@ export function TemplateTab() {
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  onClick={() => setField('templateKey', tpl.key)}
+                  onClick={() => selectTemplate(tpl)}
                   className={cn(
                     'group relative rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50',
                     active

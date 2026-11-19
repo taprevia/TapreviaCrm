@@ -5,6 +5,8 @@ import { PanthiEventTemplate } from './templates/panthi-event';
 import { ProfessionalProfileTemplate } from './templates/professional-profile';
 import { SocialTemplate } from './templates/social';
 import { PremiumPurpleTemplate } from './templates/premium-purple';
+import { NoirEliteTemplate } from './templates/noir-elite';
+import { EmeraldEssenceTemplate } from './templates/emerald-essence';
 import type { IProduct, IVcard, ReviewCta } from './types';
 import { DEFAULT_TEMPLATE_KEY, safeTemplateKey } from '@/lib/card-templates';
 
@@ -71,6 +73,8 @@ export const CARD_TEMPLATES = {
   'professional-profile': ProfessionalProfileTemplate,
   social: SocialTemplate,
   'premium-purple': PremiumPurpleTemplate,
+  'noir-elite': NoirEliteTemplate,
+  'emerald-essence': EmeraldEssenceTemplate,
 } as const satisfies Record<
   string,
   (props: { vcard: IVcard; products: IProduct[]; reviewCta?: ReviewCta }) => ReactNode

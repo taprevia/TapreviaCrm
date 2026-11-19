@@ -137,8 +137,15 @@ export function SocialTemplate({
     if (result.status === 'error') console.error('[vcf] download failed:', result.message);
   };
 
+  // The fixed dock is ~68px tall plus safe-area. Terminal sections already
+  // reserve pb-8 (32px), so this adds only the remaining clearance and skips it
+  // entirely when the dock is hidden. No shared dock/layout change is needed.
+  const dockClearanceClass = vcard.config?.hideStickyBar
+    ? ''
+    : ' pb-[calc(36px_+_env(safe-area-inset-bottom))]';
+
   return (
-    <div className={`max-w-md mx-auto min-h-screen bg-slate-900 text-white shadow-2xl relative overflow-hidden font-sans${themedAccent ? ' soc-themed-accent' : ''}${themedBg ? ' soc-themed-bg' : ''}`}>
+    <div className={`max-w-md mx-auto min-h-screen bg-slate-900 text-white shadow-2xl relative overflow-hidden${dockClearanceClass} font-sans${themedAccent ? ' soc-themed-accent' : ''}${themedBg ? ' soc-themed-bg' : ''}`}>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       {/* Banner */}
       <div className="h-36 sm:h-44 w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 relative overflow-hidden soc-banner">
@@ -279,6 +286,22 @@ export function SocialTemplate({
           </div>
         </div>
       )}
+
+      {/* Powered by Taprevia */}
+      <footer className="mt-7 px-6 pb-8 pt-5 text-center">
+        <span aria-hidden="true" className="mx-auto mb-2 block h-px w-12 bg-white/20" />
+        <p className="text-[11px] tracking-wide text-slate-400">
+          Powered by <span className="font-bold text-indigo-300">Taprevia</span>
+        </p>
+        <a
+          href="https://taprevia.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mx-auto mt-1.5 inline-flex max-w-full min-h-11 items-center justify-center px-2 text-center text-[11px] font-medium tracking-wide text-indigo-300 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]"
+        >
+          Click here to create your digital business card
+        </a>
+      </footer>
     </div>
   );
 }
