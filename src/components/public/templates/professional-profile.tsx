@@ -37,6 +37,7 @@ import {
   FaChevronRight,
   FaCube,
   FaEnvelope,
+  FaClock,
   FaFire,
   FaGlobe,
   FaHeart,
@@ -47,6 +48,7 @@ import {
   FaRightLeft,
   FaShareNodes,
   FaSpinner,
+  FaStar,
   FaUserPlus,
   FaWhatsapp,
   FaWrench,
@@ -57,8 +59,14 @@ import { safeExternalUrl } from '@/lib/safe-url';
 import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { phoneDigits, telHref } from '@/lib/phone';
+import { publicBusinessHours } from '@/lib/business-hours';
+import {
+  GALLERY_PREVIEW_COUNT,
+  galleryPreview,
+  useGalleryViewer,
+} from '@/lib/hooks/use-gallery-viewer';
 import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
-import type { IProduct, IVcard } from '../types';
+import type { IProduct, IVcard, ReviewCta } from '../types';
 import { SafeHtml } from '@/lib/sanitizer';
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -92,6 +100,8 @@ interface PPData {
   products: PPProduct[];
   services: string[];
   gallery: string[];
+  /** Captions aligned by index with `gallery`; empty string when absent. */
+  galleryCaptions: string[];
   hasPhone: boolean;
 }
 
@@ -142,9 +152,15 @@ function buildData({ vcard, products }: { vcard: IVcard; products: IProduct[] })
 
   const services = (vcard.services ?? []).map((s) => s.title?.trim()).filter(Boolean);
 
-  const gallery = (vcard.galleryImages ?? [])
-    .map((g) => g?.imageUrl?.trim() ?? '')
-    .filter((url) => url.length > 0);
+  const galleryRows = (vcard.galleryImages ?? [])
+    .map((g) => ({
+      url: g?.imageUrl?.trim() ?? '',
+      // Legacy/missing captions become '' — never rendered, never injected.
+      caption: typeof g?.caption === 'string' ? g.caption.trim() : '',
+    }))
+    .filter((row) => row.url.length > 0);
+  const gallery = galleryRows.map((row) => row.url);
+  const galleryCaptions = galleryRows.map((row) => row.caption);
 
   const heroUrl =
     vcard.coverType !== 'color' && vcard.coverValue?.trim()
@@ -168,6 +184,7 @@ function buildData({ vcard, products }: { vcard: IVcard; products: IProduct[] })
     products: productItems,
     services,
     gallery,
+    galleryCaptions,
     hasPhone: phoneRaw.length > 0,
   };
 }
@@ -197,6 +214,8 @@ const handleImgError = (
   image.dataset.ppfb = '1';
   image.src = kind === 'avatar' ? FALLBACK_AVATAR : fallbackMedia(label);
 };
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+\d][\d\s()-]{6,}$/;
@@ -252,6 +271,48 @@ const STYLES = `
 .ppc-bio ul,.ppc-bio ol{margin:4px 0 0;padding-left:18px}
 .ppc-bio li{margin:0 0 4px}
 .ppc-bio a{color:#047857;text-decoration:underline}
+/* Saved theme colours. Scoped classes are added only when the customer has a
+ * valid stored colour, so cards without theme settings keep the original look.
+ * Values arrive as pre-validated #RRGGBB CSS variables from the public page. */
+.ppc-themed-bg.ppc-themed-bg{background-image:none;background-color:var(--v-bg,#fff)}
+.ppc-themed-accent .text-emerald-700,.ppc-themed-accent .text-emerald-800,.ppc-themed-accent .text-emerald-600,.ppc-themed-accent .text-emerald-500,.ppc-themed-accent .text-emerald-400,.ppc-themed-accent .ppc-bio a{color:var(--v-accent)}
+.ppc-themed-accent .bg-emerald-600,.ppc-themed-accent .bg-emerald-500{background-color:var(--v-accent)}
+.ppc-themed-accent .ppc-gallery-all{color:var(--v-on-accent,#fff)}
+.ppc-themed-accent .bg-emerald-100\\/70{background-color:color-mix(in srgb,var(--v-accent) 16%,#fff)}
+.ppc-themed-accent .hover\\:bg-emerald-50:hover{background-color:color-mix(in srgb,var(--v-accent) 8%,#fff)}
+.ppc-themed-accent .hover\\:text-emerald-700:hover{color:var(--v-accent)}
+.ppc-themed-accent .ring-emerald-600,.ppc-themed-accent .focus\\:ring-emerald-600:focus{--tw-ring-color:var(--v-accent)}
+/* Link tiles and service cards keep their original geometry. These unlayered
+ * rules override the app-wide :root * dark border token; --v-border is
+ * already supplied by the public page and builder preview themes. */
+.ppc-link-tile,
+.ppc-service-card{border-color:color-mix(in srgb,var(--v-border,#e5e7eb) 55%,transparent)}
+.ppc-service-card{box-shadow:0 1px 2px rgb(15 23 42/.03)}
+.ppc-service-card:hover{border-color:color-mix(in srgb,var(--v-border,#e5e7eb) 80%,transparent)}
+.ppc-gallery-layer{position:fixed;inset:0;z-index:60}
+.ppc-image-layer{position:fixed;inset:0;z-index:70}
+.ppc-layer-backdrop{position:absolute;inset:0;background:rgb(15 23 42/.7)}
+.ppc-gallery-dialog{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;background:var(--v-surface,#fff);color:var(--v-text,#18181b);overflow:hidden}
+.ppc-gallery-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:calc(16px + env(safe-area-inset-top)) 16px 12px;border-bottom:1px solid var(--v-border,#e5e7eb);background:var(--v-surface,#fff)}
+.ppc-gallery-title{margin:0;font-size:16px;line-height:22px;font-weight:700;color:var(--v-text,#18181b)}
+.ppc-gallery-count{margin:2px 0 0;font-size:12px;line-height:16px;color:var(--v-text,#18181b);opacity:.65}
+.ppc-gallery-close{width:44px;height:44px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--v-border,#e5e7eb);border-radius:9999px;background:transparent;color:var(--v-text,#18181b);cursor:pointer}
+.ppc-gallery-close:focus-visible,.ppc-gallery-thumb:focus-visible{outline:2px solid var(--v-accent,currentColor);outline-offset:2px}
+.ppc-gallery-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
+.ppc-gallery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ppc-gallery-tile{margin:0;min-width:0}
+.ppc-gallery-thumb{display:block;width:100%;aspect-ratio:1/1;padding:0;border:1px solid var(--v-border,#e5e7eb);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--v-text,#18181b) 6%,var(--v-surface,#fff));cursor:zoom-in}
+.ppc-gallery-img{display:block;width:100%;height:100%;object-fit:contain}
+.ppc-gallery-caption{margin-top:4px;font-size:11px;line-height:14px;color:var(--v-text,#18181b);opacity:.65;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ppc-image-stage{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;padding:20px;touch-action:pan-y;pointer-events:none}
+.ppc-image-stage > *{pointer-events:auto}
+@media(min-width:640px){
+.ppc-gallery-dialog{top:50%;bottom:auto;left:50%;right:auto;transform:translate(-50%,-50%);width:min(880px,calc(100% - 40px));height:min(88vh,900px);border:1px solid var(--v-border,#e5e7eb);border-radius:16px;box-shadow:0 20px 60px rgb(0 0 0/.18)}
+.ppc-gallery-head{padding:20px}
+.ppc-gallery-scroll{padding:20px}
+.ppc-gallery-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(min-width:1024px){.ppc-gallery-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.ppc-shimmer{animation:none}.ppc-fade-in,.ppc-zoom-in,.ppc-pop{animation:none}}
 `;
 
@@ -274,7 +335,7 @@ const INNER_LINK =
   ' [&>svg]:text-emerald-700';
 
 const SOCIAL_TILE =
-  'grid h-12 w-12 place-items-center rounded-xl border border-black/5 bg-white/70 text-zinc-500 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-emerald-50 hover:text-emerald-700 hover:shadow-[0_8px_20px_rgba(16,185,129,0.15)] active:scale-[0.98] motion-reduce:transform-none ' +
+  'grid h-12 w-12 place-items-center rounded-xl border ppc-link-tile bg-white/70 text-zinc-500 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-emerald-50 hover:text-emerald-700 hover:shadow-[0_8px_20px_rgba(16,185,129,0.15)] active:scale-[0.98] motion-reduce:transform-none ' +
   FOCUS;
 
 const WA_PILL =
@@ -335,11 +396,26 @@ function FieldError({ id, children }: { id: string; children: ReactNode }) {
 export function ProfessionalProfileTemplate({
   vcard,
   products,
+  reviewCta,
 }: {
   vcard: IVcard;
   products: IProduct[];
+  reviewCta?: ReviewCta;
 }) {
   const data = useMemo(() => buildData({ vcard, products }), [vcard, products]);
+  const hours = useMemo(
+    () => publicBusinessHours(vcard.businessHours, vcard.businessHoursFormat),
+    [vcard.businessHours, vcard.businessHoursFormat],
+  );
+  // Theme classes are added ONLY for a valid stored colour. The public page
+  // supplies the pre-validated #RRGGBB values as --v-accent / --v-bg.
+  // The native-signature pair means the customer explicitly reset to this
+  // template's original theme, so keep the un-themed native emerald design.
+  const accentHex = (vcard.themeConfig?.accentColor ?? '').trim().toUpperCase();
+  const bgHex = (vcard.themeConfig?.bgColor ?? '').trim().toUpperCase();
+  const isNativeTheme = accentHex === '#059669' && bgHex === '#FFFFFF';
+  const themedAccent = !isNativeTheme && HEX_COLOR_RE.test(vcard.themeConfig?.accentColor ?? '');
+  const themedBg = !isNativeTheme && HEX_COLOR_RE.test(vcard.themeConfig?.bgColor ?? '');
   const WA_NUMBER = data.phoneRaw;
 
   const buildWa = (message: string): string => (WA_NUMBER ? buildWaLink(WA_NUMBER, message) : '#');
@@ -379,8 +455,6 @@ export function ProfessionalProfileTemplate({
   const [leadSent, setLeadSent] = useState(false);
   const leadTimer = useRef<number | null>(null);
 
-  // Photo lightbox
-  const [lightbox, setLightbox] = useState<{ photos: string[]; index: number } | null>(null);
   const [productActive, setProductActive] = useState(0);
   const productTrackRef = useRef<HTMLDivElement | null>(null);
   const productScrollRaf = useRef<number | null>(null);
@@ -404,7 +478,7 @@ export function ProfessionalProfileTemplate({
     [],
   );
 
-  const anyOverlay = sheet === 'open' || lightbox !== null;
+  const anyOverlay = sheet === 'open';
 
   useEffect(() => {
     if (!anyOverlay) return undefined;
@@ -418,14 +492,12 @@ export function ProfessionalProfileTemplate({
   useEffect(() => {
     if (!anyOverlay) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (lightbox !== null) setLightbox(null);
-      else if (sheet === 'open') closeSheet();
+      if (event.key === 'Escape') closeSheet();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSheet is stable
-  }, [anyOverlay, lightbox, sheet]);
+  }, [anyOverlay, sheet]);
 
   useEffect(() => {
     if (sheet !== 'open') return;
@@ -494,15 +566,22 @@ export function ProfessionalProfileTemplate({
     }
   };
 
-  const openLightbox = (photos: string[], index: number): void =>
-    setLightbox({ photos, index });
-
-  const stepLightbox = (delta: number): void =>
-    setLightbox((current) => {
-      if (current === null) return null;
-      const total = current.photos.length;
-      return { photos: current.photos, index: (current.index + delta + total) % total };
-    });
+  const galleryImages = useMemo(
+    () =>
+      data.gallery.map((url, index) => ({
+        url,
+        caption: data.galleryCaptions[index] ?? '',
+      })),
+    [data.gallery, data.galleryCaptions]
+  );
+  const productLightboxImages = useMemo(
+    () => data.products.map((item) => ({ url: item.imageUrl, caption: '' })),
+    [data.products]
+  );
+  const gallery = useGalleryViewer();
+  const galleryPreviewRows = galleryPreview(galleryImages);
+  const galleryTotal = galleryImages.length;
+  const hasMoreGallery = galleryTotal > GALLERY_PREVIEW_COUNT;
 
   // Center the carousel on the middle clone copy once the track is laid out.
   useEffect(() => {
@@ -678,11 +757,10 @@ export function ProfessionalProfileTemplate({
   const sheetInput = (invalid: boolean): string =>
     `${INPUT_BASE} ${invalid ? INPUT_ERR : INPUT_OK}`;
 
-  const galleryTotal = data.gallery.length;
   const shownServices = servicesExpanded ? data.services : data.services.slice(0, VISIBLE_SERVICES);
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-100 font-sans text-zinc-900 antialiased bg-[radial-gradient(1200px_600px_at_50%_-200px,rgba(16,185,129,0.10),transparent_60%),radial-gradient(800px_500px_at_100%_100%,rgba(251,191,36,0.05),transparent_55%)]">
+    <div className={`flex min-h-screen flex-col bg-zinc-100 font-sans text-zinc-900 antialiased bg-[radial-gradient(1200px_600px_at_50%_-200px,rgba(16,185,129,0.10),transparent_60%),radial-gradient(800px_500px_at_100%_100%,rgba(251,191,36,0.05),transparent_55%)]${themedAccent ? ' ppc-themed-accent' : ''}${themedBg ? ' ppc-themed-bg' : ''}`}>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
 
       <main className="mx-auto w-full max-w-md flex-1 border border-black/5 bg-white/95 min-[480px]:my-6 min-[480px]:overflow-hidden min-[480px]:rounded-3xl min-[480px]:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_20px_50px_rgba(0,0,0,0.08)]">
@@ -801,6 +879,16 @@ export function ProfessionalProfileTemplate({
               </button>
             )}
           </div>
+          {reviewCta && (
+            <a
+              href={reviewCta.href}
+              aria-label={`Rate ${data.name} on Google`}
+              className={`${MT} mt-2.5 w-full bg-zinc-100 px-4 py-2.5 text-xs text-zinc-900 ring-1 ring-inset ring-black/[0.04] hover:bg-white hover:shadow-md`}
+            >
+              <FaStar size={14} aria-hidden="true" />
+              Share your experience
+            </a>
+          )}
           {data.website && (
             <a
               href={data.website}
@@ -853,12 +941,7 @@ export function ProfessionalProfileTemplate({
                     >
                       <button
                         type="button"
-                        onClick={() =>
-                          openLightbox(
-                            data.products.map((p) => p.imageUrl),
-                            realIndex,
-                          )
-                        }
+                        onClick={() => gallery.openProductImage(productLightboxImages, realIndex)}
                         aria-label={`View ${product.title}`}
                         className="group relative h-36 w-full flex-none cursor-zoom-in border-0 bg-zinc-100 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                       >
@@ -923,7 +1006,7 @@ export function ProfessionalProfileTemplate({
                 {shownServices.map((service) => (
                   <div
                     key={service}
-                    className="flex items-center gap-3 rounded-xl border border-black/5 bg-zinc-50 p-3.5 transition-colors duration-300 hover:border-black/[0.08] hover:bg-zinc-100/70"
+                    className="flex items-center gap-3 rounded-xl border ppc-service-card bg-zinc-50 p-3.5 transition-colors duration-300 hover:bg-zinc-100/70"
                   >
                     <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-emerald-100/70 text-emerald-700">
                       <ServiceIcon service={service} />
@@ -966,6 +1049,25 @@ export function ProfessionalProfileTemplate({
             </section>
           )}
 
+          {/* Business Hours */}
+          {hours.length > 0 && (
+            <section className="mt-8" aria-labelledby="ppc-hours-head">
+              <SectionHeading id="ppc-hours-head" icon={<FaClock size={15} />}>
+                Business Hours
+              </SectionHeading>
+              <ul className="divide-y divide-zinc-100 rounded-2xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                {hours.map((h) => (
+                  <li key={h.day} className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm font-medium text-zinc-800">{h.label}</span>
+                    <span className={`text-sm tabular-nums ${h.closed ? 'italic text-zinc-400' : 'text-zinc-500'}`}>
+                      {h.time}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {/* Gallery */}
           {galleryTotal > 0 && (
             <section className="mt-8" aria-labelledby="ppc-gallery-head">
@@ -973,28 +1075,44 @@ export function ProfessionalProfileTemplate({
                 Gallery
               </SectionHeading>
               <div className="grid grid-cols-3 gap-2">
-                {data.gallery.map((photo, index) => (
-                  <button
-                    key={photo}
-                    type="button"
-                    onClick={() => openLightbox(data.gallery, index)}
-                    aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
-                    className="group aspect-square cursor-zoom-in overflow-hidden rounded-xl border-0 bg-zinc-200 p-0 transition-shadow hover:shadow-[0_12px_28px_rgba(0,0,0,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
-                    <img
-                      src={photo}
-                      alt={`${data.name} gallery photo ${index + 1}`}
-                      width={400}
-                      height={400}
-                      loading="lazy"
-                      decoding="async"
-                      className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105 group-hover:brightness-105 motion-reduce:transform-none ppc-shimmer"
-                      onError={(e) => handleImgError(e, 'media', data.name)}
-                    />
-                  </button>
+                {galleryPreviewRows.map((row, index) => (
+                  <figure key={`${row.url}-${index}`} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => gallery.openPreviewImage(galleryImages, index)}
+                      aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
+                      className="group aspect-square w-full cursor-zoom-in overflow-hidden rounded-xl border-0 bg-zinc-200 p-0 transition-shadow hover:shadow-[0_12px_28px_rgba(0,0,0,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
+                      <img
+                        src={row.url}
+                        alt={`${data.name} gallery photo ${index + 1}`}
+                        width={400}
+                        height={400}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105 group-hover:brightness-105 motion-reduce:transform-none ppc-shimmer"
+                        onError={(e) => handleImgError(e, 'media', data.name)}
+                      />
+                    </button>
+                    {row.caption ? (
+                      <figcaption className="mt-1 line-clamp-2 text-[11px] leading-tight text-zinc-500">
+                        {row.caption}
+                      </figcaption>
+                    ) : null}
+                  </figure>
                 ))}
               </div>
+              {hasMoreGallery ? (
+                <button
+                  type="button"
+                  onClick={() => gallery.openGrid(galleryImages)}
+                  aria-label={`View All ${galleryTotal} Photos`}
+                  className={`${MT} ppc-gallery-all mt-3 w-full bg-emerald-600 px-4 py-2.5 text-xs text-white`}
+                >
+                  View All {galleryTotal} Photos
+                </button>
+              ) : null}
             </section>
           )}
 
@@ -1300,16 +1418,94 @@ export function ProfessionalProfileTemplate({
         </div>
       )}
 
+      {/* Full gallery grid */}
+      {gallery.isGridOpen ? (
+        <div
+          ref={gallery.gridOverlayRef}
+          className="ppc-gallery-layer"
+          role="presentation"
+          onKeyDown={gallery.trapTabKeys}
+        >
+          <div className="ppc-layer-backdrop ppc-fade-in" aria-hidden="true" {...gallery.gridBackdropProps} />
+          <div
+            className="ppc-gallery-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ppc-gallery-overlay-title"
+            data-gallery-source="grid"
+          >
+            <header className="ppc-gallery-head">
+              <div>
+                <h2 className="ppc-gallery-title" id="ppc-gallery-overlay-title">
+                  Gallery
+                </h2>
+                <p className="ppc-gallery-count">{gallery.gridImages.length} photos</p>
+              </div>
+              <button
+                type="button"
+                className="ppc-gallery-close"
+                onClick={gallery.closeGrid}
+                aria-label="Close gallery"
+              >
+                <FaXmark size={18} aria-hidden="true" />
+              </button>
+            </header>
+            <div ref={gallery.gridScrollRef} className="ppc-gallery-scroll ppc-scroll">
+              <div className="ppc-gallery-grid">
+                {gallery.gridImages.map((row, index) => (
+                  <figure className="ppc-gallery-tile" key={`${row.url}-${index}`}>
+                    <button
+                      type="button"
+                      className="ppc-gallery-thumb"
+                      onClick={() => gallery.openGridImage(index)}
+                      aria-label={`Open photo ${index + 1} of ${gallery.gridImages.length}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
+                      <img
+                        className="ppc-gallery-img"
+                        src={row.url}
+                        alt={`${data.name} gallery photo ${index + 1}`}
+                        width={400}
+                        height={400}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => handleImgError(e, 'media', data.name)}
+                      />
+                    </button>
+                    {row.caption ? (
+                      <figcaption className="ppc-gallery-caption">{row.caption}</figcaption>
+                    ) : null}
+                  </figure>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Photo lightbox */}
-      {lightbox !== null && (
-        <div className="fixed inset-0 z-50 bg-zinc-900/70 ppc-fade-in" role="dialog" aria-modal="true" aria-label="Photo viewer">
-          <div className="flex h-full w-full items-center justify-center p-5">
+      {gallery.isImageOpen && gallery.current ? (
+        <div
+          ref={gallery.imageOverlayRef}
+          className="ppc-image-layer"
+          role="presentation"
+          onKeyDown={gallery.trapTabKeys}
+        >
+          <div className="ppc-layer-backdrop ppc-fade-in" aria-hidden="true" {...gallery.imageBackdropProps} />
+          <div
+            className="ppc-image-stage"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Photo viewer"
+            data-gallery-source={gallery.imageSource ?? undefined}
+            {...gallery.touchHandlers}
+          >
             <span className="absolute left-4 top-3.5 text-xs font-medium text-zinc-100 drop-shadow">
-              {lightbox.index + 1} / {lightbox.photos.length}
+              {gallery.index + 1} / {gallery.total}
             </span>
             <button
               type="button"
-              onClick={() => setLightbox(null)}
+              onClick={gallery.closeImage}
               aria-label="Close photo viewer"
               className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-black/45 text-white backdrop-blur-md transition-all duration-300 hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
@@ -1317,7 +1513,7 @@ export function ProfessionalProfileTemplate({
             </button>
             <button
               type="button"
-              onClick={() => stepLightbox(-1)}
+              onClick={() => gallery.step(-1)}
               aria-label="Previous photo"
               className="absolute left-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/45 text-white backdrop-blur-md transition-all duration-300 hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
@@ -1325,7 +1521,7 @@ export function ProfessionalProfileTemplate({
             </button>
             <button
               type="button"
-              onClick={() => stepLightbox(1)}
+              onClick={() => gallery.step(1)}
               aria-label="Next photo"
               className="absolute right-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/10 bg-black/45 text-white backdrop-blur-md transition-all duration-300 hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
@@ -1333,15 +1529,25 @@ export function ProfessionalProfileTemplate({
             </button>
             {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
             <img
-              src={lightbox.photos[lightbox.index]}
-              alt={`Photo ${lightbox.index + 1} of ${lightbox.photos.length}`}
+              key={gallery.index}
+              src={gallery.current.url}
+              alt={`Photo ${gallery.index + 1} of ${gallery.total}`}
               width={900}
               height={900}
               className="max-h-[82vh] max-w-[92vw] rounded-xl object-contain ppc-zoom-in"
+              style={gallery.current.caption ? { maxHeight: 'calc(82vh - 52px)' } : undefined}
             />
+            {gallery.current.caption ? (
+              <figcaption
+                className="absolute bottom-[calc(14px+env(safe-area-inset-bottom))] left-4 right-4 break-words text-center text-xs leading-4 text-zinc-100"
+                style={{ textShadow: '0 1px 4px rgba(0,0,0,.5)' }}
+              >
+                {gallery.current.caption}
+              </figcaption>
+            ) : null}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

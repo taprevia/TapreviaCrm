@@ -107,7 +107,10 @@ export function ReviewExperience({
   const avatarUrl = card.profileImageUrl?.trim();
 
   return (
-    <div className="vcard-root min-h-screen" style={themeVars}>
+    <div
+      className="vcard-root min-h-screen bg-[var(--v-bg)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]"
+      style={themeVars}
+    >
       <ReviewAssistantFlow
         alias={alias.toLowerCase()}
         businessName={name}

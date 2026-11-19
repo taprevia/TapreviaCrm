@@ -42,6 +42,7 @@ type DirtyOwner =
   | 'descriptionHtml'
   | 'templateKey'
   | 'profileImageUrl'
+  | 'logoUrl'
   | 'galleryImages'
   | 'coverType'
   | 'coverStyle'
@@ -49,6 +50,7 @@ type DirtyOwner =
   | 'socialLinks'
   | 'services'
   | 'businessHours'
+  | 'businessHoursFormat'
   | 'themeConfig'
   | 'reviewAssistant'
   | 'redirectUrl';
@@ -62,6 +64,7 @@ const OWNER_PATH_HEADS: ReadonlySet<string> = new Set<DirtyOwner>([
   'descriptionHtml',
   'templateKey',
   'profileImageUrl',
+  'logoUrl',
   'galleryImages',
   'coverType',
   'coverStyle',
@@ -69,6 +72,7 @@ const OWNER_PATH_HEADS: ReadonlySet<string> = new Set<DirtyOwner>([
   'socialLinks',
   'services',
   'businessHours',
+  'businessHoursFormat',
   'themeConfig',
   'reviewAssistant',
   'redirectUrl',
@@ -268,6 +272,7 @@ function hydrateCard(raw: CardDraft): CardDraft {
   draft.coverStyle ??= 'cover';
   draft.coverValue ??= '';
   draft.profileImageUrl ??= '';
+  draft.logoUrl ??= '';
   draft.galleryImages = Array.isArray(draft.galleryImages)
     ? draft.galleryImages.map((img) => ({
         imageUrl: img.imageUrl ?? '',
@@ -322,6 +327,11 @@ function hydrateCard(raw: CardDraft): CardDraft {
   draft.businessHours = normalizeBusinessHours(
     Array.isArray(draft.businessHours) ? draft.businessHours : []
   );
+  // Invalid/legacy values become unset so the API schema is never violated and
+  // the public renderer keeps its historical 24-hour fallback.
+  if (draft.businessHoursFormat !== '12h' && draft.businessHoursFormat !== '24h') {
+    draft.businessHoursFormat = undefined;
+  }
   if (!draft.reviewAssistant || typeof draft.reviewAssistant !== 'object') {
     draft.reviewAssistant = {} as IReviewAssistantConfig;
   }
@@ -345,7 +355,11 @@ export interface UseCardDraftResult {
   themeSaveSupported: boolean;
   save: () => void;
   setUploadedFile: (path: string, result: UploadResult) => void;
-  clearUploadedFile: (path: string) => Promise<void>;
+  /** keepRemote defers storage deletion to post-save superseded cleanup (logos). */
+  clearUploadedFile: (
+    path: string,
+    options?: { keepRemote?: boolean }
+  ) => Promise<void>;
   getUploadKey: (path: string) => string | null;
 }
 
@@ -561,13 +575,13 @@ export function useCardDraft(id: string): UseCardDraftResult {
   }, []);
 
   const clearUploadedFile = useCallback(
-    async (path: string) => {
+    async (path: string, options?: { keepRemote?: boolean }) => {
       const url = getPathValue(draftRef.current, path);
       const key =
         uploadKeysRef.current.get(path) ??
         (typeof url === 'string' ? mediaKeyFromUrl(url) : null);
 
-      if (key) {
+      if (key && options?.keepRemote !== true) {
         try {
           const res = await fetch(`/api/uploads?key=${encodeURIComponent(key)}`, {
             method: 'DELETE',

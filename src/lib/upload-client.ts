@@ -27,7 +27,7 @@ export interface UploadResult {
 }
 
 export interface UploadFileOptions {
-  category: 'avatar' | 'cover' | 'gallery' | 'product' | 'socialIcon' | 'virtualBackground' | 'other';
+  category: 'avatar' | 'cover' | 'gallery' | 'logo' | 'product' | 'socialIcon' | 'virtualBackground' | 'other';
   cardId?: string;
 }
 
@@ -131,6 +131,13 @@ export async function uploadFile(file: File, options: UploadFileOptions): Promis
   const uploadName =
     isOther(options) || blob === file ? file.name : `${file.name.replace(/\.[^.]+$/, '')}.webp`;
   const effective: File = blob === file ? file : new File([blob], uploadName, { type: mime });
+
+  // Logos must always use the buffered, server byte-sniffed pipeline. The
+  // direct presign/confirm path only checks store metadata, so bypassing it
+  // here avoids trusting a client-declared MIME type for customer logos.
+  if (options.category === 'logo') {
+    return uploadMultipart(effective, options);
+  }
 
   const presignRes = await fetch('/api/uploads/presign', {
     method: 'POST',

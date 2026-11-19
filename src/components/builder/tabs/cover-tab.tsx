@@ -23,6 +23,7 @@ import type { CoverType, CoverStyle } from '@/types';
 import { useBuilder } from '../context';
 import { RemoveUploadButton, UploadButton } from '../upload-button';
 import { cn } from '@/lib/utils';
+import { safeLogoUrl } from '@/lib/safe-url';
 
 /** Cover types a customer may select. `video` is legacy-read-only. */
 type SelectableCoverType = Exclude<CoverType, 'video'>;
@@ -60,6 +61,7 @@ export function CoverTab() {
   const { toast } = useToast();
 
   const avatarUrl = draft.profileImageUrl?.trim() ?? '';
+  const logoUrl = safeLogoUrl(draft.logoUrl);
 
   const handleTypeChange = (next: SelectableCoverType) => {
     // Reset a value that doesn't fit the newly selected kind of cover.
@@ -72,9 +74,9 @@ export function CoverTab() {
     setField('coverType', next);
   };
 
-  const removeUpload = async (path: string) => {
+  const removeUpload = async (path: string, options?: { keepRemote?: boolean }) => {
     try {
-      await clearUploadedFile(path);
+      await clearUploadedFile(path, options);
     } catch (error) {
       toast({
         title: 'Could not remove file',
@@ -117,6 +119,43 @@ export function CoverTab() {
               onUploaded={(result) => setUploadedFile('profileImageUrl', result)}
             />
             <p className="text-xs text-ink-faint">Square JPG, PNG or WebP — cropped to a circle.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Business logo ── */}
+      <section aria-label="Business logo">
+        <h3 className="text-sm font-semibold text-ink">Business Logo</h3>
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          <div className="relative flex h-16 w-40 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-field p-2 ring-1 ring-line-subtle">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- mirrors public portal img usage
+              <img
+                src={logoUrl}
+                alt="Business logo preview"
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-center text-xs text-ink-faint">No logo uploaded</span>
+            )}
+            {logoUrl && (
+              <RemoveUploadButton
+                label="Remove business logo"
+                className="absolute right-1 top-1"
+                onRemove={() => removeUpload('logoUrl', { keepRemote: true })}
+              />
+            )}
+          </div>
+          <div className="min-w-0 space-y-2">
+            <UploadButton
+              category="logo"
+              cardId={draft._id}
+              label={logoUrl ? 'Replace logo' : 'Upload logo'}
+              onUploaded={(result) => setUploadedFile('logoUrl', result)}
+            />
+            <p className="text-xs text-ink-faint">
+              PNG, JPEG or WebP up to 8 MB. Wide, tall and transparent logos are kept intact.
+            </p>
           </div>
         </div>
       </section>

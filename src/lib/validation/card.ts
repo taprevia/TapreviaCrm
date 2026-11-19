@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sanitizeHtml } from '@/lib/sanitizer';
+import { isSafeLogoUrl } from '@/lib/safe-url';
 import {
   aliasSchema,
   optionalEmailField,
@@ -183,6 +184,13 @@ export const updateCardSchema = z
     coverStyle: coverStyleSchema.optional(),
     coverValue: z.string().max(2048).optional(),
     profileImageUrl: optionalUrlOrMediaPathSchema.optional(),
+    // Stricter than other media fields: only '' / strict /media/<key> / http(s).
+    logoUrl: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine(isSafeLogoUrl, 'Must be a valid logo URL')
+      .optional(),
     galleryImages: z.array(galleryImageSchema).max(30).optional(),
     services: z.array(serviceItemSchema).max(30).optional(),
     themeConfig: z
@@ -194,6 +202,8 @@ export const updateCardSchema = z
     basic: basicPartialSchema.optional(),
     location: locationPartialSchema.optional(),
     businessHours: z.array(businessHourSchema).max(7).optional(),
+    /** Public display preference only — never changes stored HH:MM values. */
+    businessHoursFormat: z.enum(['12h', '24h']).optional(),
     socialLinks: z.array(socialLinkSchema).max(50).optional(),
     banner: bannerPartialSchema.optional(),
     privacyPolicyHtml: z

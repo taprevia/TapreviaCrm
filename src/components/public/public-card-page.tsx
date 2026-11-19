@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { headers } from 'next/headers';
-import { MessageSquareText } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import Product from '@/models/Product';
 import TenantSettings from '@/models/TenantSettings';
@@ -126,26 +124,20 @@ export async function PublicCardPage({
   const profileAllowed = await canUseFeature(ownerId, 'profile');
   if (!profileAllowed) notFound();
 
-  // Approved Phase 4D.4 Premium entry point: a Premium profile Card that is
-  // product-entitled and has an enabled Review Assistant gets an explicit link
-  // to the existing review page. The public profile URL/NFC/QR destination is
-  // deliberately unchanged.
-  let premiumReviewUrl: string | null = null;
-  // Central-only publication is the authority for the Premium review entry.
-  // The legacy `reviewAssistant.enabled` flag alone must not hide a published
-  // central review experience, and it must not expose an unpublished one.
+  // A product-entitled profile Card with an enabled central Review Assistant
+  // gets one native template CTA to the existing review page. The public
+  // profile URL/NFC/QR destination is deliberately unchanged.
+  let reviewCtaHref: string | null = null;
+  // Central-only publication is the authority for the review entry. The legacy
+  // `reviewAssistant.enabled` flag alone must not hide a published central
+  // review experience, and it must not expose an unpublished one.
   if (card.kind === 'profile' && card.urlAlias) {
     const [entitlement, effectiveReview] = await Promise.all([
       getCardReviewEntitlement(card),
       resolveEffectiveReviewSettings(card),
     ]);
-    if (
-      entitlement.entitled &&
-      entitlement.productId === 'PREMIUM_NFC_CARD' &&
-      effectiveReview.enabled &&
-      card.urlAlias
-    ) {
-      premiumReviewUrl = `/review/${encodeURIComponent(card.urlAlias)}`;
+    if (entitlement.entitled && effectiveReview.enabled) {
+      reviewCtaHref = `/review/${encodeURIComponent(card.urlAlias)}`;
     }
   }
 
@@ -216,18 +208,8 @@ export async function PublicCardPage({
         products={products}
         newsletterDelaySeconds={settings?.general?.newsletterModalDelaySeconds ?? 8}
         newsletterEnabled={newsletterEnabled}
+        reviewCta={reviewCtaHref ? { href: reviewCtaHref } : undefined}
       />
-      {premiumReviewUrl && (
-        <div className="mx-auto w-full max-w-md px-4 pb-24">
-          <Link
-            href={premiumReviewUrl}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--v-accent)] px-4 text-sm font-semibold text-[var(--v-on-accent)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2"
-          >
-            <MessageSquareText className="h-4 w-4" aria-hidden="true" />
-            Share your experience
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

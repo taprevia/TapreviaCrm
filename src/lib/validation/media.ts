@@ -5,6 +5,7 @@ export const mediaCategorySchema = z.enum([
   'avatar',
   'cover',
   'gallery',
+  'logo',
   'product',
   'socialIcon',
   'virtualBackground',

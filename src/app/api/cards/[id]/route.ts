@@ -23,6 +23,7 @@ import {
   CARD_IMMUTABLE_URL_FIELDS,
   findImmutableUrlChange,
 } from '@/lib/services/url-identity';
+import { mediaKeyFromLogoUrl } from '@/lib/safe-url';
 
 type Params = { params: { id: string } };
 
@@ -42,6 +43,41 @@ function mediaKeyFromUrl(url: unknown): string | null {
 }
 
 /**
+ * Logo-only superseded key. Uses the strict helper so only a well-formed
+ * platform media URL can ever become a delete candidate.
+ */
+function collectSupersededLogoKey(
+  card: { logoUrl?: string },
+  data: Record<string, unknown>
+): string | null {
+  if (data.logoUrl === undefined) return null;
+  const before = mediaKeyFromLogoUrl(card.logoUrl);
+  const after = mediaKeyFromLogoUrl(data.logoUrl);
+  return before && before !== after ? before : null;
+}
+
+/**
+ * A media object must not be reclaimed while any other Card still points at it.
+ * Scoped to logo cleanup; existing avatar/cover/gallery cleanup is untouched.
+ */
+async function isMediaUrlReferencedByAnotherCard(
+  key: string,
+  cardId: string
+): Promise<boolean> {
+  const url = `/media/${key}`;
+  const other = await Card.exists({
+    _id: { $ne: cardId },
+    $or: [
+      { logoUrl: url },
+      { profileImageUrl: url },
+      { coverValue: url },
+      { 'galleryImages.imageUrl': url },
+    ],
+  });
+  return other !== null;
+}
+
+/**
  * Keys that the incoming update replaces, computed from the *persisted* card
  * before any mutation.
  *
@@ -54,10 +90,19 @@ function mediaKeyFromUrl(url: unknown): string | null {
  * and must not delete the image it used to point at.
  */
 function collectSupersededKeys(
-  card: { profileImageUrl?: string; coverValue?: string; coverType?: string; galleryImages?: Array<{ imageUrl?: string }> },
+  card: {
+    logoUrl?: string;
+    profileImageUrl?: string;
+    coverValue?: string;
+    coverType?: string;
+    galleryImages?: Array<{ imageUrl?: string }>;
+  },
   data: Record<string, unknown>
 ): string[] {
   const superseded = new Set<string>();
+
+  const supersededLogoKey = collectSupersededLogoKey(card, data);
+  if (supersededLogoKey) superseded.add(supersededLogoKey);
 
   if (data.profileImageUrl !== undefined) {
     const before = mediaKeyFromUrl(card.profileImageUrl);
@@ -104,12 +149,18 @@ function collectSupersededKeys(
 async function cleanupSupersededMedia(
   keys: string[],
   userId: string,
-  cardId: string
+  cardId: string,
+  protectedLogoKey?: string | null
 ): Promise<void> {
   if (keys.length === 0) return;
 
   for (const key of keys) {
     try {
+      // A logo object still referenced by another Card is not superseded.
+      if (key === protectedLogoKey && (await isMediaUrlReferencedByAnotherCard(key, cardId))) {
+        continue;
+      }
+
       // Ownership gate: only media belonging to the requesting user may be
       // removed, so a crafted PATCH cannot delete another tenant's object even
       // if a stale URL were ever written into their own card.
@@ -253,6 +304,22 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
     const data = parsed.data;
 
+    // A platform logo URL must reference an existing, ready logo Media row
+    // owned by this user. External http(s) values are already URL-validated by
+    // the schema and carry no storage key to verify.
+    const submittedLogoKey = mediaKeyFromLogoUrl(data.logoUrl);
+    if (submittedLogoKey) {
+      const logoMedia = await Media.findOne({
+        key: submittedLogoKey,
+        userId: user._id,
+        category: 'logo',
+        status: 'ready',
+      })
+        .select('_id')
+        .lean();
+      if (!logoMedia) return fail(403, 'FORBIDDEN', 'Not your logo media');
+    }
+
     // Card kind is controlled by product allocation (admin authoritative).
     // Customers must never change their card's experience directly.
     if (data.kind !== undefined && data.kind !== (card.kind ?? 'profile') && user.role !== 'admin') {
@@ -394,6 +461,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         (day) => byDay.get(day as never) ?? { day: day as never, enabled: false, from: '', to: '' }
       );
     }
+    // Display-only preference; validated by updateCardSchema. Stored times are
+    // untouched, and omitting this field leaves legacy cards unchanged.
+    if (data.businessHoursFormat !== undefined) {
+      card.businessHoursFormat = data.businessHoursFormat;
+    }
     if (data.socialLinks) {
       card.socialLinks = preserveSocialLinkMetadata(card.socialLinks, data.socialLinks);
     }
@@ -414,6 +486,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     // Compute superseded media from the persisted card BEFORE mutating it.
+    const supersededLogoKey = collectSupersededLogoKey(card, data);
     const supersededKeys = collectSupersededKeys(card, data);
 
     for (const key of [
@@ -429,6 +502,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       'coverStyle',
       'coverValue',
       'profileImageUrl',
+      'logoUrl',
       'privacyPolicyHtml',
       'termsHtml',
       'kind',
@@ -454,7 +528,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // Durable first, reclaim second. Replaces the client-invisible leak where
     // uploading a new avatar/cover/gallery image orphaned the previous object
     // forever (no delete on replace, and the TTL purge only covers 'pending').
-    await cleanupSupersededMedia(supersededKeys, user._id, String(card._id));
+    await cleanupSupersededMedia(
+      supersededKeys,
+      user._id,
+      String(card._id),
+      supersededLogoKey
+    );
 
     return ok({ card });
   } catch (error) {

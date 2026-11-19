@@ -2,10 +2,29 @@
  * Phase audit pure regression checks for the safe repair set.
  */
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { isBcryptHash } from '@/models/User';
 import { updateProductConfigSchema } from '@/lib/validation/product-config';
 import { getPublicProductSlug, RESERVED_PUBLIC_SEGMENTS } from '@/lib/services/human-url';
 import { resolveCanonicalProductId } from '@/lib/services/product-identity';
+import {
+  CARD_TEMPLATE_META,
+  DEFAULT_TEMPLATE_KEY,
+  isRegisteredTemplate,
+  safeTemplateKey,
+} from '@/lib/card-templates';
+
+// This runner compiles TSX with the classic JSX runtime, so React must exist
+// before the component registry is loaded. Test-only; no app code is affected.
+const nodeRequire = createRequire(process.cwd() + '/');
+const React = nodeRequire('react') as typeof import('react');
+(globalThis as { React?: typeof React }).React = React;
+const { CARD_TEMPLATES } = nodeRequire(
+  '@/components/public/template-registry',
+) as typeof import('@/components/public/template-registry');
+
+const metaKeys = CARD_TEMPLATE_META.map((t) => t.key);
+const componentKeys = Object.keys(CARD_TEMPLATES);
 
 let checks = 0;
 let failures = 0;
@@ -39,6 +58,22 @@ check('full bcrypt hashes are recognized; prefixes are not', () => {
   assert.equal(isBcryptHash('$2b$12$' + 'a'.repeat(53)), true);
   assert.equal(isBcryptHash('$2b$12$'), false);
   assert.equal(isBcryptHash('$2b$not-a-full-hash'), false);
+});
+check('template metadata and component registry keys stay in parity', () => {
+  assert.deepEqual([...metaKeys].sort(), [...componentKeys].sort());
+  assert.ok(componentKeys.every((key) => isRegisteredTemplate(key)));
+});
+check('default template key is present in both registries', () => {
+  assert.ok(metaKeys.includes(DEFAULT_TEMPLATE_KEY));
+  assert.ok(componentKeys.includes(DEFAULT_TEMPLATE_KEY));
+});
+check('safeTemplateKey keeps valid, missing, unknown and legacy fallback behavior', () => {
+  assert.equal(safeTemplateKey(metaKeys[0]), metaKeys[0]);
+  assert.equal(safeTemplateKey(undefined), DEFAULT_TEMPLATE_KEY);
+  assert.equal(safeTemplateKey(null), DEFAULT_TEMPLATE_KEY);
+  assert.equal(safeTemplateKey('unknown-template'), DEFAULT_TEMPLATE_KEY);
+  assert.equal(safeTemplateKey('modern-professional'), DEFAULT_TEMPLATE_KEY);
+  assert.equal(safeTemplateKey('panthevent'), DEFAULT_TEMPLATE_KEY);
 });
 
 console.log('\n=== AUDIT PURE SUMMARY ===');

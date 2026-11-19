@@ -221,6 +221,7 @@ export interface ICard {
   coverStyle: CoverStyle;
   coverValue: string;
   profileImageUrl: string;
+  logoUrl?: string;
   galleryImages?: Array<{ imageUrl: string; caption?: string }>;
   services?: IServiceItem[];
   themeConfig: { accentColor: string; bgColor: string };
@@ -244,6 +245,8 @@ export interface ICard {
     lng?: number;
   };
   businessHours: IBusinessHour[];
+  /** Optional public display preference; absent on legacy cards = 24h display. */
+  businessHoursFormat?: '12h' | '24h';
   socialLinks: ISocialLink[];
   banner: IVcardBanner;
   privacyPolicyHtml: string;
@@ -428,6 +431,7 @@ export type MediaCategory =
   | 'avatar'
   | 'cover'
   | 'gallery'
+  | 'logo'
   | 'product'
   | 'socialIcon'
   | 'virtualBackground'

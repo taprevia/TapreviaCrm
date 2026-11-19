@@ -15,7 +15,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { IVcard, IProduct } from '@/components/public/types';
 import { CARD_TEMPLATES } from '@/components/public/template-registry';
 import type { CardDraft } from '@/lib/hooks/use-card-draft';
-import { DEFAULT_TEMPLATE_KEY } from '@/lib/card-templates';
+import { DEFAULT_TEMPLATE_KEY, safeTemplateKey } from '@/lib/card-templates';
 
 /* ─── Colour helpers (shared with theme-tab / match public-card-page) ───────── */
 
@@ -97,7 +97,7 @@ export function PreviewPanel({ draft }: PreviewPanelProps) {
 
   const vcard = draft as unknown as IVcard;
   const TemplateComponent =
-    CARD_TEMPLATES[draft.templateKey as keyof typeof CARD_TEMPLATES] ??
+    CARD_TEMPLATES[safeTemplateKey(draft.templateKey) as keyof typeof CARD_TEMPLATES] ??
     CARD_TEMPLATES[DEFAULT_TEMPLATE_KEY];
 
   /* Products are a standalone resource; fetch so product-backed templates render. */

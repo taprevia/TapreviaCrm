@@ -36,6 +36,12 @@ export const CARD_TEMPLATE_META: readonly CardTemplateMeta[] = [
     description:
       'Modern glassmorphic profile card layout with cover banner, circular overlapping avatar, quick contact actions, and dynamic brand links.',
   },
+  {
+    key: 'premium-purple',
+    name: 'Royal Aura',
+    description:
+      'A luxurious digital business profile with royal purple gradients, elegant gold waves, and a modern premium layout.',
+  },
 ];
 
 /** Template customers get when a card has no explicit templateKey yet. */

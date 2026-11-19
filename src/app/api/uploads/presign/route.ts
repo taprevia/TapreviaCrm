@@ -51,6 +51,13 @@ export async function POST(request: NextRequest) {
     }
     const { category, cardId, file } = parsed.data;
 
+    // Logo uploads are pinned to the buffered, byte-verified /api/uploads
+    // pipeline by the client. Reject any direct attempt here as well so a
+    // crafted caller cannot reserve a logo object without sharp verification.
+    if (category === 'logo') {
+      return fail(400, 'VALIDATION_ERROR', 'Logos must use verified image upload');
+    }
+
     // ── Classify + size-gate before any presign ──
     let cls;
     try {

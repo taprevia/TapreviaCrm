@@ -18,7 +18,10 @@ export interface BuilderContextValue {
   themeSaveSupported: boolean;
   save: () => void;
   setUploadedFile: (path: string, result: UploadResult) => void;
-  clearUploadedFile: (path: string) => Promise<void>;
+  clearUploadedFile: (
+    path: string,
+    options?: { keepRemote?: boolean }
+  ) => Promise<void>;
   getUploadKey: (path: string) => string | null;
 }
 

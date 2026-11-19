@@ -162,6 +162,7 @@ const CardSchema = new Schema(
     },
     coverValue: { type: String, default: '' },
     profileImageUrl: { type: String, default: '' },
+    logoUrl: { type: String, trim: true },
     galleryImages: [
       {
         _id: false,
@@ -205,6 +206,9 @@ const CardSchema = new Schema(
       type: [BusinessHourSchema],
       default: () => DEFAULT_BUSINESS_HOURS.map((d) => ({ ...d })),
     },
+    // Optional display preference. No default is applied so legacy cards stay
+    // byte-compatible; the public renderer falls back to 24h when absent.
+    businessHoursFormat: { type: String, enum: ['12h', '24h'] },
     socialLinks: { type: [SocialLinkSchema], default: [] },
 
     banner: {

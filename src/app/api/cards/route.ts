@@ -150,6 +150,9 @@ export async function POST(request: NextRequest) {
         uid: routeSlug,
         templateKey: parsed.data.templateKey ?? DEFAULT_TEMPLATE_KEY,
         businessHours: DEFAULT_BUSINESS_HOURS.map((d) => ({ ...d })),
+        // Newly created profiles use 12-hour display. Legacy cards have no
+        // field and keep their historical 24-hour rendering.
+        businessHoursFormat: '12h',
       });
 
       return ok({ card }, 201);

@@ -1,3 +1,5 @@
+import { safeLogoUrl } from '@/lib/safe-url';
+
 export interface SocialLinkDto {
   platform?: string;
   url?: string;
@@ -59,6 +61,7 @@ export interface PublicCardDto {
   descriptionHtml?: string;
   avatarUrl?: string;
   profileImageUrl?: string;
+  logoUrl?: string;
   coverImageUrl?: string;
   coverType?: string;
   coverValue?: string;
@@ -98,6 +101,8 @@ export interface PublicCardDto {
     from: string;
     to: string;
   }>;
+  /** Display-only preference; absent on legacy cards (rendered as 24h). */
+  businessHoursFormat?: '12h' | '24h';
   sections?: Record<string, boolean>;
   config?: CardRenderConfigDto;
   gallery?: Array<{
@@ -268,6 +273,7 @@ export function toPublicCardDto(cardDoc: unknown): PublicCardDto {
     descriptionHtml: str(card.descriptionHtml),
     avatarUrl,
     profileImageUrl: str(card.profileImageUrl),
+    logoUrl: safeLogoUrl(card.logoUrl),
     coverImageUrl: str(card.coverImageUrl) ?? str(card.coverValue),
     coverType: str(card.coverType),
     coverValue: str(card.coverValue),
@@ -315,6 +321,10 @@ export function toPublicCardDto(cardDoc: unknown): PublicCardDto {
     businessHours: pickRows(card.businessHours, ['day', 'enabled', 'from', 'to']) as
       | PublicCardDto['businessHours']
       | undefined,
+    businessHoursFormat:
+      card.businessHoursFormat === '12h' || card.businessHoursFormat === '24h'
+        ? card.businessHoursFormat
+        : undefined,
     sections: pickObject(card.sections, [
       'header',
       'contact',

@@ -205,12 +205,46 @@ async function copyToClipboard(text: string): Promise<boolean> {
   return ok;
 }
 
+/**
+ * Scoped, unlayered styles for the review surface. globals.css applies an
+ * app-wide :root * dark border token that outranks Tailwind's layered
+ * utilities, so border colours are reset here with higher specificity. All
+ * colours resolve from the per-card --v-* variables set by ReviewExperience,
+ * which keeps default light, dark and custom themes consistent. Geometry,
+ * spacing and hover/disabled states stay untouched.
+ */
+const REVIEW_STYLES = `
+.vcard-root {
+  --ra-accent-fg:color-mix(in srgb,var(--v-accent,#2563eb) 45%,var(--v-text,#111827));
+  --ra-accent-soft:color-mix(in srgb,var(--v-accent,#2563eb) 12%,var(--v-surface,#f8fafc));
+  --ra-accent-border:color-mix(in srgb,var(--v-accent,#2563eb) 32%,var(--v-border,#e5e7eb));
+}
+.vcard-root .ra-card,
+.vcard-root .ra-input,
+.vcard-root .ra-info,
+.vcard-root .ra-error{border-color:color-mix(in srgb,var(--v-border,#e5e7eb) 65%,transparent)}
+.vcard-root .ra-input:focus{border-color:var(--v-accent,#2563eb)}
+.vcard-root .ra-chip[aria-pressed="false"]{border-color:var(--v-border,#e5e7eb)}
+.vcard-root .ra-chip[aria-pressed="true"]{border-color:var(--v-accent,#2563eb)}
+.vcard-root .ra-success{color:color-mix(in srgb,var(--v-text,#111827) 55%,#15803d)}
+.vcard-root .ra-error-text{color:color-mix(in srgb,var(--v-text,#111827) 55%,#b91c1c)}
+.vcard-root .ra-error{background-color:color-mix(in srgb,#ef4444 10%,var(--v-surface,#f8fafc));color:color-mix(in srgb,var(--v-text,#111827) 55%,#b91c1c);box-shadow:0 0 0 1px color-mix(in srgb,#ef4444 30%,var(--v-border,#e5e7eb))}
+.vcard-root .ra-wrap{overflow-wrap:anywhere}
+.vcard-root .ra-accent-fg{color:var(--ra-accent-fg)}
+.vcard-root .ra-accent-pill,
+.vcard-root .ra-badge{color:var(--ra-accent-fg);background-color:var(--ra-accent-soft);border:1px solid var(--ra-accent-border)}
+.vcard-root .ra-secondary-cta{color:var(--ra-accent-fg);background-color:var(--ra-accent-soft);border-color:var(--ra-accent-border)}
+.vcard-root .ra-primary{box-shadow:0 6px 18px -8px color-mix(in srgb,var(--v-accent,#2563eb) 70%,transparent)}
+.vcard-root .ra-primary:disabled{box-shadow:none}
+.vcard-root .ra-divider{background-color:var(--v-border,#e5e7eb)}
+`;
+
 const inputClass =
-  'w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition-colors focus:border-[var(--v-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--v-accent)]/25';
+  'ra-input w-full rounded-xl border bg-[var(--v-bg)] px-3.5 py-2.5 text-base text-[var(--v-text)] placeholder:text-[var(--v-muted)] transition-colors focus:border-[var(--v-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--v-accent)]/25 sm:text-sm';
 const primaryButtonClass =
-  'flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--v-accent)] text-sm font-semibold text-[var(--v-on-accent)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
+  'ra-primary flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--v-accent)] text-sm font-semibold text-[var(--v-on-accent)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
 const secondaryButtonClass =
-  'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--v-border)] bg-[var(--v-surface)] text-sm font-semibold text-[var(--v-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]';
+  'ra-card flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border bg-[var(--v-surface)] text-sm font-semibold text-[var(--v-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]';
 
 /**
  * Typewriter reveal for review text, driven by an `animate()` motion value so
@@ -311,16 +345,17 @@ function SuggestionCard({
   onCopy: (text: string) => void;
   onRegenerate: () => void;
 }) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.li
       layout
-      initial={{ opacity: 0, y: 10 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="rounded-2xl border border-[var(--v-border)] bg-[var(--v-surface)] p-5 text-left shadow-sm"
+      exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.25, ease: 'easeOut' }}
+      className="ra-card rounded-2xl border bg-[var(--v-surface)] p-4 text-left shadow-sm sm:p-5"
     >
-      <blockquote id={`ra-suggestion-${index}`} className="text-[15px] leading-7 text-[var(--v-text)]">
+      <blockquote id={`ra-suggestion-${index}`} className="ra-wrap text-[15px] leading-7 text-[var(--v-text)]">
         <TypewriterText text={item.text} />
       </blockquote>
 
@@ -334,7 +369,7 @@ function SuggestionCard({
         >
           Use this review
         </button>
-        <div className={cn('grid gap-2', showCopy ? 'grid-cols-2' : 'grid-cols-1')}>
+        <div className={cn('grid gap-2', showCopy ? 'grid-cols-1 min-[420px]:grid-cols-2' : 'grid-cols-1')}>
           {showCopy && (
             <button
               type="button"
@@ -348,7 +383,7 @@ function SuggestionCard({
                   initial={{ scale: 0.6, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-                  className="flex items-center gap-1.5 text-green-600"
+                  className="ra-success flex items-center gap-1.5"
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
                   Copied
@@ -952,7 +987,8 @@ export function ReviewAssistantFlow({
   }, [suggestions]);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col space-y-6 bg-[var(--v-bg)] px-4 pb-10 pt-6 text-center sm:my-8 sm:rounded-2xl sm:border sm:border-[var(--v-border)] sm:bg-[var(--v-surface)] sm:p-6">
+    <main className="mx-auto flex w-full max-w-md flex-col space-y-5 bg-[var(--v-bg)] px-4 pb-10 pt-5 text-center sm:my-8 sm:space-y-6 sm:rounded-2xl sm:border sm:border-[var(--v-border)] sm:bg-[var(--v-surface)] sm:p-6">
+      <style dangerouslySetInnerHTML={{ __html: REVIEW_STYLES }} />
       {/* Screen-reader announcements for async outcomes. */}
       <p aria-live="polite" role="status" className="sr-only">
         {status}
@@ -962,7 +998,7 @@ export function ReviewAssistantFlow({
       <header className="flex flex-col items-center">
         <span
           aria-hidden="true"
-          className="relative inline-flex h-11 w-11 shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-[var(--v-accent)] align-middle"
+          className="relative inline-flex h-16 w-16 shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-[var(--v-accent)] align-middle ring-2 ring-[var(--v-accent)] ring-offset-2 ring-offset-[var(--v-bg)] sm:h-20 sm:w-20"
         >
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- plain img per public-portal spec
@@ -974,13 +1010,13 @@ export function ReviewAssistantFlow({
               className="absolute inset-0 h-full w-full object-cover"
             />
           ) : (
-            <span className="text-sm font-bold leading-none text-[var(--v-on-accent)]">
+            <span className="text-lg font-bold leading-none text-[var(--v-on-accent)] sm:text-xl">
               {initials || '?'}
             </span>
           )}
         </span>
-        <p className="mt-2 truncate text-base font-semibold text-[var(--v-text)]">{businessName}</p>
-        <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-[var(--v-accent)]">
+        <p className="ra-wrap mt-3 max-w-full text-base font-semibold text-[var(--v-text)] sm:mt-4">{businessName}</p>
+        <p className="ra-accent-pill mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold">
           <Sparkles className="h-3 w-3" aria-hidden="true" />
           Leave a review
         </p>
@@ -988,10 +1024,10 @@ export function ReviewAssistantFlow({
 
       {/* Hero question */}
       <div className="space-y-2">
-        <h1 className="text-xl font-bold leading-snug text-[var(--v-text)] sm:text-2xl">
+        <h1 className="text-[22px] font-bold leading-snug text-[var(--v-text)] sm:text-2xl">
           How was your experience?
         </h1>
-        <p className="text-sm leading-relaxed text-[var(--v-muted)]">
+        <p className="ra-wrap text-sm leading-relaxed text-[var(--v-muted)]">
           {config.welcomeMessage.trim() ||
             `Tell ${businessName} about your experience. We’ll help you write it — you stay in control.`}
         </p>
@@ -1002,14 +1038,18 @@ export function ReviewAssistantFlow({
           collapses mid-scroll (M15). */}
       {!hasDraft && (suggestions.length > 0 || generating) && (
         <section className="space-y-3" aria-labelledby="ra-suggestions-heading">
-          <div className="flex items-center justify-between gap-3">
-            <h2 id="ra-suggestions-heading" className="text-left text-[13px] font-semibold text-[var(--v-text)]">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="ra-suggestions-heading" className="ra-accent-fg flex items-center gap-1.5 text-left text-[13px] font-semibold">
+              <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
               {generating
                 ? 'Updating suggestion…'
                 : initialSuggestions
-                  ? 'Here’s a suggestion to get you started'
+                  ? 'Here’s a suggested review'
                   : 'Another suggestion'}
             </h2>
+            <span className="ra-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+              AI Suggested
+            </span>
             {generating && (
               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--v-muted)]">
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -1053,11 +1093,18 @@ export function ReviewAssistantFlow({
       {/* "Want to write your own?" — quiet entry to the manual composer. */}
       {!hasDraft && !showManualComposer && (
         <div className="space-y-3">
+          {(suggestions.length > 0 || generating) && (
+            <div className="flex items-center gap-3" aria-hidden="true">
+              <span className="ra-divider h-px flex-1" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--v-muted)]">or</span>
+              <span className="ra-divider h-px flex-1" />
+            </div>
+          )}
           <p className="text-sm font-medium text-[var(--v-text)]">Want to write your own?</p>
           <button
             type="button"
             onClick={openManualComposer}
-            className={secondaryButtonClass}
+            className={cn(secondaryButtonClass, 'ra-secondary-cta')}
           >
             <PenLine className="h-4 w-4" aria-hidden="true" />
             Write my own review →
@@ -1107,7 +1154,7 @@ export function ReviewAssistantFlow({
                       aria-pressed={active}
                       onClick={() => toggleTopic(topic)}
                       className={cn(
-                        'min-h-10 items-center rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]',
+                        'ra-chip ra-wrap min-h-11 items-center rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]',
                         active
                           ? 'border-[var(--v-accent)] bg-[var(--v-accent)] text-[var(--v-on-accent)]'
                           : 'border-[var(--v-border)] bg-[var(--v-surface)] text-[var(--v-text)]'
@@ -1199,7 +1246,7 @@ export function ReviewAssistantFlow({
                     aria-pressed={length === opt.value}
                     onClick={() => handleChangeLength(opt.value)}
                     className={cn(
-                      'flex h-9 items-center justify-center rounded-lg text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]',
+                      'flex h-11 items-center justify-center rounded-lg text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)]',
                       length === opt.value
                         ? 'bg-[var(--v-accent)] text-[var(--v-on-accent)]'
                         : 'text-[var(--v-muted)]'
@@ -1237,7 +1284,7 @@ export function ReviewAssistantFlow({
           </button>
 
           {!canGenerate && !generating && (
-            <p role="status" className="text-center text-xs leading-relaxed text-[var(--v-muted)]">
+            <p role="status" className="ra-wrap text-center text-xs leading-relaxed text-[var(--v-muted)]">
               {trimmedFeedback.length === 0
                 ? `Write at least ${AI_MIN_FEEDBACK_CHARS} characters about your experience to generate a review.`
                 : `Add ${remainingFeedbackChars} more character${remainingFeedbackChars === 1 ? '' : 's'} to generate a review, or use “Use my words as my review”.`}
@@ -1257,8 +1304,8 @@ export function ReviewAssistantFlow({
       )}
 
       {error && (
-        <div className="rounded-xl bg-red-50 px-3.5 py-2.5 ring-1 ring-red-200">
-          <p role="alert" className="text-xs leading-relaxed text-red-700">
+        <div className="ra-error rounded-xl px-3.5 py-2.5">
+          <p role="alert" className="ra-wrap text-xs leading-relaxed">
             {error}
           </p>
         </div>
@@ -1276,7 +1323,7 @@ export function ReviewAssistantFlow({
             </p>
           </div>
 
-          <div className="space-y-3 rounded-2xl border border-[var(--v-border)] bg-[var(--v-surface)] p-5 shadow-sm">
+          <div className="ra-card space-y-3 rounded-2xl border bg-[var(--v-surface)] p-5 shadow-sm">
             <textarea
               id="ra-draft"
               rows={6}
@@ -1289,7 +1336,7 @@ export function ReviewAssistantFlow({
               }}
             />
             {copyFailed && (
-              <p className="text-xs font-medium text-red-600">Couldn’t copy automatically — select the text and copy it manually.</p>
+              <p className="ra-wrap ra-error-text text-xs font-medium">Couldn’t copy automatically — select the text and copy it manually.</p>
             )}
 
             <p className="text-xs text-[var(--v-muted)]">
@@ -1337,7 +1384,7 @@ export function ReviewAssistantFlow({
                 >
                   {copied ? (
                     <>
-                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      <Check className="ra-success h-4 w-4" aria-hidden="true" />
                       Copied
                     </>
                   ) : (
@@ -1350,12 +1397,12 @@ export function ReviewAssistantFlow({
               )}
 
               {!hasGoogleUrl && (
-                <div className="rounded-xl bg-[var(--v-surface)] px-3.5 py-3 ring-1 ring-[var(--v-border)]">
-                  <p className="flex min-h-12 items-center justify-center gap-2 text-sm font-semibold text-[var(--v-muted)]">
+                <div className="ra-info rounded-xl border border-dashed bg-[var(--v-surface)] px-3.5 py-3 text-left">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-[var(--v-text)]">
                     <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                    Continue to Google Reviews →
+                    Continue to Google Reviews
                   </p>
-                  <p className="mt-1 text-center text-[11px] leading-relaxed text-[var(--v-muted)]">
+                  <p className="ra-wrap mt-1 text-[11px] leading-relaxed text-[var(--v-muted)]">
                     {businessName} hasn’t added a Google Reviews link yet — copy your review and post it on Google your way.
                   </p>
                 </div>
@@ -1366,7 +1413,7 @@ export function ReviewAssistantFlow({
                   href={googleUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-center text-xs font-medium text-[var(--v-accent)] underline underline-offset-2"
+                  className="block rounded text-center text-xs font-medium text-[var(--v-accent)] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v-bg)]"
                 >
                   Open Google Reviews
                 </a>

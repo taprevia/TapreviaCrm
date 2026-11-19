@@ -25,10 +25,15 @@ import { canonicalPublicBase } from '@/lib/public-base';
 import { resolveCustomerPublicPath } from '@/lib/services/customer-public-url';
 import { downloadVcfForCard, requestVcfDownload } from '@/lib/vcf-download';
 import { phoneDigits, telHref } from '@/lib/phone';
+import { publicBusinessHours } from '@/lib/business-hours';
+import {
+  GALLERY_PREVIEW_COUNT,
+  galleryPreview,
+  useGalleryViewer,
+} from '@/lib/hooks/use-gallery-viewer';
 import { brandLabelFromUrl } from '@/utils/get-link-icon';
 import { getBrandIcon } from '@/utils/getBrandIcon';
-import type { IVcard } from '../types';
-import type { IProduct } from '../types';
+import type { IProduct, IVcard, ReviewCta } from '../types';
 import { SafeHtml } from '@/lib/sanitizer';
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -63,6 +68,8 @@ interface PantheventData {
   products: PantheventProduct[];
   services: string[];
   gallery: string[];
+  /** Captions aligned by index with `gallery`; empty string when absent. */
+  galleryCaptions: string[];
 }
 
 type Pep2IconName =
@@ -78,6 +85,7 @@ type Pep2IconName =
   | 'chevron-down'
   | 'globe'
   | 'mail'
+  | 'clock'
   | 'package'
   | 'wrench'
   | 'images'
@@ -124,6 +132,12 @@ const ICON_PATHS: Record<Pep2IconName, React.ReactNode> = {
       <path d="M4 7h16" />
       <path d="m16 21 4-4-4-4" />
       <path d="M20 17H4" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </>
   ),
   close: (
@@ -331,6 +345,7 @@ const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 .pep2-scope{--pep2-primary:var(--v-accent,#10b981);--pep2-primary-hover:color-mix(in srgb,var(--pep2-primary) 85%,#000);--pep2-primary-active:color-mix(in srgb,var(--pep2-primary) 72%,#000);--pep2-gradient:linear-gradient(135deg,var(--pep2-primary),color-mix(in srgb,var(--pep2-primary) 60%,#0ea5e9));--pep2-wa:#25D366;--pep2-wa-hover:#1fc35b;--pep2-bg:var(--v-bg,hsl(220 20% 97%));--pep2-surface:var(--v-surface,#ffffff);--pep2-muted:color-mix(in srgb,var(--v-surface,#ffffff) 96%,var(--v-text,#0f172a));--pep2-muted-hover:color-mix(in srgb,var(--v-surface,#ffffff) 92%,var(--v-text,#0f172a));--pep2-muted-fg:var(--v-muted,hsl(220 9% 46%));--pep2-fg:var(--v-text,hsl(222 47% 11%));--pep2-border:var(--v-border,hsl(220 13% 91%));--pep2-error:#ef4444;--pep2-wash-15:color-mix(in srgb,var(--pep2-primary) 15%,transparent);--pep2-wash-20:color-mix(in srgb,var(--pep2-primary) 20%,transparent);--pep2-halo:color-mix(in srgb,var(--pep2-primary) 25%,transparent);--pep2-shadow-card:0 1px 3px rgb(0 0 0/.04),0 1px 2px -1px rgb(0 0 0/.04);--pep2-shadow-up:0 10px 25px -5px rgb(0 0 0/.08),0 8px 10px -6px rgb(0 0 0/.04);--pep2-shadow-chip:0 2px 8px rgb(0 0 0/.12);--pep2-r-sm:8px;--pep2-r-md:12px;--pep2-r-lg:16px;--pep2-e-std:cubic-bezier(.4,0,.2,1);--pep2-e-decel:cubic-bezier(.05,.7,.1,1);--pep2-e-spring:cubic-bezier(.32,.72,0,1);display:block;min-height:100vh;background:var(--pep2-surface);font-family:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--pep2-fg);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;}
+.pep2-scope.pep2-native{--pep2-primary:#10b981;--pep2-bg:hsl(220 20% 97%);--pep2-surface:#ffffff;--pep2-muted:color-mix(in srgb,#ffffff 96%,hsl(222 47% 11%));--pep2-muted-hover:color-mix(in srgb,#ffffff 92%,hsl(222 47% 11%));--pep2-muted-fg:hsl(220 9% 46%);--pep2-fg:hsl(222 47% 11%);--pep2-border:hsl(220 13% 91%);}
 .pep2-scope *,.pep2-scope *::before,.pep2-scope *::after{box-sizing:border-box;margin:0;padding:0;}
 .pep2-scope :focus-visible{outline:2px solid var(--pep2-primary);outline-offset:2px;border-radius:4px;}
 .pep2-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
@@ -386,6 +401,11 @@ const STYLES = `
 .pep2-section{margin-top:32px;}
 .pep2-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:14px;line-height:20px;font-weight:700;color:var(--pep2-fg);}
 .pep2-head-ico{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--pep2-r-sm);background:var(--pep2-wash-15);color:var(--pep2-primary);}
+.pep2-hours{display:flex;flex-direction:column;border:1px solid var(--pep2-border);border-radius:var(--pep2-r-sm);overflow:hidden;}
+.pep2-hours-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;font-size:13px;line-height:18px;}
+.pep2-hours-row + .pep2-hours-row{border-top:1px solid var(--pep2-border);}
+.pep2-hours-day{color:var(--pep2-fg);font-weight:600;}
+.pep2-hours-time{color:var(--pep2-muted-fg);font-variant-numeric:tabular-nums;}
 
 .pep2-ptrack{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
 
@@ -426,6 +446,11 @@ const STYLES = `
 .pep2-gthumb{aspect-ratio:1/1;padding:0;border:0;border-radius:var(--pep2-r-md);overflow:hidden;background:var(--pep2-muted);cursor:zoom-in;transition:transform 120ms var(--pep2-e-std);}
 .pep2-gthumb:active{transform:scale(.95);}
 .pep2-gimg{width:100%;height:100%;object-fit:cover;display:block;transition:transform 300ms var(--pep2-e-std),filter 300ms var(--pep2-e-std);}
+.pep2-gtile{margin:0;min-width:0;}
+.pep2-gcap{margin-top:4px;font-size:11px;line-height:14px;color:var(--pep2-muted-fg);overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.pep2-gall-all{margin-top:12px;width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 14px;border:1px solid var(--pep2-border);border-radius:9999px;background:var(--pep2-wash-15);color:var(--pep2-primary);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:background 180ms var(--pep2-e-std),transform 120ms var(--pep2-e-std);}
+.pep2-gall-all:hover{background:color-mix(in srgb,var(--pep2-primary) 22%,transparent);}
+.pep2-gall-all:active{transform:scale(.98);}
 
 .pep2-form{display:flex;flex-direction:column;gap:12px;margin-top:12px;}
 .pep2-frow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
@@ -471,9 +496,26 @@ const STYLES = `
 .pep2-xbtn:hover{background:var(--pep2-muted);color:var(--pep2-fg);}
 .pep2-xbtn:active{transform:scale(.95);}
 .pep2-sheet-body{display:flex;flex-direction:column;gap:12px;margin-top:16px;}
-.pep2-lb-stage{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;padding:20px;}
+.pep2-gallery-layer{position:fixed;inset:0;z-index:60;}
+.pep2-image-layer{position:fixed;inset:0;z-index:70;}
+.pep2-layer-backdrop{position:absolute;inset:0;background:rgb(15 23 42/.6);}
+.pep2-gallery-dialog{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;background:var(--pep2-surface);color:var(--pep2-fg);overflow:hidden;}
+.pep2-gallery-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:calc(16px + env(safe-area-inset-top)) 14px 12px;border-bottom:1px solid var(--pep2-border);background:var(--pep2-surface);}
+.pep2-gallery-title{margin:0;font-size:16px;line-height:22px;font-weight:700;color:var(--pep2-fg);}
+.pep2-gallery-count{margin:2px 0 0;font-size:12px;line-height:16px;color:var(--pep2-muted-fg);}
+.pep2-gallery-close{width:44px;height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border:1px solid var(--pep2-border);border-radius:9999px;background:var(--pep2-surface);color:var(--pep2-fg);cursor:pointer;}
+.pep2-gallery-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 14px calc(20px + env(safe-area-inset-bottom));}
+.pep2-gallery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.pep2-gallery-tile{margin:0;min-width:0;}
+.pep2-gallery-thumb{display:block;width:100%;aspect-ratio:1/1;padding:0;border:1px solid var(--pep2-border);border-radius:var(--pep2-r-md);overflow:hidden;background:var(--pep2-muted);cursor:zoom-in;}
+.pep2-gallery-img{display:block;width:100%;height:100%;object-fit:contain;}
+.pep2-gallery-caption{margin-top:4px;font-size:11px;line-height:14px;color:var(--pep2-muted-fg);overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.pep2-lb-stage{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;padding:20px;touch-action:pan-y;pointer-events:none;}
+.pep2-lb-stage > *{pointer-events:auto;}
 .pep2-lb-img{max-width:92vw;max-height:82vh;border-radius:var(--pep2-r-md);object-fit:contain;animation:pep2-zoom-in 260ms var(--pep2-e-decel);}
-.pep2-lb-close{position:absolute;top:12px;right:12px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:none;border-radius:9999px;background:rgb(255 255 255/.16);color:#fff;cursor:pointer;transition:background 180ms var(--pep2-e-std),transform 120ms var(--pep2-e-std);}
+.pep2-lb-img.pep2-lb-img--captioned{max-height:calc(82vh - 52px);}
+.pep2-lb-cap{position:absolute;left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom));text-align:center;font-size:12px;line-height:16px;color:#fff;text-shadow:0 1px 4px rgb(0 0 0/.5);overflow-wrap:anywhere;}
+.pep2-lb-close{position:absolute;top:12px;right:12px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:9999px;background:rgb(255 255 255/.16);color:#fff;cursor:pointer;transition:background 180ms var(--pep2-e-std),transform 120ms var(--pep2-e-std);}
 .pep2-lb-close:hover{background:rgb(255 255 255/.26);}
 .pep2-lb-close:active{transform:scale(.95);}
 .pep2-lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:9999px;background:rgb(255 255 255/.16);color:#fff;cursor:pointer;transition:background 180ms var(--pep2-e-std),transform 120ms var(--pep2-e-std);}
@@ -497,6 +539,16 @@ const STYLES = `
 @media(min-width:480px){
 .pep2-card{margin:24px 0;border-radius:var(--pep2-r-lg);box-shadow:var(--pep2-shadow-card);overflow:hidden;}
 .pep2-lb-img{max-height:86vh;}
+.pep2-lb-img.pep2-lb-img--captioned{max-height:calc(86vh - 52px);}
+.pep2-gallery-grid{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+@media(min-width:640px){
+.pep2-gallery-dialog{top:50%;bottom:auto;left:50%;right:auto;transform:translate(-50%,-50%);width:min(880px,calc(100% - 40px));height:min(88vh,900px);border:1px solid var(--pep2-border);border-radius:var(--pep2-r-lg);box-shadow:var(--pep2-shadow-card);}
+.pep2-gallery-head{padding:20px 20px 14px;}
+.pep2-gallery-scroll{padding:20px;}
+}
+@media(min-width:1024px){
+.pep2-gallery-grid{grid-template-columns:repeat(4,minmax(0,1fr));}
 }
 @media(max-width:359px){
 .pep2-avatar{width:84px;height:84px;}
@@ -599,9 +651,15 @@ function buildData({
 
   const services = (vcard.services ?? []).map((s) => s.title?.trim()).filter(Boolean);
 
-  const gallery = (vcard.galleryImages ?? [])
-    .map((g) => g?.imageUrl?.trim() ?? '')
-    .filter((url) => url.length > 0);
+  const galleryRows = (vcard.galleryImages ?? [])
+    .map((g) => ({
+      url: g?.imageUrl?.trim() ?? '',
+      // Legacy/missing captions become '' — never rendered, never injected.
+      caption: typeof g?.caption === 'string' ? g.caption.trim() : '',
+    }))
+    .filter((row) => row.url.length > 0);
+  const gallery = galleryRows.map((row) => row.url);
+  const galleryCaptions = galleryRows.map((row) => row.caption);
 
   const avatarUrl = vcard.profileImageUrl?.trim() || FALLBACK_AVATAR;
 
@@ -628,6 +686,7 @@ function buildData({
     products: productItems,
     services,
     gallery,
+    galleryCaptions,
   };
 }
 
@@ -651,13 +710,24 @@ type OverlayKind = 'closed' | 'open' | 'closing';
 export function PanthiEventTemplate({
   vcard,
   products,
+  reviewCta,
 }: {
   vcard: IVcard;
   products: IProduct[];
+  reviewCta?: ReviewCta;
 }) {
   const data = useMemo(
     () => buildData({ vcard, products }),
     [vcard, products],
+  );
+  // Native-signature pair means the customer explicitly reset to this template's
+  // original theme: bypass the injected --v-* vars and use the native palette.
+  const accentHex = (vcard.themeConfig?.accentColor ?? '').trim().toUpperCase();
+  const bgHex = (vcard.themeConfig?.bgColor ?? '').trim().toUpperCase();
+  const isNativeTheme = accentHex === '#10B981' && bgHex === '#F6F7F9';
+  const hours = useMemo(
+    () => publicBusinessHours(vcard.businessHours, vcard.businessHoursFormat),
+    [vcard.businessHours, vcard.businessHoursFormat],
   );
   const WA_NUMBER = data.phoneRaw;
   const publicBase = canonicalPublicBase().replace(/\/+$/, '');
@@ -666,8 +736,6 @@ export function PanthiEventTemplate({
       ? `${publicBase}${data.cardUrl}`
       : data.cardUrl
     : '';
-  const googleReviewUrl = safeExternalUrl(vcard.reviewAssistant?.googleReviewUrl);
-
   const buildWa = (message: string): string =>
     WA_NUMBER ? buildWaLink(WA_NUMBER, message) : '#';
 
@@ -679,7 +747,6 @@ export function PanthiEventTemplate({
 
   const [chipVisible, setChipVisible] = useState<boolean>(false);
   const [sheetState, setSheetState] = useState<OverlayKind>('closed');
-  const [lightbox, setLightbox] = useState<{ photos: string[]; index: number } | null>(null);
 
   const CAROUSEL_CLONES = data.products.length;
   const carouselItems = useMemo(
@@ -726,7 +793,7 @@ export function PanthiEventTemplate({
     [],
   );
 
-  const anyOverlayOpen = sheetState === 'open' || lightbox !== null;
+  const sheetOverlayOpen = sheetState === 'open';
 
   useEffect(() => {
     const track = productTrackRef.current;
@@ -742,17 +809,6 @@ export function PanthiEventTemplate({
       });
     });
   }, [CAROUSEL_CLONES]);
-
-  const openLightbox = (photos: string[], index: number): void => setLightbox({ photos, index });
-
-  const closeLightbox = (): void => setLightbox(null);
-
-  const stepLightbox = (delta: number): void =>
-    setLightbox((current) => {
-      if (current === null) return null;
-      const total = current.photos.length;
-      return { photos: current.photos, index: (current.index + delta + total) % total };
-    });
 
   const handleProductScroll = (): void => {
     if (productScrollRaf.current !== null || recentering.current || CAROUSEL_CLONES === 0)
@@ -785,39 +841,28 @@ export function PanthiEventTemplate({
   };
 
   useEffect(() => {
-    if (!anyOverlayOpen) return undefined;
+    if (!sheetOverlayOpen) return undefined;
     const previousOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = 'hidden';
     return () => {
       document.documentElement.style.overflow = previousOverflow;
     };
-  }, [anyOverlayOpen]);
+  }, [sheetOverlayOpen]);
 
   useEffect(() => {
-    if (!anyOverlayOpen) return undefined;
+    if (!sheetOverlayOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        if (lightbox !== null) closeLightbox();
-        else if (sheetState === 'open') closeSheet();
-        return;
-      }
-      if (lightbox !== null) {
-        if (event.key === 'ArrowRight') stepLightbox(1);
-        else if (event.key === 'ArrowLeft') stepLightbox(-1);
-        else if (event.key === 'Home') setLightbox({ photos: lightbox.photos, index: 0 });
-        else if (event.key === 'End')
-          setLightbox({ photos: lightbox.photos, index: lightbox.photos.length - 1 });
-      }
+      if (event.key === 'Escape') closeSheet();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  /* Move focus into the modal dialog (or lightbox) when it opens and restore it
-     to the triggering control when it closes, so the aria-modal semantics are
-     actually enforced for keyboard and screen-reader users. */
+  /* Move focus into the exchange sheet when it opens and restore it to the
+     triggering control when it closes. Gallery viewer focus is handled by the
+     shared hook declared after these sheet effects. */
   useEffect(() => {
-    if (anyOverlayOpen) {
+    if (sheetOverlayOpen) {
       returnFocusRef.current = document.activeElement as HTMLElement | null;
       const node = overlayRef.current;
       const focusable = node?.querySelector<HTMLElement>(
@@ -828,7 +873,24 @@ export function PanthiEventTemplate({
       returnFocusRef.current?.focus?.();
       returnFocusRef.current = null;
     }
-  }, [anyOverlayOpen]);
+  }, [sheetOverlayOpen]);
+
+  const galleryImages = useMemo(
+    () =>
+      data.gallery.map((url, index) => ({
+        url,
+        caption: data.galleryCaptions[index] ?? '',
+      })),
+    [data.gallery, data.galleryCaptions]
+  );
+  const productLightboxImages = useMemo(
+    () => data.products.map((item) => ({ url: item.imageUrl, caption: '' })),
+    [data.products]
+  );
+  const gallery = useGalleryViewer();
+  const galleryPreviewRows = galleryPreview(galleryImages);
+  const galleryTotal = galleryImages.length;
+  const hasMoreGallery = galleryTotal > GALLERY_PREVIEW_COUNT;
 
   const closeSheet = (): void => {
     if (sheetState !== 'open') return;
@@ -1018,10 +1080,8 @@ export function PanthiEventTemplate({
     }
   };
 
-  const galleryTotal = data.gallery.length;
-
   return (
-    <div className="pep2-scope">
+    <div className={isNativeTheme ? 'pep2-scope pep2-native' : 'pep2-scope'}>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
 
       <div className="pep2-card">
@@ -1119,12 +1179,10 @@ export function PanthiEventTemplate({
             </button>
             ) : null}
           </div>
-          {googleReviewUrl ? (
+          {reviewCta ? (
             <a
               className="pep2-btn pep2-btn--sm pep2-btn--soft pep2-btn--review"
-              href={googleReviewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={reviewCta.href}
               aria-label={`Rate ${data.name} on Google`}
             >
               <Icon name="star" size={14} />
@@ -1179,12 +1237,7 @@ export function PanthiEventTemplate({
                       <button
                         type="button"
                         className="pep2-pmedia"
-                        onClick={() =>
-                          openLightbox(
-                            data.products.map((item) => item.imageUrl),
-                            realIndex,
-                          )
-                        }
+                        onClick={() => gallery.openProductImage(productLightboxImages, realIndex)}
                         aria-label={`Open ${product.title} photo`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
@@ -1278,7 +1331,26 @@ export function PanthiEventTemplate({
             </section>
           ) : null}
 
-          {data.gallery.length > 0 ? (
+          {hours.length > 0 ? (
+            <section className="pep2-section" aria-labelledby="pep2-hours-head">
+            <h2 className="pep2-head" id="pep2-hours-head">
+              <span className="pep2-head-ico">
+                <Icon name="clock" size={16} />
+              </span>
+              Business Hours
+            </h2>
+            <div className="pep2-hours">
+              {hours.map((h) => (
+                <div className="pep2-hours-row" key={h.day}>
+                  <span className="pep2-hours-day">{h.label}</span>
+                  <span className="pep2-hours-time">{h.time}</span>
+                </div>
+              ))}
+            </div>
+            </section>
+          ) : null}
+
+          {galleryTotal > 0 ? (
             <section className="pep2-section" aria-labelledby="pep2-gallery-head">
             <h2 className="pep2-head" id="pep2-gallery-head">
               <span className="pep2-head-ico">
@@ -1287,28 +1359,42 @@ export function PanthiEventTemplate({
               Gallery
             </h2>
             <div className="pep2-gal">
-              {data.gallery.map((imageUrl, index) => (
-                <button
-                  key={`${imageUrl}-${index}`}
-                  type="button"
-                  className="pep2-gthumb"
-                  onClick={() => openLightbox(data.gallery, index)}
-                  aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
-                  <img
-                    className="pep2-gimg"
-                    src={imageUrl}
-                    alt={`${data.name} gallery photo ${index + 1}`}
-                    width={400}
-                    height={400}
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => handleImgError(e, data.name)}
-                  />
-                </button>
+              {galleryPreviewRows.map((row, index) => (
+                <figure className="pep2-gtile" key={`${row.url}-${index}`}>
+                  <button
+                    type="button"
+                    className="pep2-gthumb"
+                    onClick={() => gallery.openPreviewImage(galleryImages, index)}
+                    aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
+                    <img
+                      className="pep2-gimg"
+                      src={row.url}
+                      alt={`${data.name} gallery photo ${index + 1}`}
+                      width={400}
+                      height={400}
+                      loading="lazy"
+                      decoding="async"
+                      onError={(e) => handleImgError(e, data.name)}
+                    />
+                  </button>
+                  {row.caption ? (
+                    <figcaption className="pep2-gcap">{row.caption}</figcaption>
+                  ) : null}
+                </figure>
               ))}
             </div>
+            {hasMoreGallery ? (
+              <button
+                type="button"
+                className="pep2-gall-all"
+                onClick={() => gallery.openGrid(galleryImages)}
+                aria-label={`View All ${galleryTotal} Photos`}
+              >
+                View All {galleryTotal} Photos
+              </button>
+            ) : null}
             </section>
           ) : null}
 
@@ -1657,28 +1743,93 @@ export function PanthiEventTemplate({
         </div>
       ) : null}
 
-      {lightbox !== null ? (
+      {gallery.isGridOpen ? (
         <div
-          ref={overlayRef}
-          className="pep2-overlay pep2-overlay--open"
-          onClick={closeLightbox}
+          ref={gallery.gridOverlayRef}
+          className="pep2-gallery-layer"
           role="presentation"
-          onKeyDown={trapTabKeys}
+          onKeyDown={gallery.trapTabKeys}
         >
+          <div className="pep2-layer-backdrop" aria-hidden="true" {...gallery.gridBackdropProps} />
+          <div
+            className="pep2-gallery-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pep2-gallery-overlay-title"
+            data-gallery-source="grid"
+          >
+            <header className="pep2-gallery-head">
+              <div>
+                <h2 className="pep2-gallery-title" id="pep2-gallery-overlay-title">
+                  Gallery
+                </h2>
+                <p className="pep2-gallery-count">{gallery.gridImages.length} photos</p>
+              </div>
+              <button
+                type="button"
+                className="pep2-gallery-close"
+                onClick={gallery.closeGrid}
+                aria-label="Close gallery"
+              >
+                <Icon name="close" size={18} />
+              </button>
+            </header>
+            <div ref={gallery.gridScrollRef} className="pep2-gallery-scroll">
+              <div className="pep2-gallery-grid">
+                {gallery.gridImages.map((row, index) => (
+                  <figure className="pep2-gallery-tile" key={`${row.url}-${index}`}>
+                    <button
+                      type="button"
+                      className="pep2-gallery-thumb"
+                      onClick={() => gallery.openGridImage(index)}
+                      aria-label={`Open photo ${index + 1} of ${gallery.gridImages.length}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
+                      <img
+                        className="pep2-gallery-img"
+                        src={row.url}
+                        alt={`${data.name} gallery photo ${index + 1}`}
+                        width={400}
+                        height={400}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => handleImgError(e, data.name)}
+                      />
+                    </button>
+                    {row.caption ? (
+                      <figcaption className="pep2-gallery-caption">{row.caption}</figcaption>
+                    ) : null}
+                  </figure>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {gallery.isImageOpen && gallery.current ? (
+        <div
+          ref={gallery.imageOverlayRef}
+          className="pep2-image-layer"
+          role="presentation"
+          onKeyDown={gallery.trapTabKeys}
+        >
+          <div className="pep2-layer-backdrop" aria-hidden="true" {...gallery.imageBackdropProps} />
           <div
             className="pep2-lb-stage"
             role="dialog"
             aria-modal="true"
             aria-label="Photo viewer"
-            onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}
+            data-gallery-source={gallery.imageSource ?? undefined}
+            {...gallery.touchHandlers}
           >
             <span className="pep2-lb-count">
-              {lightbox.index + 1} / {lightbox.photos.length}
+              {gallery.index + 1} / {gallery.total}
             </span>
             <button
               type="button"
               className="pep2-lb-close"
-              onClick={closeLightbox}
+              onClick={gallery.closeImage}
               aria-label="Close photo viewer"
             >
               <Icon name="close" size={18} />
@@ -1686,27 +1837,30 @@ export function PanthiEventTemplate({
             <button
               type="button"
               className="pep2-lb-nav pep2-lb-nav--prev"
-              onClick={() => stepLightbox(-1)}
+              onClick={() => gallery.step(-1)}
               aria-label="Previous photo"
             >
               <Icon name="chevron-left" size={20} />
             </button>
             {/* eslint-disable-next-line @next/next/no-img-element -- plain img per reference */}
             <img
-              key={lightbox.index}
-              className="pep2-lb-img"
-              src={lightbox.photos[lightbox.index]}
-              alt={`${data.name} photo ${lightbox.index + 1}`}
+              key={gallery.index}
+              className={`pep2-lb-img${gallery.current.caption ? ' pep2-lb-img--captioned' : ''}`}
+              src={gallery.current.url}
+              alt={`${data.name} photo ${gallery.index + 1}`}
               onError={(e) => handleImgError(e, data.name)}
             />
             <button
               type="button"
               className="pep2-lb-nav pep2-lb-nav--next"
-              onClick={() => stepLightbox(1)}
+              onClick={() => gallery.step(1)}
               aria-label="Next photo"
             >
               <Icon name="chevron-right" size={20} />
             </button>
+            {gallery.current.caption ? (
+              <figcaption className="pep2-lb-cap">{gallery.current.caption}</figcaption>
+            ) : null}
           </div>
         </div>
       ) : null}

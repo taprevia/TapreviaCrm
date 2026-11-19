@@ -4,6 +4,7 @@ const MEDIA_CATEGORIES = [
   'avatar',
   'cover',
   'gallery',
+  'logo',
   'product',
   'socialIcon',
   'virtualBackground',
