@@ -72,6 +72,13 @@ export const CARD_TEMPLATE_META: readonly CardTemplateMeta[] = [
       'A premium botanical profile with a customer cover image, ivory gold-edged curve, permanent decorative leaves, emerald typography and refined cards.',
     defaultTheme: { accentColor: '#065F46', bgColor: '#FFF9F0' },
   },
+  {
+    key: 'corporate-prestige',
+    name: 'Corporate Prestige',
+    description:
+      'A refined navy-and-gold corporate profile with a right-aligned square photo, quick actions, product carousel, services, gallery and contact form.',
+    defaultTheme: { accentColor: '#0B1F36', bgColor: '#FFFFFF' },
+  },
 ];
 
 /** Template customers get when a card has no explicit templateKey yet. */

@@ -67,11 +67,22 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VISIBLE_COUNT = 3;
 
 /**
- * One shared wave geometry drives the clipped cover boundary and the thin
- * metallic gold outline. Unit coordinates map to the cover box, so the same path scales
- * with any viewport width and the two layers cannot drift apart.
+ * One shared wave geometry drives the clipped cover boundary, the ivory fill
+ * and the thin metallic gold outline. Unit coordinates map to the cover box,
+ * so the same path scales with any viewport width and no layer can drift.
+ *
+ * Three connected cubic segments form a deliberately asymmetric botanical
+ * wave: a broad crest on the left, a gradual descent behind the profile
+ * photo, then a gentler, differently-sloped rise into the right edge. Each
+ * join reuses the previous segment's outgoing tangent vector, so the slope is
+ * continuous and there are no kinks. This replaces the former symmetric
+ * single-cubic U dip (and its mirrored control points).
  */
-const COVER_WAVE_EDGE = 'M0 .76 C .28 .98, .72 .98, 1 .76';
+const COVER_WAVE_EDGE =
+  'M0 .74 ' +
+  'C .05 .715, .16 .695, .24 .72 ' +
+  'C .32 .745, .46 .93, .54 .935 ' +
+  'C .62 .94, .90 .80, 1 .795';
 const COVER_WAVE_BODY = `${COVER_WAVE_EDGE} L1 0 L0 0 Z`;
 
 /**
@@ -108,7 +119,7 @@ const STYLES = `
 }
 @media(min-width:440px){
   .ee-actions{grid-template-columns:repeat(auto-fit,minmax(0,1fr));}
-  .ee-root .ee-action-btn{white-space:nowrap;font-size:9px;}
+  .ee-root .ee-action-btn{white-space:nowrap;font-size:11px;}
 }
 .ee-products-row{display:flex;gap:.6rem;overflow-x:auto;position:relative;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-behavior:smooth;}
 .ee-products-row::-webkit-scrollbar{display:none;}
@@ -223,14 +234,14 @@ function SectionHeading({
   id?: string;
 }) {
   return (
-    <div className="mb-3 flex items-center gap-2.5">
-      <span className="ee-ring ee-focus grid h-8 w-8 shrink-0 place-items-center rounded-xl text-[#065F46] shadow-sm">
+    <div className="mb-3.5 flex items-center gap-2.5">
+      <span className="ee-focus grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#065F46] text-white shadow-[0_4px_10px_rgba(6,95,70,.25)] ring-2 ring-white/80">
         {icon}
       </span>
-      <h2 id={id} className="font-serif text-base font-semibold tracking-wide text-ee-ink">
+      <h2 id={id} className="font-serif text-base font-bold tracking-wide text-ee-ink">
         {children}
       </h2>
-      {action ? <div className="ml-auto">{action}</div> : null}
+      {action ? <div className="ml-auto shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -312,6 +323,14 @@ export function EmeraldEssenceTemplate({
         }))
         .filter((row) => row.url.length > 0),
     [vcard.galleryImages],
+  );
+  const productLightboxImages = useMemo<GalleryImage[]>(
+    () =>
+      activeProducts.map((product) => ({
+        url: product.imageUrl || fallbackImage(product.title),
+        caption: '',
+      })),
+    [activeProducts]
   );
   const gallery = useGalleryViewer();
   const galleryPreviewRows = galleryPreview(galleryImages, GALLERY_PREVIEW_COUNT);
@@ -568,7 +587,7 @@ export function EmeraldEssenceTemplate({
   };
 
   const inputClass =
-    'ee-focus h-11 w-full rounded-lg border border-[#065F46]/25 bg-[#FFFFFF] px-3 text-base text-ee-ink placeholder:text-[#718F7E] shadow-sm';
+    'ee-focus h-11 w-full rounded-xl border border-[#065F46]/20 bg-[#FFFFFF] px-3.5 text-base text-ee-ink placeholder:text-[#718F7E] shadow-sm';
   const rootStyle = {
     '--ee-accent': themedAccent ? 'var(--v-accent, #065F46)' : '#065F46',
     '--ee-page': themedBg ? 'var(--v-bg, #FFF9F0)' : '#FFF9F0',
@@ -672,13 +691,13 @@ export function EmeraldEssenceTemplate({
         <div aria-hidden="true" className="ee-leaf absolute inset-0 z-0 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element -- local decorative SVG */}
           <img src="/images/templates/emerald-essence/leaf-left.svg" alt="" draggable={false}
-            className="ee-leaf absolute -left-1 top-6 w-16 max-w-[22%] opacity-60 sm:w-24" />
+            className="ee-leaf absolute -left-2 top-4 w-20 max-w-[26%] opacity-50 sm:w-28 sm:opacity-60 lg:w-32" />
           {/* eslint-disable-next-line @next/next/no-img-element -- local decorative SVG */}
           <img src="/images/templates/emerald-essence/leaf-right.svg" alt="" draggable={false}
-            className="ee-leaf absolute -right-1 top-4 w-16 max-w-[22%] opacity-60 sm:w-24" />
+            className="ee-leaf absolute -right-2 top-2 w-20 max-w-[26%] opacity-50 sm:w-28 sm:opacity-60 lg:w-32" />
           {/* eslint-disable-next-line @next/next/no-img-element -- local decorative SVG */}
           <img src="/images/templates/emerald-essence/leaf-corner.svg" alt="" draggable={false}
-            className="ee-leaf absolute bottom-0 left-0 hidden w-12 opacity-40 sm:block" />
+            className="ee-leaf absolute bottom-0 left-1 w-12 opacity-35 sm:w-16 sm:opacity-45" />
         </div>
         <div className="relative z-10">
         <div className="relative mx-auto w-fit">
@@ -700,24 +719,24 @@ export function EmeraldEssenceTemplate({
             </div>
           )}
         </div>
-        <h1 className="mt-3 break-words font-serif text-xl font-semibold tracking-wide text-ee-ink sm:text-2xl">{name}</h1>
+        <h1 className="mt-2.5 break-words font-serif text-xl font-bold tracking-wide text-ee-ink sm:text-2xl">{name}</h1>
         {designation ? (
-          <span className="ee-outline mt-2 inline-block rounded-full bg-[#FFFFFF] px-3 py-1 text-xs font-semibold" style={{ color: 'var(--ee-accent)' }}>
+          <span className="ee-outline mt-1.5 inline-block rounded-full bg-[#FFFFFF] px-3 py-1 text-xs font-semibold shadow-sm" style={{ color: 'var(--ee-accent)' }}>
             {designation}
           </span>
         ) : null}
         {showCompany ? (
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[#5C7A6B]">{company}</p>
+          <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] text-[#5C7A6B]">{company}</p>
         ) : null}
         {bio ? (
-          <div className="mx-auto mt-2.5 max-w-md text-[13px] leading-relaxed text-[#4A6B5A]">
+          <div className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[#4A6B5A]">
             <SafeHtml html={bio} />
           </div>
         ) : null}
 
         {/* contact rows */}
         {phoneLinks.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5">
+          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5">
             {phoneLinks.map((row, index) => (
               <div key={`${row.label}-${index}`} className="flex items-center gap-1.5">
                 {index > 0 ? <span aria-hidden="true" className="h-3.5 w-px bg-[#065F46]/30" /> : null}
@@ -740,25 +759,25 @@ export function EmeraldEssenceTemplate({
       </section>
 
       {/* ── Primary actions — balanced compact row, responsive fallback ──── */}
-      <section className="ee-actions mt-5 px-5" aria-label="Quick actions">
-        <button type="button" onClick={addToContact} className="ee-grad ee-action-btn ee-focus flex min-h-[46px] w-full items-center justify-center gap-1 rounded-xl px-1 text-center text-[10px] font-bold leading-tight text-[#FFFFFF] shadow-md transition active:scale-[0.99]">
+      <section className="ee-actions mt-4 px-5" aria-label="Quick actions">
+        <button type="button" onClick={addToContact} className="ee-grad ee-action-btn ee-focus flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-full border border-[#065F46]/25 px-3 text-center text-[11px] font-bold leading-tight text-[#FFFFFF] shadow-md transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.99]">
           <UserPlus size={14} aria-hidden="true" /> Add to Contacts
         </button>
         <button
           type="button"
           onClick={() => { setNotice(null); setModalName(''); setModalEmail(''); setModalPhone(''); setModal('exchange'); }}
-          className="ee-outline ee-action-btn ee-focus flex min-h-[46px] w-full items-center justify-center gap-1 rounded-xl bg-[#FFFFFF] px-1 text-center text-[10px] font-bold leading-tight shadow-sm transition active:scale-[0.99]"
+          className="ee-action-btn ee-focus flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-full border border-[#065F46]/25 bg-[#FFFFFF] px-3 text-center text-[11px] font-bold leading-tight shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99]"
           style={{ color: 'var(--ee-accent)' }}
         >
           <ArrowLeftRight size={14} aria-hidden="true" /> Exchange Contact
         </button>
         {website ? (
-          <a href={website} target="_blank" rel="noopener noreferrer" className="ee-outline ee-action-btn ee-focus flex min-h-[46px] w-full items-center justify-center gap-1 rounded-xl bg-[#FFFFFF] px-1 text-center text-[10px] font-bold leading-tight shadow-sm transition active:scale-[0.99]" style={{ color: 'var(--ee-accent)' }}>
+          <a href={website} target="_blank" rel="noopener noreferrer" className="ee-action-btn ee-focus flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-full border border-[#065F46]/25 bg-[#FFFFFF] px-3 text-center text-[11px] font-bold leading-tight shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99]" style={{ color: 'var(--ee-accent)' }}>
             <Link2 size={14} aria-hidden="true" /> Website
           </a>
         ) : null}
         {reviewCta ? (
-          <a href={reviewCta.href} aria-label={`Rate ${name} on Google`} className="ee-outline ee-action-btn ee-focus flex min-h-[46px] w-full items-center justify-center gap-1 rounded-xl bg-[#FFFFFF] px-1 text-center text-[10px] font-bold leading-tight shadow-sm transition active:scale-[0.99]" style={{ color: 'var(--ee-accent)' }}>
+          <a href={reviewCta.href} aria-label={`Rate ${name} on Google`} className="ee-action-btn ee-focus flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-full border border-[#065F46]/25 bg-[#FFFFFF] px-3 text-center text-[11px] font-bold leading-tight shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99]" style={{ color: 'var(--ee-accent)' }}>
             <Star size={14} aria-hidden="true" /> Rate us on Google
           </a>
         ) : null}
@@ -776,7 +795,7 @@ export function EmeraldEssenceTemplate({
                 rel="noopener noreferrer"
                 aria-label={link.label}
                 title={link.label}
-                className="ee-outline ee-focus grid h-10 w-10 place-items-center rounded-xl bg-[#FFFFFF] text-base shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className="ee-focus grid h-10 w-10 place-items-center rounded-xl border border-[#065F46]/15 bg-[#FFFFFF] text-base shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                 style={{ color: socialIconColor(link.url) }}
               >
                 {getBrandIcon(link.url)}
@@ -794,7 +813,7 @@ export function EmeraldEssenceTemplate({
             icon={<Box size={16} />}
             action={
               activeProducts.length > VISIBLE_COUNT ? (
-                <button type="button" onClick={() => setProductsExpanded((v) => !v)} className="ee-focus text-xs font-bold" style={{ color: 'var(--ee-accent)' }}>
+                <button type="button" onClick={() => setProductsExpanded((v) => !v)} className="ee-focus rounded-full bg-[#E8F3EC] px-2.5 py-1 text-[11px] font-bold transition hover:bg-[#DCEBDC]" style={{ color: 'var(--ee-accent)' }}>
                   {productsExpanded ? 'Show Less' : 'See All Products'}
                 </button>
               ) : null
@@ -826,22 +845,31 @@ export function EmeraldEssenceTemplate({
                 const enquiry = waLink(`Hello ${name}! I'd like to enquire about your "${product.title}" product.`);
                 return (
                   <article key={product._id || index} className={productsExpanded ? 'min-w-0' : 'ee-product-card'}>
-                    <div className="ee-card overflow-hidden rounded-xl">
-                      {/* eslint-disable-next-line @next/next/no-img-element -- customer catalogue image */}
-                      <img
-                        src={product.imageUrl || fallbackImage(product.title)}
-                        alt={product.title}
-                        width={300}
-                        height={240}
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => onImgError(e, product.title)}
-                        className="ee-shimmer aspect-[4/3] w-full object-cover"
-                      />
-                      <div className="p-2">
-                        <h3 className="line-clamp-2 text-[11px] font-bold leading-tight text-ee-ink">{product.title}</h3>
+                    <div className="ee-card overflow-hidden rounded-2xl border border-[#065F46]/10">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          gallery.openProductImage(productLightboxImages, index)
+                        }
+                        aria-label={`View ${product.title} photo`}
+                        className="block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ee-accent)]"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element -- customer catalogue image */}
+                        <img
+                          src={product.imageUrl || fallbackImage(product.title)}
+                          alt={product.title}
+                          width={300}
+                          height={240}
+                          loading="lazy"
+                          decoding="async"
+                          onError={(e) => onImgError(e, product.title)}
+                          className="ee-shimmer aspect-[4/3] w-full object-cover"
+                        />
+                      </button>
+                      <div className="p-2.5">
+                        <h3 className="line-clamp-2 text-xs font-bold leading-tight text-ee-ink">{product.title}</h3>
                         {enquiry ? (
-                          <a href={enquiry} target="_blank" rel="noopener noreferrer" className="ee-grad ee-focus mt-2 flex min-h-[32px] items-center justify-center gap-1 rounded-lg px-1.5 text-[10px] font-bold text-[#FFFFFF] transition hover:brightness-110">
+                          <a href={enquiry} target="_blank" rel="noopener noreferrer" className="ee-grad ee-focus mt-2.5 flex min-h-[34px] items-center justify-center gap-1.5 rounded-full border border-white/20 px-2 text-[11px] font-bold text-[#FFFFFF] shadow-sm transition hover:brightness-110">
                             <MessageCircle size={12} aria-hidden="true" /> Enquire
                           </a>
                         ) : null}
@@ -859,7 +887,7 @@ export function EmeraldEssenceTemplate({
                   disabled={productNav.atStart}
                   aria-label="Previous products"
                   aria-controls="ee-products-track"
-                  className="ee-outline ee-focus pointer-events-auto absolute left-0 top-1/2 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#FFFFFF]/95 shadow-md backdrop-blur-sm transition disabled:cursor-not-allowed disabled:opacity-40"
+                  className="ee-focus pointer-events-auto absolute left-0 top-1/2 grid h-9 w-9 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-[#065F46]/20 bg-[#FFFFFF] shadow-md ring-2 ring-white/70 transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ color: 'var(--ee-accent)' }}
                 >
                   <ChevronLeft size={16} aria-hidden="true" />
@@ -870,7 +898,7 @@ export function EmeraldEssenceTemplate({
                   disabled={productNav.atEnd}
                   aria-label="Next products"
                   aria-controls="ee-products-track"
-                  className="ee-outline ee-focus pointer-events-auto absolute right-0 top-1/2 grid h-10 w-10 translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#FFFFFF]/95 shadow-md backdrop-blur-sm transition disabled:cursor-not-allowed disabled:opacity-40"
+                  className="ee-focus pointer-events-auto absolute right-0 top-1/2 grid h-9 w-9 translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-[#065F46]/20 bg-[#FFFFFF] shadow-md ring-2 ring-white/70 transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ color: 'var(--ee-accent)' }}
                 >
                   <ChevronRight size={16} aria-hidden="true" />
@@ -890,7 +918,7 @@ export function EmeraldEssenceTemplate({
               icon={<Crown size={16} />}
               action={
                 services.length > VISIBLE_COUNT ? (
-                  <button type="button" onClick={() => setServicesExpanded((v) => !v)} className="ee-focus text-xs font-bold" style={{ color: 'var(--ee-accent)' }}>
+                  <button type="button" onClick={() => setServicesExpanded((v) => !v)} className="ee-focus rounded-full bg-[#E8F3EC] px-2.5 py-1 text-[11px] font-bold transition hover:bg-[#DCEBDC]" style={{ color: 'var(--ee-accent)' }}>
                     {servicesExpanded ? 'Show Less' : 'See All Services'}
                   </button>
                 ) : null
@@ -903,13 +931,13 @@ export function EmeraldEssenceTemplate({
                 const Icon = SERVICE_ICONS[index % SERVICE_ICONS.length] ?? Sparkles;
                 const enquiry = waLink(`Hello ${name}! I'm interested in ${service}. Please share details.`);
                 return (
-                  <div key={`${service}-${index}`} className="ee-card ee-outline min-w-0 rounded-xl px-2 py-3 text-center">
-                    <span className="ee-focus mx-auto mb-1.5 grid h-8 w-8 place-items-center rounded-lg bg-[#E8F3EC]" style={{ color: 'var(--ee-accent)' }}>
-                      <Icon size={15} aria-hidden="true" />
+                  <div key={`${service}-${index}`} className="ee-card min-w-0 rounded-2xl border border-[#065F46]/10 px-2 py-3.5 text-center shadow-sm">
+                    <span className="ee-focus mx-auto mb-2 grid h-9 w-9 place-items-center rounded-full bg-[#E8F3EC] ring-1 ring-[#065F46]/10" style={{ color: 'var(--ee-accent)' }}>
+                      <Icon size={16} aria-hidden="true" />
                     </span>
-                    <p className="line-clamp-2 break-words text-[11px] font-bold leading-tight text-ee-ink">{service}</p>
+                    <p className="line-clamp-2 break-words text-xs font-bold leading-tight text-ee-ink">{service}</p>
                     {enquiry ? (
-                      <a href={enquiry} target="_blank" rel="noopener noreferrer" aria-label={`Enquire about ${service}`} className="ee-focus mt-1.5 inline-flex items-center justify-center text-[10px] font-bold" style={{ color: 'var(--ee-accent)' }}>
+                      <a href={enquiry} target="_blank" rel="noopener noreferrer" aria-label={`Enquire about ${service}`} className="ee-focus mt-2 inline-flex items-center justify-center text-[11px] font-bold" style={{ color: 'var(--ee-accent)' }}>
                         Enquire
                       </a>
                     ) : null}
@@ -928,7 +956,7 @@ export function EmeraldEssenceTemplate({
             id="ee-gallery-head"
             icon={<Images size={16} />}
             action={
-              <button type="button" onClick={() => gallery.openGrid(galleryImages)} className="ee-focus text-xs font-bold" style={{ color: 'var(--ee-accent)' }}>
+              <button type="button" onClick={() => gallery.openGrid(galleryImages)} className="ee-focus rounded-full bg-[#E8F3EC] px-2.5 py-1 text-[11px] font-bold transition hover:bg-[#DCEBDC]" style={{ color: 'var(--ee-accent)' }}>
                 View All {galleryTotal} Photos
               </button>
             }
@@ -942,7 +970,7 @@ export function EmeraldEssenceTemplate({
                 type="button"
                 onClick={() => gallery.openPreviewImage(galleryImages, index)}
                 aria-label={`Open photo ${index + 1} of ${galleryTotal}`}
-                className="ee-focus relative aspect-square overflow-hidden rounded-lg shadow-sm ring-1 ring-[#065F46]/25"
+                className="ee-focus relative aspect-square overflow-hidden rounded-xl shadow-md ring-1 ring-[#065F46]/15 transition hover:shadow-lg"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- customer gallery image */}
                 <img src={row.url} alt={`${name} gallery photo ${index + 1}`} width={300} height={300} loading="lazy" decoding="async" onError={(e) => onImgError(e, name)} className="h-full w-full object-cover" />
@@ -979,14 +1007,14 @@ export function EmeraldEssenceTemplate({
 
       {/* ── Get in touch ──────────────────────────────────────────────────── */}
       <section className="mt-7 px-5" aria-labelledby="ee-contact-head">
-        <div className="ee-panel rounded-2xl p-4">
+        <div className="ee-panel rounded-2xl p-4 sm:p-5">
           <SectionHeading id="ee-contact-head" icon={<Send size={16} />}>Get in touch</SectionHeading>
           <form onSubmit={submitLead} className="ee-form-grid" noValidate>
             <div><label htmlFor="ee-lead-name" className="sr-only">Name</label><input id="ee-lead-name" className={inputClass} placeholder="Your name" autoComplete="name" maxLength={100} value={leadName} onChange={(e) => setLeadName(e.target.value)} required /></div>
             <div><label htmlFor="ee-lead-email" className="sr-only">Email</label><input id="ee-lead-email" type="email" className={inputClass} placeholder="Email address" autoComplete="email" value={leadEmail} onChange={(e) => setLeadEmail(e.target.value)} /></div>
             <div className="ee-span-all"><label htmlFor="ee-lead-phone" className="sr-only">Phone</label><input id="ee-lead-phone" type="tel" className={inputClass} placeholder="Phone number" autoComplete="tel" maxLength={20} value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} /></div>
             <div className="ee-span-all"><label htmlFor="ee-lead-message" className="sr-only">Message</label><textarea id="ee-lead-message" className={`${inputClass} h-24 resize-none py-2.5`} placeholder="Your message" maxLength={2000} value={leadMessage} onChange={(e) => setLeadMessage(e.target.value)} /></div>
-            <button type="submit" disabled={leadBusy} className="ee-grad ee-focus ee-span-all flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-[#FFFFFF] shadow-md transition disabled:opacity-60">
+            <button type="submit" disabled={leadBusy} className="ee-grad ee-focus ee-span-all flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-white/20 text-sm font-bold text-[#FFFFFF] shadow-md transition hover:brightness-110 disabled:opacity-60">
               <Send size={16} aria-hidden="true" /> {leadBusy ? 'Sending…' : 'Send Message'}
             </button>
           </form>

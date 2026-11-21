@@ -295,6 +295,14 @@ export function PremiumPurpleTemplate({
         .filter((row) => row.url.length > 0),
     [vcard.galleryImages],
   );
+  const productLightboxImages = useMemo<GalleryImage[]>(
+    () =>
+      activeProducts.map((product) => ({
+        url: product.imageUrl || fallbackImage(product.title),
+        caption: '',
+      })),
+    [activeProducts]
+  );
   const gallery = useGalleryViewer();
   const galleryPreviewRows = galleryPreview(galleryImages, GALLERY_PREVIEW_COUNT);
   // The first captioned preview row keeps its caption attached to its own tile.
@@ -793,17 +801,26 @@ export function PremiumPurpleTemplate({
                 return (
                   <article key={product._id || index} className={productsExpanded ? 'min-w-0' : 'pp-product-card'}>
                     <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-violet-100/70">
-                      {/* eslint-disable-next-line @next/next/no-img-element -- customer catalogue image */}
-                      <img
-                        src={product.imageUrl || fallbackImage(product.title)}
-                        alt={product.title}
-                        width={300}
-                        height={240}
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => onImgError(e, product.title)}
-                        className="pp-shimmer aspect-[4/3] w-full object-cover"
-                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          gallery.openProductImage(productLightboxImages, index)
+                        }
+                        aria-label={`View ${product.title} photo`}
+                        className="block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--pp-accent)]"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element -- customer catalogue image */}
+                        <img
+                          src={product.imageUrl || fallbackImage(product.title)}
+                          alt={product.title}
+                          width={300}
+                          height={240}
+                          loading="lazy"
+                          decoding="async"
+                          onError={(e) => onImgError(e, product.title)}
+                          className="pp-shimmer aspect-[4/3] w-full object-cover"
+                        />
+                      </button>
                       <div className="p-2">
                         <h3 className="line-clamp-2 text-[11px] font-bold leading-tight text-pp-ink">{product.title}</h3>
                         {enquiry ? (

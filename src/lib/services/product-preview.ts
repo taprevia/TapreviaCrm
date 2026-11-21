@@ -8,8 +8,9 @@
  *    settings allow it;
  *  - profile Cards → the saved public profile URL (publicSlug → profile → /c/);
  *  - social Cards → their safe configured external destination;
- *  - Standees → the review host when the gate is on/eligible, otherwise the
- *    existing public panel/route so preview never regresses to a dead link.
+ *  - Standees → the review host only for single-profile, review-host-eligible
+ *    records; multi-profile Standees keep the existing public panel/route so
+ *    preview never regresses to a dead link or skips the platform picker.
  *
  * It never invents identifiers, mixes assignment/catalog ids with Card ids, or
  * picks another instance of the same product type. Callers pass the instance
@@ -22,6 +23,7 @@ import { resolveEffectiveReviewSettings } from '@/lib/services/review-effective-
 import {
   resolveStandeeReviewHost,
 } from '@/lib/services/review-standee-settings';
+import { classifyStandeeProfile } from '@/lib/services/standee-entry-state';
 import { STANDEE_REVIEW_ASSISTANT_ENABLED } from '@/lib/review-feature-flags';
 
 export type PreviewSetupReason =
@@ -122,6 +124,12 @@ export async function resolveStandeePreview(
         uid?: string | null;
         publicSlug?: string | null;
         linkedCardPublicSlug?: string | null;
+        maxProfiles?: number | null;
+        fixedProfiles?: string[] | null;
+        socialQrs?: Array<{
+          platform?: string | null;
+          destinationUrl?: string | null;
+        }> | null;
       }
     | null
     | undefined
@@ -138,7 +146,18 @@ export async function resolveStandeePreview(
     return { ok: true, kind: 'profile', href: `/${linkedCardPublicSlug}` };
   }
   const route = (standee.routeSlug ?? standee.uid ?? '').trim();
-  if (STANDEE_REVIEW_ASSISTANT_ENABLED && route) {
+  // Reuse the branded-entry classifier so Preview follows the same multi-profile
+  // rule as /r: modern AIO 3/4 and legacy multi-slot records keep the public
+  // panel/picker, while confirmed single-profile records may still enter the
+  // Review Assistant host.
+  const profileClass = classifyStandeeProfile({
+    maxProfiles: standee.maxProfiles,
+    fixedProfiles: standee.fixedProfiles,
+    socialQrs: standee.socialQrs,
+  });
+  const multiProfileStandee =
+    profileClass === 'modern-multi' || profileClass === 'legacy-multi';
+  if (!multiProfileStandee && STANDEE_REVIEW_ASSISTANT_ENABLED && route) {
     const host = await resolveStandeeReviewHost(route);
     if (host) {
       return { ok: true, kind: 'standee', href: `/standee-review/${encodeURIComponent(route)}` };

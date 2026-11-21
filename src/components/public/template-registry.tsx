@@ -7,6 +7,7 @@ import { SocialTemplate } from './templates/social';
 import { PremiumPurpleTemplate } from './templates/premium-purple';
 import { NoirEliteTemplate } from './templates/noir-elite';
 import { EmeraldEssenceTemplate } from './templates/emerald-essence';
+import { CorporatePrestigeTemplate } from './templates/corporate-prestige';
 import type { IProduct, IVcard, ReviewCta } from './types';
 import { DEFAULT_TEMPLATE_KEY, safeTemplateKey } from '@/lib/card-templates';
 
@@ -75,6 +76,7 @@ export const CARD_TEMPLATES = {
   'premium-purple': PremiumPurpleTemplate,
   'noir-elite': NoirEliteTemplate,
   'emerald-essence': EmeraldEssenceTemplate,
+  'corporate-prestige': CorporatePrestigeTemplate,
 } as const satisfies Record<
   string,
   (props: { vcard: IVcard; products: IProduct[]; reviewCta?: ReviewCta }) => ReactNode
